@@ -1,0 +1,184 @@
+// LedgerPro Prisma Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Account {
+  id              String       @id @default(cuid())
+  name            String
+  mask            String
+  kind            AccountKind
+  currentBalance  Decimal      @db.Decimal(15, 2)
+  glAccountCode   String?
+  syncStatus      String       @default("synced")
+  lastSyncedAt    DateTime?
+  displayColor    String?
+  logoInitials    String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  transactions    Transaction[]
+  bills           Bill[]       @relation("PaymentAccount")
+}
+
+model Transaction {
+  id                  String            @id @default(cuid())
+  accountId           String
+  date                DateTime
+  description         String
+  merchant            String?
+  amount              Decimal           @db.Decimal(15, 2)
+  categoryId          String?
+  suggestedCategoryId String?
+  status              TransactionStatus @default(to_review)
+  matchRef            String?
+  excludeReason       String?
+  importBatchId       String?
+  source              TransactionSource @default(feed)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  account             Account                @relation(fields: [accountId], references: [id])
+  category            ChartOfAccountsEntry?  @relation("CategoryTransactions", fields: [categoryId], references: [id])
+  suggestedCategory   ChartOfAccountsEntry?  @relation("SuggestedCategoryTransactions", fields: [suggestedCategoryId], references: [id])
+}
+
+model Contact {
+  id                 String        @id @default(cuid())
+  name               String
+  company            String?
+  type               ContactType
+  email              String?
+  phone              String?
+  outstandingBalance Decimal       @default(0) @db.Decimal(15, 2)
+  status             ContactStatus @default(active)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  invoices           Invoice[]
+  bills              Bill[]        @relation("VendorBills")
+}
+
+model Invoice {
+  id         String        @id
+  customerId String
+  issueDate  DateTime
+  dueDate    DateTime
+  amount     Decimal       @db.Decimal(15, 2)
+  status     InvoiceStatus @default(draft)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  customer   Contact       @relation(fields: [customerId], references: [id])
+  lines      InvoiceLine[]
+}
+
+model InvoiceLine {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  description String
+  qty         Decimal  @db.Decimal(10, 4)
+  rate        Decimal  @db.Decimal(15, 2)
+  taxRate     Decimal  @default(0) @db.Decimal(5, 4)
+  amount      Decimal  @db.Decimal(15, 2)
+
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+}
+
+model Bill {
+  id               String     @id
+  kind             BillKind   @default(bill)
+  vendorId         String?
+  payee            String?
+  date             DateTime
+  categoryId       String?
+  paymentAccountId String?
+  amount           Decimal    @db.Decimal(15, 2)
+  status           BillStatus @default(draft)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  vendor           Contact?              @relation("VendorBills", fields: [vendorId], references: [id])
+  category         ChartOfAccountsEntry? @relation("CategoryBills", fields: [categoryId], references: [id])
+  paymentAccount   Account?              @relation("PaymentAccount", fields: [paymentAccountId], references: [id])
+}
+
+model ChartOfAccountsEntry {
+  id          String      @id @default(cuid())
+  code        String      @unique
+  name        String
+  type        AccountType
+  detailType  String
+  parentCode  String?
+  balance     Decimal     @default(0) @db.Decimal(15, 2)
+  active      Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  categoryTransactions  Transaction[] @relation("CategoryTransactions")
+  suggestedTransactions Transaction[] @relation("SuggestedCategoryTransactions")
+  categoryBills         Bill[]        @relation("CategoryBills")
+}
+
+enum AccountKind {
+  checking
+  savings
+  credit_card
+  payout_clearing
+}
+
+enum TransactionStatus {
+  to_review
+  categorized
+  excluded
+}
+
+enum TransactionSource {
+  feed
+  csv
+  ofx
+  pdf
+  manual
+}
+
+enum ContactType {
+  customer
+  supplier
+}
+
+enum ContactStatus {
+  active
+  inactive
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+  overdue
+}
+
+enum BillKind {
+  bill
+  expense
+}
+
+enum BillStatus {
+  draft
+  open
+  paid
+  overdue
+}
+
+enum AccountType {
+  asset
+  liability
+  equity
+  income
+  expense
+}
