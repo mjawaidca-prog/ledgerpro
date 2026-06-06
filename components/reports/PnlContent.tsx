@@ -19,51 +19,47 @@ import {
   FileText as FileTextIcon,
 } from 'lucide-react'
 
-// ── Data ──────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-const MODEL = [
+import type { PnlData } from '@/lib/trpc/routers/reports'
+
+type PnlSection = PnlData['sections'][number]
+
+// ── Fallback hardcoded data ──────────────────────────────────────────────────
+
+const FALLBACK_SECTIONS: PnlSection[] = [
   {
     key: 'income', title: 'Income', income: true,
     rows: [
-      ['Product sales',   248900, 214300],
-      ['Service revenue', 162400, 138900],
-      ['Other income',      8150,   9800],
-    ] as [string, number, number][],
+      { name: 'Product sales',   current: 248900, prior: 214300 },
+      { name: 'Service revenue', current: 162400, prior: 138900 },
+      { name: 'Other income',    current:   8150, prior:   9800 },
+    ],
     totalLabel: 'Total income',
   },
   {
     key: 'cogs', title: 'Cost of goods sold', income: false,
     rows: [
-      ['Materials & supplies', 78200, 71400],
-      ['Subcontractors',       41600, 38200],
-      ['Shipping & freight',   12300, 10900],
-    ] as [string, number, number][],
+      { name: 'Materials & supplies', current: 78200, prior: 71400 },
+      { name: 'Subcontractors',       current: 41600, prior: 38200 },
+      { name: 'Shipping & freight',   current: 12300, prior: 10900 },
+    ],
     totalLabel: 'Total cost of goods sold',
   },
-  { key: 'gross', computed: 'gross', income: true, label: 'Gross profit' },
   {
     key: 'opex', title: 'Operating expenses', income: false,
     rows: [
-      ['Payroll & wages',           138400, 121900],
-      ['Rent & lease',               42500,  42500],
-      ['Software & subscriptions',   18900,  15200],
-      ['Advertising & marketing',    24600,  19800],
-      ['Travel & meals',              9840,  12400],
-      ['Utilities',                   6420,   6100],
-      ['Insurance',                   7200,   6800],
-      ['Office supplies',             3180,   3560],
-    ] as [string, number, number][],
+      { name: 'Payroll & wages',           current: 138400, prior: 121900 },
+      { name: 'Rent & lease',              current:  42500, prior:  42500 },
+      { name: 'Software & subscriptions',  current:  18900, prior:  15200 },
+      { name: 'Advertising & marketing',   current:  24600, prior:  19800 },
+      { name: 'Travel & meals',            current:   9840, prior:  12400 },
+      { name: 'Utilities',                 current:   6420, prior:   6100 },
+      { name: 'Insurance',                 current:   7200, prior:   6800 },
+      { name: 'Office supplies',           current:   3180, prior:   3560 },
+    ],
     totalLabel: 'Total operating expenses',
   },
-  { key: 'netop', computed: 'netop', income: true, label: 'Net operating income' },
-  {
-    key: 'other', title: 'Other expenses', income: false,
-    rows: [
-      ['Interest expense', 2180, 2640],
-    ] as [string, number, number][],
-    totalLabel: 'Total other expenses',
-  },
-  { key: 'net', computed: 'net', income: true, label: 'Net income' },
 ]
 
 type CompareMode = 'pp' | 'py' | 'none'
@@ -75,24 +71,34 @@ function fmtNum(n: number) {
   return (n < 0 ? '−' : '') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function cmpVal(cur: number, pp: number, mode: CompareMode) {
-  return mode === 'py' ? Math.round(pp * 0.9) : pp
+function cmpVal(cur: number, prior: number, mode: CompareMode) {
+  return mode === 'py' ? Math.round(prior * 0.9) : prior
 }
 
-function sums(section: { rows: [string, number, number][] }, mode: CompareMode) {
+function sums(section: PnlSection, mode: CompareMode) {
   let cur = 0, cmp = 0
   for (const r of section.rows) {
-    cur += r[1]
-    cmp += cmpVal(r[1], r[2], mode)
+    cur += r.current
+    cmp += cmpVal(r.current, r.prior, mode)
   }
   return { cur, cmp }
 }
 
-function compute(mode: CompareMode) {
-  const inc = sums(MODEL[0] as { rows: [string, number, number][] }, mode)
-  const cogs = sums(MODEL[1] as { rows: [string, number, number][] }, mode)
-  const opex = sums(MODEL[3] as { rows: [string, number, number][] }, mode)
-  const other = sums(MODEL[5] as { rows: [string, number, number][] }, mode)
+function findSection(sections: PnlSection[], key: string) {
+  return sections.find((s) => s.key === key)
+}
+
+function compute(sections: PnlSection[], mode: CompareMode) {
+  const incSec = findSection(sections, 'income')
+  const cogsSec = findSection(sections, 'cogs')
+  const opexSec = findSection(sections, 'opex')
+  const otherSec = findSection(sections, 'other')
+
+  const inc = incSec ? sums(incSec, mode) : { cur: 0, cmp: 0 }
+  const cogs = cogsSec ? sums(cogsSec, mode) : { cur: 0, cmp: 0 }
+  const opex = opexSec ? sums(opexSec, mode) : { cur: 0, cmp: 0 }
+  const other = otherSec ? sums(otherSec, mode) : { cur: 0, cmp: 0 }
+
   return {
     income: inc, cogs, opex, other,
     gross: { cur: inc.cur - cogs.cur, cmp: inc.cmp - cogs.cmp },
@@ -130,7 +136,8 @@ const RANGES = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function PnlContent() {
+export function PnlContent({ data }: { data?: PnlData | null }) {
+  const sections = data?.sections ?? FALLBACK_SECTIONS
   const [compareMode, setCompareMode] = useState<CompareMode>('pp')
   const [rangeIdx, setRangeIdx] = useState(2) // Year to date
   const [rangeMenuOpen, setRangeMenuOpen] = useState(false)
@@ -151,8 +158,41 @@ export function PnlContent() {
     return () => document.removeEventListener('click', close)
   }, [])
 
-  const C = compute(compareMode)
+  const C = compute(sections, compareMode)
   const noCompare = compareMode === 'none'
+
+  // Build the display model: sections interleaved with computed rows
+  const hasCogs = !!findSection(sections, 'cogs')
+  const displayModel: Array<PnlSection | { key: string; computed: string; income: boolean; label: string }> = []
+  for (const sec of sections) {
+    displayModel.push(sec)
+    if (sec.key === 'cogs') {
+      displayModel.push({ key: 'gross', computed: 'gross', income: true, label: 'Gross profit' })
+    }
+    if (sec.key === 'opex') {
+      displayModel.push({ key: 'netop', computed: 'netop', income: true, label: 'Net operating income' })
+    }
+    if (sec.key === 'other') {
+      displayModel.push({ key: 'net', computed: 'net', income: true, label: 'Net income' })
+    }
+  }
+  // If there was no COGS section, insert gross profit after income
+  if (!hasCogs) {
+    const incIdx = displayModel.findIndex((s) => s.key === 'income')
+    if (incIdx >= 0) {
+      displayModel.splice(incIdx + 1, 0, { key: 'gross', computed: 'gross', income: true, label: 'Gross profit' })
+    }
+  }
+  // Ensure net income is always at the end if not already there
+  if (!displayModel.some((s) => s.key === 'net')) {
+    displayModel.push({ key: 'net', computed: 'net', income: true, label: 'Net income' })
+  }
+  // Ensure net operating income exists if not already there
+  if (!displayModel.some((s) => s.key === 'netop')) {
+    const opexIdx = displayModel.findIndex((s) => s.key === 'opex')
+    const insertAt = opexIdx >= 0 ? opexIdx + 1 : displayModel.length - 1
+    displayModel.splice(insertAt, 0, { key: 'netop', computed: 'netop', income: true, label: 'Net operating income' })
+  }
   const cmpThLabel = compareMode === 'py' ? 'Jan–May 2025' : 'Prior period'
 
   return (
@@ -282,14 +322,14 @@ export function PnlContent() {
             </tr>
           </thead>
           <tbody>
-            {MODEL.map((s) => {
+            {displayModel.map((s) => {
               // Computed rows (Gross profit, Net operating income, Net income)
               if ('computed' in s && s.computed) {
                 const key = s.computed as 'gross' | 'netop' | 'net'
                 const v = C[key]
                 const rowCls = key === 'net' ? 'net' : 'total'
                 const incomeRef = C.income.cur
-                const marginNote = (key === 'gross' || key === 'net')
+                const marginNote = (key === 'gross' || key === 'net') && incomeRef !== 0
                   ? <div className="row-note">{((v.cur / incomeRef) * 100).toFixed(1)}% {key === 'gross' ? 'margin' : 'net margin'}</div>
                   : null
 
@@ -307,7 +347,7 @@ export function PnlContent() {
               }
 
               // Section rows
-              const sec = s as { key: string; title: string; income: boolean; rows: [string, number, number][]; totalLabel: string }
+              const sec = s as PnlSection
               const t = sums(sec, compareMode)
               return (
                 <React.Fragment key={sec.key}>
@@ -317,13 +357,13 @@ export function PnlContent() {
                     {!noCompare && <><td className="num col-cmp" /><td className="num col-pct" /></>}
                   </tr>
                   {sec.rows.map((r, i) => {
-                    const cmp = cmpVal(r[1], r[2], compareMode)
+                    const cmp = cmpVal(r.current, r.prior, compareMode)
                     return (
                       <tr key={`${sec.key}-${i}`} className="line">
-                        <td className="acct">{r[0]}</td>
-                        <td className="num">{i === 0 ? fmt(r[1]) : fmtNum(r[1])}</td>
+                        <td className="acct">{r.name}</td>
+                        <td className="num">{i === 0 ? fmt(r.current) : fmtNum(r.current)}</td>
                         <CmpCell cmp={cmp} mode={compareMode} />
-                        <PctBadge cur={r[1]} cmp={cmp} incomeLike={sec.income} mode={compareMode} />
+                        <PctBadge cur={r.current} cmp={cmp} incomeLike={sec.income} mode={compareMode} />
                       </tr>
                     )
                   })}

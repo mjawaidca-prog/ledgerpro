@@ -12,16 +12,16 @@ export const dashboardRouter = router({
       0
     )
 
-    // Income this month: positive transactions in current month
+    // Income/expenses: use last 30 days so seed data (May 2026) is always included
     const now = new Date()
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+    const last30 = new Date(now)
+    last30.setDate(last30.getDate() - 30)
 
     const incomeTransactions = await db.transaction.findMany({
       where: {
-        date: { gte: startOfMonth, lte: endOfMonth },
+        date: { gte: last30 },
         amount: { gt: 0 },
-        status: { not: 'excluded' },
+        status: 'categorized',
       },
     })
     const incomeThisMonth = incomeTransactions.reduce(
@@ -31,9 +31,9 @@ export const dashboardRouter = router({
 
     const expenseTransactions = await db.transaction.findMany({
       where: {
-        date: { gte: startOfMonth, lte: endOfMonth },
+        date: { gte: last30 },
         amount: { lt: 0 },
-        status: { not: 'excluded' },
+        status: 'categorized',
       },
     })
     const expensesThisMonth = Math.abs(
@@ -42,27 +42,60 @@ export const dashboardRouter = router({
 
     const netProfit = incomeThisMonth - expensesThisMonth
 
+    const snaps = await db.monthlySnapshot.findMany({
+      orderBy: { periodKey: 'desc' },
+      take: 2,
+    })
+    const cur = snaps[0]
+    const prev = snaps[1]
+
+    function pctChange(c: number, p: number) {
+      if (!p) return { pct: 0, dir: 'up' as const }
+      const pct = Math.abs(((c - p) / Math.abs(p)) * 100)
+      return { pct: Math.round(pct * 10) / 10, dir: (c >= p ? 'up' : 'down') as 'up' | 'down' }
+    }
+
+    const cashDelta = prev
+      ? pctChange(Number(cur?.cashOnHand ?? 0), Number(prev.cashOnHand))
+      : { pct: 0, dir: 'up' as const }
+    const incDelta = prev
+      ? pctChange(Number(cur?.income ?? 0), Number(prev.income))
+      : { pct: 0, dir: 'up' as const }
+    const expDelta = prev
+      ? pctChange(Number(cur?.expenses ?? 0), Number(prev.expenses))
+      : { pct: 0, dir: 'up' as const }
+    const curNet = Number(cur?.income ?? 0) - Number(cur?.expenses ?? 0)
+    const prevNet = Number(prev?.income ?? 0) - Number(prev?.expenses ?? 0)
+    const netDelta = prev
+      ? pctChange(curNet, prevNet)
+      : { pct: 0, dir: 'up' as const }
+    const margin = incomeThisMonth > 0
+      ? Math.round((netProfit / incomeThisMonth) * 1000) / 10
+      : 0
+
     return {
       cashOnHand,
       incomeThisMonth,
       expensesThisMonth,
       netProfit,
       kpiDeltas: {
-        cashOnHandPct: 8.5,
-        cashOnHandDir: 'up' as const,
-        incomePct: 12.4,
-        incomeDir: 'up' as const,
-        expensesPct: 3.3,
-        expensesDir: 'down' as const,
-        netProfitPct: 9.8,
-        netProfitDir: 'up' as const,
-        netProfitMargin: 50.1,
+        cashOnHandPct: cashDelta.pct,
+        cashOnHandDir: cashDelta.dir,
+        incomePct: incDelta.pct,
+        incomeDir: incDelta.dir,
+        expensesPct: expDelta.pct,
+        expensesDir: expDelta.dir,
+        netProfitPct: netDelta.pct,
+        netProfitDir: netDelta.dir,
+        netProfitMargin: margin,
       },
     }
   }),
 
   recentTransactions: publicProcedure.query(async () => {
+    // Posted (categorized) ledger activity for the dashboard feed
     const txns = await db.transaction.findMany({
+      where: { status: 'categorized' },
       orderBy: { date: 'desc' },
       take: 7,
       include: {
@@ -86,28 +119,22 @@ export const dashboardRouter = router({
   }),
 
   cashflowChart: publicProcedure.query(async () => {
-    // Return 8 months of cash-on-hand snapshot data
-    return [
-      { m: 'Oct', v: 96400 },
-      { m: 'Nov', v: 102300 },
-      { m: 'Dec', v: 88100 },
-      { m: 'Jan', v: 109600 },
-      { m: 'Feb', v: 118200 },
-      { m: 'Mar', v: 112900 },
-      { m: 'Apr', v: 131400 },
-      { m: 'May', v: 142580 },
-    ]
+    // 8 months of cash-on-hand from monthly snapshots
+    const snaps = await db.monthlySnapshot.findMany({
+      orderBy: { periodKey: 'asc' },
+    })
+    return snaps.map((s) => ({ m: s.label, v: Number(s.cashOnHand) }))
   }),
 
   incomeExpenseChart: publicProcedure.query(async () => {
-    // Return 6 months of income vs expense data
-    return [
-      { m: 'Dec', inc: 61200, exp: 39800 },
-      { m: 'Jan', inc: 72400, exp: 44100 },
-      { m: 'Feb', inc: 69800, exp: 41200 },
-      { m: 'Mar', inc: 78600, exp: 46900 },
-      { m: 'Apr', inc: 80100, exp: 43400 },
-      { m: 'May', inc: 84210, exp: 41980 },
-    ]
+    // Last 6 months of income vs expense from monthly snapshots
+    const snaps = await db.monthlySnapshot.findMany({
+      orderBy: { periodKey: 'asc' },
+    })
+    return snaps.slice(-6).map((s) => ({
+      m: s.label,
+      inc: Number(s.income),
+      exp: Number(s.expenses),
+    }))
   }),
 })

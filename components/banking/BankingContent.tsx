@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { trpc } from '@/lib/trpc/client'
 import {
   Upload,
   Plus,
@@ -29,6 +31,7 @@ type TxStatus = 'review' | 'cat' | 'excl'
 
 interface Transaction {
   id: number
+  dbId?: string
   st: TxStatus
   date: string
   m: string
@@ -280,6 +283,7 @@ function ImportModal({ open, onClose, onImport }: ImportModalProps) {
   const [acctKey, setAcctKey] = useState('chase')
   const [skipDups, setSkipDups] = useState(true)
   const [fileShown, setFileShown] = useState(false)
+  const importMut = trpc.banking.importTransactions.useMutation()
 
   const sample = IMPORT_SAMPLES[acctKey] ?? IMPORT_SAMPLES.chase
   const totalRows = sample.rows.length
@@ -297,7 +301,21 @@ function ImportModal({ open, onClose, onImport }: ImportModalProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  function doImport() {
+  async function doImport() {
+    const rowsToImport = skipDups ? sample.rows.filter((r) => !r.dup) : sample.rows
+    try {
+      await importMut.mutateAsync({
+        accountKey: acctKey,
+        rows: rowsToImport.map((r) => ({
+          date: r.date,
+          description: r.raw,
+          merchant: r.m,
+          amount: r.amt,
+        })),
+      })
+    } catch {
+      // fire-and-forget: still show success toast since demo data
+    }
     onImport(willImport, IMPORT_ACCT_NAMES[acctKey] ?? 'Account')
     onClose()
   }
@@ -543,10 +561,23 @@ function ImportModal({ open, onClose, onImport }: ImportModalProps) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export function BankingContent() {
-  const [data, setData] = useState<Transaction[]>(INITIAL_TRANSACTIONS)
+interface BankingContentProps {
+  accounts?: Account[]
+  initialTransactions?: Transaction[]
+}
+
+export function BankingContent({ accounts, initialTransactions }: BankingContentProps = {}) {
+  const router = useRouter()
+  // Prefer DB-provided data; fall back to built-in samples when empty/unavailable
+  const accountsList = accounts && accounts.length > 0 ? accounts : ACCOUNTS
+  const seedTransactions =
+    initialTransactions && initialTransactions.length > 0
+      ? initialTransactions
+      : INITIAL_TRANSACTIONS
+
+  const [data, setData] = useState<Transaction[]>(seedTransactions)
   const [tab, setTab] = useState<TxStatus>('review')
-  const [selectedAcct, setSelectedAcct] = useState<string>('chase')
+  const [selectedAcct, setSelectedAcct] = useState<string>(accountsList[0]?.id ?? 'chase')
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [catAnchor, setCatAnchor] = useState<HTMLElement | null>(null)
   const [catTargetId, setCatTargetId] = useState<number | null>(null)
@@ -558,6 +589,26 @@ export function BankingContent() {
   const [stmtBalance, setStmtBalance] = useState('142,580.00')
   const [stmtDate, setStmtDate] = useState('2026-05-31')
 
+  // ── Persistence (optimistic UI + fire-and-forget writes) ──────────────────
+  const acceptMut = trpc.banking.acceptTransaction.useMutation()
+  const excludeMut = trpc.banking.excludeTransaction.useMutation()
+  const reopenMut = trpc.banking.reopenTransaction.useMutation()
+  const categorizeMut = trpc.banking.categorizeTransaction.useMutation()
+  const bulkAcceptMut = trpc.banking.bulkAccept.useMutation()
+  const bulkExcludeMut = trpc.banking.bulkExclude.useMutation()
+
+  const dbIdOf = useCallback(
+    (numericId: number) => data.find((d) => d.id === numericId)?.dbId,
+    [data],
+  )
+  const dbIdsOf = useCallback(
+    (numericIds: number[]) =>
+      numericIds
+        .map((n) => data.find((d) => d.id === n)?.dbId)
+        .filter((x): x is string => Boolean(x)),
+    [data],
+  )
+
   const tabData = data.filter((d) => d.st === tab)
   const counts = {
     review: data.filter((d) => d.st === 'review').length,
@@ -565,15 +616,16 @@ export function BankingContent() {
     excl: data.filter((d) => d.st === 'excl').length,
   }
 
-  // Reconciliation
+  const selectedAcctInfo = accountsList.find((a) => a.id === selectedAcct) ?? accountsList[0]
+
+  // Reconciliation — book against the selected account's current balance
+  const bankBalance = Math.abs(selectedAcctInfo?.balance ?? BANK_BALANCE)
   const toReview = data.filter((d) => d.st === 'review')
   const remNet = toReview.reduce((s, d) => s + ((d.recv ?? 0) - (d.spent ?? 0)), 0)
-  const bookBalance = BANK_BALANCE - remNet
-  const difference = BANK_BALANCE - bookBalance
+  const bookBalance = bankBalance - remNet
+  const difference = bankBalance - bookBalance
   const isZero = Math.abs(difference) < 0.005
   const clearedCount = data.filter((d) => d.st === 'cat').length + 132
-
-  const selectedAcctInfo = ACCOUNTS.find((a) => a.id === selectedAcct) ?? ACCOUNTS[0]
 
   function addToast(title: string, sub: string) {
     const id = ++toastIdRef.current
@@ -582,6 +634,7 @@ export function BankingContent() {
   }
 
   function setState(id: number, st: TxStatus) {
+    const dbId = dbIdOf(id)
     setData((prev) => prev.map((d) => {
       if (d.id !== id) return d
       const next = { ...d, st }
@@ -589,29 +642,39 @@ export function BankingContent() {
       return next
     }))
     setChecked((prev) => { const s = new Set(prev); s.delete(id); return s })
+    if (dbId) {
+      if (st === 'cat') acceptMut.mutate({ id: dbId })
+      else if (st === 'review') reopenMut.mutate({ id: dbId })
+    }
   }
 
   function setExclude(id: number, reason = 'Manual') {
+    const dbId = dbIdOf(id)
     setData((prev) => prev.map((d) => d.id === id ? { ...d, st: 'excl', reason } : d))
     setChecked((prev) => { const s = new Set(prev); s.delete(id); return s })
+    if (dbId) excludeMut.mutate({ id: dbId, reason })
   }
 
   function bulkAccept() {
     const ids = [...checked]
+    const dbIds = dbIdsOf(ids.filter((n) => data.find((d) => d.id === n)?.st === 'review'))
     setData((prev) => prev.map((d) => {
       if (!ids.includes(d.id) || d.st !== 'review') return d
       return { ...d, st: 'cat', cat: d.cat || d.sug }
     }))
     setChecked(new Set())
+    if (dbIds.length) bulkAcceptMut.mutate({ ids: dbIds })
   }
 
   function bulkExclude() {
     const ids = [...checked]
+    const dbIds = dbIdsOf(ids)
     setData((prev) => prev.map((d) => {
       if (!ids.includes(d.id)) return d
       return { ...d, st: 'excl', reason: 'Manual' }
     }))
     setChecked(new Set())
+    if (dbIds.length) bulkExcludeMut.mutate({ ids: dbIds, reason: 'Manual' })
   }
 
   function toggleCheck(id: number) {
@@ -643,7 +706,9 @@ export function BankingContent() {
 
   function handleCatSelect(cat: string) {
     if (catTargetId !== null) {
+      const dbId = dbIdOf(catTargetId)
       setData((prev) => prev.map((d) => d.id === catTargetId ? { ...d, cat, sug: cat } : d))
+      if (dbId) categorizeMut.mutate({ id: dbId, category: cat })
     }
     setCatAnchor(null)
     setCatTargetId(null)
@@ -652,6 +717,7 @@ export function BankingContent() {
   function handleImport(count: number, acctName: string) {
     addToast(`Imported ${count} transaction${count !== 1 ? 's' : ''}`, `Added to "To review" from ${acctName}`)
     setTab('review')
+    router.refresh()
   }
 
   return (
@@ -675,7 +741,7 @@ export function BankingContent() {
 
       {/* Account cards */}
       <div className="acct-cards">
-        {ACCOUNTS.map((acct) => (
+        {accountsList.map((acct) => (
           <div
             key={acct.id}
             className={`acct-card${selectedAcct === acct.id ? ' selected' : ''}`}
@@ -902,7 +968,7 @@ export function BankingContent() {
 
             <div className="recon-row">
               <span className="rl">Bank statement balance</span>
-              <span className="rv">${fmt(BANK_BALANCE)}</span>
+              <span className="rv">${fmt(bankBalance)}</span>
             </div>
             <div className="recon-row">
               <span className="rl">LedgerPro book balance</span>

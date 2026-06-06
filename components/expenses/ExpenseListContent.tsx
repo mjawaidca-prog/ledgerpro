@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { trpc } from '@/lib/trpc/client'
 import {
   Plus,
   Download,
@@ -94,6 +95,41 @@ export function ExpenseListContent({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null)
   const rowMenuRef = useRef<HTMLDivElement>(null)
+
+  const deleteExpense = trpc.expenses.delete.useMutation()
+  const updateExpense = trpc.expenses.update.useMutation()
+
+  const handleMarkPaid = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return
+      try {
+        await Promise.all(ids.map((id) => updateExpense.mutateAsync({ id, status: 'Paid' })))
+        setSelected(new Set())
+        setRowMenu(null)
+        router.refresh()
+      } catch {
+        alert('Could not update status. Please try again.')
+      }
+    },
+    [updateExpense, router],
+  )
+
+  const handleDelete = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return
+      const label = ids.length === 1 ? ids[0] : `${ids.length} items`
+      if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return
+      try {
+        await Promise.all(ids.map((id) => deleteExpense.mutateAsync({ id })))
+        setSelected(new Set())
+        setRowMenu(null)
+        router.refresh()
+      } catch {
+        alert('Could not delete. Please try again.')
+      }
+    },
+    [deleteExpense, router],
+  )
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -289,11 +325,12 @@ export function ExpenseListContent({
         <div className={`bulkbar${selected.size > 0 ? ' show' : ''}`}>
           <span className="bcount"><span>{selected.size}</span> selected</span>
           <div className="spacer" />
-          <button className="btn btn-secondary btn-sm"><Check />Mark paid</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => handleMarkPaid([...selected])}><Check />Mark paid</button>
           <button className="btn btn-secondary btn-sm"><Tag />Categorize</button>
           <button
             className="btn btn-ghost btn-sm"
             style={{ color: 'var(--danger)' }}
+            onClick={() => handleDelete([...selected])}
           >
             <Trash2 />Delete
           </button>
@@ -455,7 +492,7 @@ export function ExpenseListContent({
           >
             <Pencil />Edit
           </div>
-          <div className="menu-item" onClick={() => setRowMenu(null)}>
+          <div className="menu-item" onClick={() => handleMarkPaid([rowMenu.expenseId])}>
             <CheckCircle2 />Mark as paid
           </div>
           <div className="menu-item" onClick={() => setRowMenu(null)}>
@@ -468,7 +505,7 @@ export function ExpenseListContent({
           <div
             className="menu-item"
             style={{ color: 'var(--danger)' }}
-            onClick={() => setRowMenu(null)}
+            onClick={() => handleDelete([rowMenu.expenseId])}
           >
             <Trash2 style={{ color: 'var(--danger)' }} />Delete
           </div>

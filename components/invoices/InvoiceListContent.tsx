@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { trpc } from '@/lib/trpc/client'
 import {
   Plus,
   Download,
@@ -82,6 +83,41 @@ export function InvoiceListContent({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null)
   const rowMenuRef = useRef<HTMLDivElement>(null)
+
+  const deleteInvoice = trpc.invoices.delete.useMutation()
+  const updateInvoice = trpc.invoices.update.useMutation()
+
+  const handleUpdateStatus = useCallback(
+    async (ids: string[], status: 'draft' | 'sent' | 'paid' | 'overdue') => {
+      if (ids.length === 0) return
+      try {
+        await Promise.all(ids.map((id) => updateInvoice.mutateAsync({ id, status })))
+        setSelected(new Set())
+        setRowMenu(null)
+        router.refresh()
+      } catch {
+        alert('Could not update status. Please try again.')
+      }
+    },
+    [updateInvoice, router],
+  )
+
+  const handleDelete = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return
+      const label = ids.length === 1 ? `invoice ${ids[0]}` : `${ids.length} invoices`
+      if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return
+      try {
+        await Promise.all(ids.map((id) => deleteInvoice.mutateAsync({ id })))
+        setSelected(new Set())
+        setRowMenu(null)
+        router.refresh()
+      } catch {
+        alert('Could not delete. Please try again.')
+      }
+    },
+    [deleteInvoice, router],
+  )
 
   // Close row menu on outside click
   useEffect(() => {
@@ -280,11 +316,12 @@ export function InvoiceListContent({
         <div className={`bulkbar${selected.size > 0 ? ' show' : ''}`}>
           <span className="bcount"><span>{selected.size}</span> selected</span>
           <div className="spacer" />
-          <button className="btn btn-secondary btn-sm"><Send />Send</button>
-          <button className="btn btn-secondary btn-sm"><Check />Mark paid</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => handleUpdateStatus([...selected], 'sent')}><Send />Send</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => handleUpdateStatus([...selected], 'paid')}><Check />Mark paid</button>
           <button
             className="btn btn-ghost btn-sm"
             style={{ color: 'var(--danger)' }}
+            onClick={() => handleDelete([...selected])}
           >
             <Trash2 />Delete
           </button>
@@ -446,10 +483,10 @@ export function InvoiceListContent({
           >
             <Pencil />Edit invoice
           </div>
-          <div className="menu-item" onClick={() => setRowMenu(null)}>
+          <div className="menu-item" onClick={() => handleUpdateStatus([rowMenu.invoiceId], 'sent')}>
             <Send />Send / resend
           </div>
-          <div className="menu-item" onClick={() => setRowMenu(null)}>
+          <div className="menu-item" onClick={() => handleUpdateStatus([rowMenu.invoiceId], 'paid')}>
             <CheckCircle2 />Mark as paid
           </div>
           <div className="menu-item" onClick={() => setRowMenu(null)}>
@@ -462,7 +499,7 @@ export function InvoiceListContent({
           <div
             className="menu-item"
             style={{ color: 'var(--danger)' }}
-            onClick={() => setRowMenu(null)}
+            onClick={() => handleDelete([rowMenu.invoiceId])}
           >
             <Trash2 style={{ color: 'var(--danger)' }} />Delete
           </div>

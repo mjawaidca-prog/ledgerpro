@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { trpc } from '@/lib/trpc/client'
 import {
   ArrowLeft,
   ChevronRight,
@@ -76,6 +77,11 @@ export function BillEditor({ bill, isNew }: { bill: BillData; isNew: boolean }) 
   const [lines, setLines]               = useState<BillLine[]>(bill.lines)
   const [activeTab, setActiveTab]       = useState<'categories' | 'items'>('categories')
   const [receiptAttached, setReceiptAttached] = useState(false)
+  const [payAccount, setPayAccount]     = useState('Chase Business Checking ••4021')
+
+  const createBill = trpc.expenses.create.useMutation()
+  const updateBill = trpc.expenses.update.useMutation()
+  const saving = createBill.isPending || updateBill.isPending
 
   const selectedVendor = VENDORS.find((v) => v.name === vendorName) ?? VENDORS[0]
 
@@ -115,6 +121,54 @@ export function BillEditor({ bill, isNew }: { bill: BillData; isNew: boolean }) 
   const handleCancel = useCallback(() => {
     router.push('/expenses')
   }, [router])
+
+  const handleSave = useCallback(
+    async (status: 'Draft' | 'Open' | 'Paid') => {
+      const primaryCategory = lines[0]?.category ?? 'Software & subscriptions'
+      const numericTaxRate = TAX_RATES[taxRate] != null ? TAX_RATES[taxRate] * 100 : 0
+      const id = isNew
+        ? `BILL-${Math.floor(1000 + Math.random() * 9000)}`
+        : bill.id
+
+      const payload = {
+        id,
+        kind: 'bill' as const,
+        vendorName,
+        category: primaryCategory,
+        payAccount,
+        date: billDate,
+        dueDate: dueDate || undefined,
+        billNumber: billNumber || undefined,
+        paymentTerms: paymentTerms || undefined,
+        amount: total,
+        status,
+        memo: memo || undefined,
+        taxRate: numericTaxRate,
+        lines: lines.map((l) => ({
+          category: l.category,
+          description: l.description || undefined,
+          amount: Number(l.amount) || 0,
+        })),
+      }
+
+      try {
+        if (isNew) {
+          await createBill.mutateAsync(payload)
+        } else {
+          await updateBill.mutateAsync(payload)
+        }
+        router.push('/expenses')
+        router.refresh()
+      } catch {
+        // surface a minimal failure cue; keep the editor open
+        alert('Could not save the bill. Please try again.')
+      }
+    },
+    [
+      isNew, bill.id, vendorName, lines, payAccount, billDate, dueDate,
+      billNumber, paymentTerms, total, memo, taxRate, createBill, updateBill, router,
+    ],
+  )
 
   return (
     <>
@@ -451,7 +505,11 @@ export function BillEditor({ bill, isNew }: { bill: BillData; isNew: boolean }) 
               <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-strong)' }}>
                 Pay from account
               </label>
-              <select className="select">
+              <select
+                className="select"
+                value={payAccount}
+                onChange={(e) => setPayAccount(e.target.value)}
+              >
                 <option>Chase Business Checking ••4021</option>
                 <option>Amex Business ••6700</option>
               </select>
@@ -479,17 +537,17 @@ export function BillEditor({ bill, isNew }: { bill: BillData; isNew: boolean }) 
           </span>
         </span>
         <div className="spacer" />
-        <button className="btn btn-ghost" type="button" onClick={handleCancel}>
+        <button className="btn btn-ghost" type="button" onClick={handleCancel} disabled={saving}>
           Cancel
         </button>
-        <button className="btn btn-secondary" type="button">
+        <button className="btn btn-secondary" type="button" onClick={() => handleSave('Draft')} disabled={saving}>
           <FileEdit />Save as draft
         </button>
-        <button className="btn btn-secondary" type="button">
+        <button className="btn btn-secondary" type="button" onClick={() => handleSave('Paid')} disabled={saving}>
           <Banknote />Save &amp; pay
         </button>
-        <button className="btn btn-primary" type="button">
-          <Check />Save bill
+        <button className="btn btn-primary" type="button" onClick={() => handleSave('Open')} disabled={saving}>
+          <Check />{saving ? 'Saving…' : 'Save bill'}
         </button>
       </footer>
     </>

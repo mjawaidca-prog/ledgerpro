@@ -114,6 +114,7 @@ model ChartOfAccountsEntry {
   name        String
   type        AccountType
   detailType  String
+  description String?
   parentCode  String?
   balance     Decimal     @default(0) @db.Decimal(15, 2)
   active      Boolean     @default(true)
@@ -123,6 +124,17 @@ model ChartOfAccountsEntry {
   categoryTransactions  Transaction[] @relation("CategoryTransactions")
   suggestedTransactions Transaction[] @relation("SuggestedCategoryTransactions")
   categoryBills         Bill[]        @relation("CategoryBills")
+}
+
+model MonthlySnapshot {
+  id         String   @id @default(cuid())
+  label      String   // short month label, e.g. "May"
+  periodKey  String   @unique // sortable key, e.g. "2026-05"
+  cashOnHand Decimal  @db.Decimal(15, 2)
+  income     Decimal  @db.Decimal(15, 2)
+  expenses   Decimal  @db.Decimal(15, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 enum AccountKind {

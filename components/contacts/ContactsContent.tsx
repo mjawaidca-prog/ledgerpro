@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { trpc } from '@/lib/trpc/client'
 import {
   Plus,
   Upload,
@@ -52,8 +54,87 @@ export function ContactsContent({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null)
   const [sortMenuOpen, setSortMenuOpen] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [editingContact, setEditingContact] = useState<ContactRow | null>(null)
+  const [formData, setFormData] = useState({ name: '', company: '', type: 'customer' as 'customer' | 'supplier', email: '', phone: '', status: 'active' as 'active' | 'inactive' })
   const rowMenuRef = useRef<HTMLDivElement>(null)
   const sortMenuRef = useRef<HTMLDivElement>(null)
+  const router = useRouter()
+
+  const deleteContact = trpc.contacts.delete.useMutation()
+  const createContact = trpc.contacts.create.useMutation()
+  const updateContact = trpc.contacts.update.useMutation()
+
+  const openCreateForm = useCallback(() => {
+    setEditingContact(null)
+    setFormData({ name: '', company: '', type: 'customer', email: '', phone: '', status: 'active' })
+    setShowForm(true)
+  }, [])
+
+  const openEditForm = useCallback((contact: ContactRow) => {
+    setEditingContact(contact)
+    setFormData({
+      name: contact.name,
+      company: contact.company,
+      type: contact.type === 'Customer' ? 'customer' : 'supplier',
+      email: contact.email,
+      phone: contact.phone,
+      status: contact.status === 'Active' ? 'active' : 'inactive',
+    })
+    setRowMenu(null)
+    setShowForm(true)
+  }, [])
+
+  const handleFormSave = useCallback(async () => {
+    try {
+      if (editingContact) {
+        await updateContact.mutateAsync({
+          id: editingContact.id,
+          name: formData.name,
+          company: formData.company,
+          type: formData.type,
+          email: formData.email,
+          phone: formData.phone,
+          status: formData.status,
+        })
+      } else {
+        await createContact.mutateAsync({
+          name: formData.name,
+          company: formData.company || undefined,
+          type: formData.type,
+          email: formData.email || undefined,
+          phone: formData.phone || undefined,
+        })
+      }
+      setShowForm(false)
+      router.refresh()
+    } catch {
+      alert('Could not save contact. Please try again.')
+    }
+  }, [editingContact, formData, createContact, updateContact, router])
+
+  const handleDelete = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return
+      const label = ids.length === 1 ? 'this contact' : `${ids.length} contacts`
+      if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return
+      try {
+        const results = await Promise.all(ids.map((id) => deleteContact.mutateAsync({ id })))
+        const blocked = results.filter((r) => !r.success && r.reason === 'in_use').length
+        setSelected(new Set())
+        setRowMenu(null)
+        router.refresh()
+        if (blocked > 0) {
+          alert(
+            `${blocked} contact${blocked === 1 ? '' : 's'} could not be deleted because ${blocked === 1 ? 'it has' : 'they have'} invoices or bills. Mark inactive instead.`,
+          )
+        }
+      } catch {
+        alert('Could not delete. Please try again.')
+      }
+    },
+    [deleteContact, router],
+  )
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -123,7 +204,7 @@ export function ContactsContent({
         <div className="spacer" />
         <div className="head-tools">
           <button className="btn btn-secondary"><Upload />Import</button>
-          <button className="btn btn-primary"><Plus />New contact</button>
+          <button className="btn btn-primary" onClick={openCreateForm}><Plus />New contact</button>
         </div>
       </div>
 
@@ -240,7 +321,11 @@ export function ContactsContent({
           <div className="spacer" />
           <button className="btn btn-secondary btn-sm"><Mail />Email</button>
           <button className="btn btn-secondary btn-sm"><Tag />Add tag</button>
-          <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ color: 'var(--danger)' }}
+            onClick={() => handleDelete([...selected])}
+          >
             <Trash2 />Delete
           </button>
         </div>
@@ -368,7 +453,7 @@ export function ContactsContent({
             left: rowMenu.x,
           }}
         >
-          <div className="menu-item" onClick={() => setRowMenu(null)}><Pencil />Edit contact</div>
+          <div className="menu-item" onClick={() => { const c = contacts.find((c) => c.id === rowMenu.id); if (c) openEditForm(c) }}><Pencil />Edit contact</div>
           <div className="menu-item" onClick={() => setRowMenu(null)}><FileText />New invoice</div>
           <div className="menu-item" onClick={() => setRowMenu(null)}><Banknote />Record payment</div>
           <div className="menu-item" onClick={() => setRowMenu(null)}><FileBarChart />View statement</div>
@@ -376,9 +461,170 @@ export function ContactsContent({
           <div
             className="menu-item"
             style={{ color: 'var(--danger)' }}
-            onClick={() => setRowMenu(null)}
+            onClick={() => handleDelete([rowMenu.id])}
           >
             <Trash2 style={{ color: 'var(--danger)' }} />Delete
+          </div>
+        </div>
+      )}
+
+      {/* CONTACT FORM MODAL */}
+      {showForm && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 120,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            padding: '6vh 20px 40px',
+            background: 'rgba(11, 15, 23, 0.55)',
+            backdropFilter: 'blur(3px)',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowForm(false) }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              padding: 24,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+            }}
+          >
+            <h2 style={{ margin: 0, fontSize: 18, color: 'var(--text)' }}>
+              {editingContact ? 'Edit contact' : 'New contact'}
+            </h2>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Name *</span>
+              <input
+                type="text"
+                required
+                value={formData.name}
+                onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Company</span>
+              <input
+                type="text"
+                value={formData.company}
+                onChange={(e) => setFormData((f) => ({ ...f, company: e.target.value }))}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Type</span>
+              <select
+                value={formData.type}
+                onChange={(e) => setFormData((f) => ({ ...f, type: e.target.value as 'customer' | 'supplier' }))}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                }}
+              >
+                <option value="customer">Customer</option>
+                <option value="supplier">Supplier</option>
+              </select>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Email</span>
+              <input
+                type="text"
+                value={formData.email}
+                onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Phone</span>
+              <input
+                type="text"
+                value={formData.phone}
+                onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                }}
+              />
+            </label>
+
+            {editingContact && (
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Status</span>
+                <select
+                  value={formData.status}
+                  onChange={(e) => setFormData((f) => ({ ...f, status: e.target.value as 'active' | 'inactive' }))}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text)',
+                    fontSize: 14,
+                  }}
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </label>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowForm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={!formData.name.trim() || createContact.isPending || updateContact.isPending}
+                onClick={handleFormSave}
+              >
+                {(createContact.isPending || updateContact.isPending) ? 'Saving...' : 'Save'}
+              </button>
+            </div>
           </div>
         </div>
       )}

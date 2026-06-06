@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useState, useMemo, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { trpc } from '@/lib/trpc/client'
 import {
   Plus,
   Upload,
@@ -15,113 +17,33 @@ import {
   Trash2,
 } from 'lucide-react'
 
-// ── Data ──────────────────────────────────────────────────────────────────────
+// ── Presentation metadata (data comes from the DB via props) ───────────────────
 
-const TYPES = [
-  {
-    key: 'asset', label: 'Assets', single: 'Asset', color: 'var(--blue-500)',
-    accounts: [
-      { code: '1000', name: 'Bank Accounts', detail: '—', desc: 'Operating cash accounts', parent: true, children: [
-        { code: '1010', name: 'Chase Business Checking', detail: 'Bank', desc: 'Primary operating account', bal: 142580.00, active: true },
-        { code: '1020', name: 'Stripe Clearing', detail: 'Bank', desc: 'Payment processor clearing', bal: 6961.55, active: true },
-      ]},
-      { code: '1200', name: 'Accounts Receivable', detail: 'Accounts receivable', desc: 'Money owed by customers', bal: 58430.00, active: true },
-      { code: '1400', name: 'Undeposited Funds', detail: 'Other current asset', desc: 'Received, not yet deposited', bal: 2140.55, active: true },
-      { code: '1500', name: 'Inventory', detail: 'Inventory asset', desc: 'Goods held for resale', bal: 38900.00, active: true },
-      { code: '1700', name: 'Fixed Assets', detail: '—', desc: 'Property & equipment', parent: true, children: [
-        { code: '1710', name: 'Equipment', detail: 'Machinery & equipment', desc: 'Owned equipment at cost', bal: 42000.00, active: true },
-        { code: '1720', name: 'Accumulated Depreciation', detail: 'Accumulated depreciation', desc: 'Contra-asset account', bal: -12500.00, active: true },
-      ]},
-    ],
-  },
-  {
-    key: 'liability', label: 'Liabilities', single: 'Liability', color: 'var(--amber-500)',
-    accounts: [
-      { code: '2000', name: 'Accounts Payable', detail: 'Accounts payable', desc: 'Money owed to vendors', bal: 21840.00, active: true },
-      { code: '2100', name: 'Credit Cards', detail: '—', desc: 'Business credit cards', parent: true, children: [
-        { code: '2110', name: 'Amex Business', detail: 'Credit card', desc: 'Corporate charge card', bal: 8420.55, active: true },
-      ]},
-      { code: '2200', name: 'Sales Tax Payable', detail: 'Other current liability', desc: 'Sales tax collected', bal: 6310.20, active: true },
-      { code: '2400', name: 'Payroll Liabilities', detail: 'Payroll liability', desc: 'Withholdings owed', bal: 9180.00, active: true },
-      { code: '2700', name: 'SBA Term Loan', detail: 'Long-term liability', desc: '7-year term loan', bal: 60000.00, active: true },
-    ],
-  },
-  {
-    key: 'equity', label: 'Equity', single: 'Equity', color: '#7c5cff',
-    accounts: [
-      { code: '3000', name: "Owner's Capital", detail: "Owner's equity", desc: 'Contributed capital', bal: 120000.00, active: true },
-      { code: '3100', name: 'Retained Earnings', detail: 'Retained earnings', desc: 'Accumulated profits', bal: 95420.00, active: true },
-      { code: '3900', name: "Owner's Draw", detail: "Owner's equity", desc: 'Distributions to owner', bal: -18000.00, active: true },
-    ],
-  },
-  {
-    key: 'income', label: 'Income', single: 'Income', color: 'var(--green-500)',
-    accounts: [
-      { code: '4000', name: 'Product Sales', detail: 'Income', desc: 'Revenue from goods sold', bal: 248900.00, active: true },
-      { code: '4100', name: 'Service Revenue', detail: 'Income', desc: 'Revenue from services', bal: 162400.00, active: true },
-      { code: '4900', name: 'Other Income', detail: 'Other income', desc: 'Miscellaneous income', bal: 8150.00, active: true },
-    ],
-  },
-  {
-    key: 'expense', label: 'Expenses', single: 'Expense', color: 'var(--red-500)',
-    accounts: [
-      { code: '5000', name: 'Cost of Goods Sold', detail: '—', desc: 'Direct costs of sales', parent: true, children: [
-        { code: '5010', name: 'Materials & Supplies', detail: 'Supplies & materials', desc: 'Raw materials', bal: 78200.00, active: true },
-        { code: '5020', name: 'Subcontractors', detail: 'Subcontractor', desc: 'Outsourced labor', bal: 41600.00, active: true },
-      ]},
-      { code: '6000', name: 'Payroll & Wages', detail: 'Payroll expense', desc: 'Salaries and wages', bal: 138400.00, active: true },
-      { code: '6100', name: 'Rent & Lease', detail: 'Rent or lease', desc: 'Office lease', bal: 42500.00, active: true },
-      { code: '6200', name: 'Software & Subscriptions', detail: 'Dues & subscriptions', desc: 'SaaS tools', bal: 18900.00, active: true },
-      { code: '6300', name: 'Advertising & Marketing', detail: 'Advertising', desc: 'Campaigns & ads', bal: 24600.00, active: true },
-      { code: '6400', name: 'Travel & Meals', detail: 'Travel', desc: 'Business travel', bal: 9840.00, active: true },
-      { code: '6900', name: 'Utilities', detail: 'Utilities', desc: 'Power, internet, phone', bal: 6420.00, active: true },
-      { code: '6950', name: 'Bank Charges', detail: 'Bank charges', desc: 'Legacy fees account', bal: 0.00, active: false },
-    ],
-  },
+import type { CoaAccount } from '@/lib/trpc/routers/coa'
+
+const TYPE_META = [
+  { key: 'asset', label: 'Assets', single: 'Asset', color: 'var(--blue-500)' },
+  { key: 'liability', label: 'Liabilities', single: 'Liability', color: 'var(--amber-500)' },
+  { key: 'equity', label: 'Equity', single: 'Equity', color: '#7c5cff' },
+  { key: 'income', label: 'Income', single: 'Income', color: 'var(--green-500)' },
+  { key: 'expense', label: 'Expenses', single: 'Expense', color: 'var(--red-500)' },
 ]
 
-type FlatAccount = {
-  code: string
-  name: string
-  detail: string
-  desc: string
-  bal: number
-  active: boolean
-  isParent: boolean
-  isSub: boolean
-  typeKey: string
+const META_BY_KEY: Record<string, (typeof TYPE_META)[number]> = Object.fromEntries(
+  TYPE_META.map((t) => [t.key, t]),
+)
+
+type FlatAccount = CoaAccount & {
   typeLabel: string
   typeSingle: string
   typeColor: string
 }
 
-function flattenAll(): FlatAccount[] {
-  const out: FlatAccount[] = []
-  for (const t of TYPES) {
-    for (const a of t.accounts) {
-      if ('parent' in a && a.parent) {
-        const children = (a as { children: { code: string; name: string; detail: string; desc: string; bal: number; active: boolean }[] }).children
-        const total = children.reduce((s, c) => s + c.bal, 0)
-        out.push({ code: a.code, name: a.name, detail: a.detail, desc: a.desc, bal: total, active: true, isParent: true, isSub: false, typeKey: t.key, typeLabel: t.label, typeSingle: t.single, typeColor: t.color })
-        for (const c of children) {
-          out.push({ code: c.code, name: c.name, detail: c.detail, desc: c.desc, bal: c.bal, active: c.active, isParent: false, isSub: true, typeKey: t.key, typeLabel: t.label, typeSingle: t.single, typeColor: t.color })
-        }
-      } else {
-        const leaf = a as { code: string; name: string; detail: string; desc: string; bal: number; active: boolean }
-        out.push({ code: leaf.code, name: leaf.name, detail: leaf.detail, desc: leaf.desc, bal: leaf.bal, active: leaf.active, isParent: false, isSub: false, typeKey: t.key, typeLabel: t.label, typeSingle: t.single, typeColor: t.color })
-      }
-    }
-  }
-  return out
-}
-
-function typeStats(typeKey: string) {
-  const rows = flattenAll().filter((r) => r.typeKey === typeKey)
-  const leafRows = rows.filter((r) => !r.isParent)
-  return {
-    count: rows.length,
-    total: leafRows.reduce((s, r) => s + r.bal, 0),
-  }
+function decorate(accounts: CoaAccount[]): FlatAccount[] {
+  return accounts.map((a) => {
+    const meta = META_BY_KEY[a.typeKey] ?? { label: a.typeKey, single: a.typeKey, color: 'var(--text-muted)' }
+    return { ...a, typeLabel: meta.label, typeSingle: meta.single, typeColor: meta.color }
+  })
 }
 
 function money(n: number) {
@@ -136,13 +58,52 @@ interface RowMenuState {
   y: number
 }
 
-export function CoaContent({ initialStats }: { initialStats: Record<string, { count: number; total: number }> }) {
+export function CoaContent({
+  initialStats,
+  accounts,
+}: {
+  initialStats: Record<string, { count: number; total: number }>
+  accounts: CoaAccount[]
+}) {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [activeFilter, setActiveFilter] = useState('all')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null)
   const rowMenuRef = useRef<HTMLDivElement>(null)
+  const router = useRouter()
+
+  const [showForm, setShowForm] = useState(false)
+  const [editingAccount, setEditingAccount] = useState<FlatAccount | null>(null)
+
+  const setActiveMut = trpc.coa.setActive.useMutation()
+  const deleteMut = trpc.coa.delete.useMutation()
+  const createMut = trpc.coa.create.useMutation()
+  const updateMut = trpc.coa.update.useMutation()
+
+  async function handleToggleActive(currentActive: boolean) {
+    if (!rowMenu) return
+    const code = rowMenu.code
+    setRowMenu(null)
+    await setActiveMut.mutateAsync({ code, active: !currentActive })
+    router.refresh()
+  }
+
+  async function handleDelete() {
+    if (!rowMenu) return
+    const code = rowMenu.code
+    setRowMenu(null)
+    const res = await deleteMut.mutateAsync({ code })
+    if (!res.success) {
+      alert(
+        res.reason === 'in_use'
+          ? 'This account has posted activity and cannot be deleted. Make it inactive instead.'
+          : 'Could not delete this account.',
+      )
+      return
+    }
+    router.refresh()
+  }
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -156,8 +117,19 @@ export function CoaContent({ initialStats }: { initialStats: Record<string, { co
     }
   }, [rowMenu])
 
-  const allRows = useMemo(() => flattenAll(), [])
+  const allRows = useMemo(() => decorate(accounts), [accounts])
   const totalAccounts = useMemo(() => allRows.filter((r) => !r.isParent).length, [allRows])
+
+  // Per-type stats derived from the DB-backed rows (falls back to server stats)
+  function typeStats(typeKey: string) {
+    const fromStats = initialStats[typeKey]
+    if (fromStats) return fromStats
+    const rows = allRows.filter((r) => r.typeKey === typeKey)
+    return {
+      count: rows.length,
+      total: rows.filter((r) => !r.isParent).reduce((s, r) => s + r.bal, 0),
+    }
+  }
 
   function toggleCollapse(key: string) {
     setCollapsed((prev) => {
@@ -167,10 +139,6 @@ export function CoaContent({ initialStats }: { initialStats: Record<string, { co
       return next
     })
   }
-
-  const typeStats2 = useMemo(() => {
-    return TYPES.map((t) => ({ key: t.key, label: t.label, ...typeStats(t.key) }))
-  }, [])
 
   // Filtered rows per type
   function getTypeRows(typeKey: string): FlatAccount[] {
@@ -189,13 +157,13 @@ export function CoaContent({ initialStats }: { initialStats: Record<string, { co
   }
 
   const visibleTypes = useMemo(() => {
-    return TYPES.filter((t) => {
+    return TYPE_META.filter((t) => {
       if (typeFilter !== 'all' && typeFilter !== t.key) return false
       const rows = getTypeRows(t.key)
       return rows.length > 0
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeFilter, activeFilter, search])
+  }, [typeFilter, activeFilter, search, allRows])
 
   const anyVisible = visibleTypes.length > 0
 
@@ -214,13 +182,13 @@ export function CoaContent({ initialStats }: { initialStats: Record<string, { co
         <div className="head-tools">
           <button className="btn btn-secondary"><Upload />Import</button>
           <button className="btn btn-secondary"><Printer />Export</button>
-          <button className="btn btn-primary"><Plus />New account</button>
+          <button className="btn btn-primary" onClick={() => { setEditingAccount(null); setShowForm(true) }}><Plus />New account</button>
         </div>
       </div>
 
       {/* SUMMARY TILES */}
       <div className="coa-tiles">
-        {TYPES.map((t) => {
+        {TYPE_META.map((t) => {
           const { count, total } = typeStats(t.key)
           return (
             <div key={t.key} className={`coa-tile tile-${t.key}`}>
@@ -298,7 +266,7 @@ export function CoaContent({ initialStats }: { initialStats: Record<string, { co
           </thead>
           <tbody>
             {anyVisible ? (
-              TYPES.map((t) => {
+              TYPE_META.map((t) => {
                 if (typeFilter !== 'all' && typeFilter !== t.key) return null
                 const typeRows = getTypeRows(t.key)
                 if (typeRows.length === 0) return null
@@ -391,6 +359,34 @@ export function CoaContent({ initialStats }: { initialStats: Record<string, { co
         )}
       </div>
 
+      {/* ACCOUNT FORM MODAL */}
+      {showForm && <AccountFormModal
+        account={editingAccount}
+        onClose={() => setShowForm(false)}
+        onSave={async (data) => {
+          if (editingAccount) {
+            await updateMut.mutateAsync({
+              code: editingAccount.code,
+              name: data.name,
+              detailType: data.detailType,
+              description: data.description,
+              active: data.active,
+            })
+          } else {
+            await createMut.mutateAsync({
+              code: data.code,
+              name: data.name,
+              type: data.type as 'asset' | 'liability' | 'equity' | 'income' | 'expense',
+              detailType: data.detailType,
+              description: data.description || undefined,
+              balance: data.balance,
+            })
+          }
+          setShowForm(false)
+          router.refresh()
+        }}
+      />}
+
       {/* ROW ACTIONS MENU */}
       {rowMenu && (
         <div
@@ -403,16 +399,230 @@ export function CoaContent({ initialStats }: { initialStats: Record<string, { co
             left: rowMenu.x,
           }}
         >
-          <div className="menu-item" onClick={() => setRowMenu(null)}><Pencil />Edit account</div>
-          <div className="menu-item" onClick={() => setRowMenu(null)}><BookOpen />View register</div>
-          <div className="menu-item" onClick={() => setRowMenu(null)}><Copy />Duplicate</div>
-          <div className="menu-sep" />
-          <div className="menu-item" onClick={() => setRowMenu(null)}><EyeOff />Make inactive</div>
-          <div className="menu-item" style={{ color: 'var(--danger)' }} onClick={() => setRowMenu(null)}>
-            <Trash2 style={{ color: 'var(--danger)' }} />Delete
-          </div>
+          {(() => {
+            const row = allRows.find((r) => r.code === rowMenu.code)
+            const isActive = row?.active ?? true
+            return (
+              <>
+                <div className="menu-item" onClick={() => { const acct = allRows.find((r) => r.code === rowMenu!.code); if (acct) { setEditingAccount(acct); setShowForm(true) } setRowMenu(null) }}><Pencil />Edit account</div>
+                <div className="menu-item" onClick={() => setRowMenu(null)}><BookOpen />View register</div>
+                <div className="menu-item" onClick={() => setRowMenu(null)}><Copy />Duplicate</div>
+                <div className="menu-sep" />
+                <div className="menu-item" onClick={() => handleToggleActive(isActive)}>
+                  <EyeOff />{isActive ? 'Make inactive' : 'Make active'}
+                </div>
+                <div className="menu-item" style={{ color: 'var(--danger)' }} onClick={handleDelete}>
+                  <Trash2 style={{ color: 'var(--danger)' }} />Delete
+                </div>
+              </>
+            )
+          })()}
         </div>
       )}
     </>
+  )
+}
+
+// ── Account Form Modal ───────────────────────────────────────────────────────
+
+interface AccountFormData {
+  code: string
+  name: string
+  type: string
+  detailType: string
+  description: string
+  balance: number
+  active: boolean
+}
+
+function AccountFormModal({
+  account,
+  onClose,
+  onSave,
+}: {
+  account: FlatAccount | null
+  onClose: () => void
+  onSave: (data: AccountFormData) => Promise<void>
+}) {
+  const isEdit = account !== null
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState<AccountFormData>({
+    code: account?.code ?? '',
+    name: account?.name ?? '',
+    type: account?.typeKey ?? 'asset',
+    detailType: account?.detail ?? '',
+    description: account?.desc ?? '',
+    balance: account?.bal ?? 0,
+    active: account?.active ?? true,
+  })
+
+  function set<K extends keyof AccountFormData>(key: K, value: AccountFormData[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await onSave(form)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 120,
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    padding: '6vh 20px 40px',
+    background: 'rgba(11, 15, 23, 0.55)',
+    backdropFilter: 'blur(3px)',
+  }
+
+  const modalStyle: React.CSSProperties = {
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border)',
+    borderRadius: 12,
+    width: '100%',
+    maxWidth: 520,
+    boxShadow: '0 20px 60px rgba(0,0,0,.4)',
+  }
+
+  const headStyle: React.CSSProperties = {
+    padding: '20px 24px 0',
+    fontSize: '1.1rem',
+    fontWeight: 600,
+    color: 'var(--text)',
+  }
+
+  const bodyStyle: React.CSSProperties = {
+    padding: '16px 24px 24px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 14,
+  }
+
+  const fgStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  }
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '0.82rem',
+    fontWeight: 500,
+    color: 'var(--text-muted)',
+  }
+
+  const footerStyle: React.CSSProperties = {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 8,
+    paddingTop: 8,
+  }
+
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={headStyle}>{isEdit ? 'Edit account' : 'New account'}</div>
+        <form onSubmit={handleSubmit} style={bodyStyle}>
+          {/* Code */}
+          <div style={fgStyle}>
+            <label style={labelStyle}>Code</label>
+            <input
+              className="input"
+              type="text"
+              required
+              readOnly={isEdit}
+              value={form.code}
+              onChange={(e) => set('code', e.target.value)}
+              style={isEdit ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
+            />
+          </div>
+
+          {/* Name */}
+          <div style={fgStyle}>
+            <label style={labelStyle}>Name</label>
+            <input
+              className="input"
+              type="text"
+              required
+              value={form.name}
+              onChange={(e) => set('name', e.target.value)}
+            />
+          </div>
+
+          {/* Type */}
+          <div style={fgStyle}>
+            <label style={labelStyle}>Type</label>
+            <select
+              className="select"
+              value={form.type}
+              disabled={isEdit}
+              onChange={(e) => set('type', e.target.value)}
+              style={isEdit ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
+            >
+              <option value="asset">Asset</option>
+              <option value="liability">Liability</option>
+              <option value="equity">Equity</option>
+              <option value="income">Income</option>
+              <option value="expense">Expense</option>
+            </select>
+          </div>
+
+          {/* Detail type */}
+          <div style={fgStyle}>
+            <label style={labelStyle}>Detail type</label>
+            <input
+              className="input"
+              type="text"
+              required
+              value={form.detailType}
+              onChange={(e) => set('detailType', e.target.value)}
+            />
+          </div>
+
+          {/* Description */}
+          <div style={fgStyle}>
+            <label style={labelStyle}>Description</label>
+            <textarea
+              className="textarea"
+              rows={2}
+              value={form.description}
+              onChange={(e) => set('description', e.target.value)}
+            />
+          </div>
+
+          {/* Balance — only for new accounts */}
+          {!isEdit && (
+            <div style={fgStyle}>
+              <label style={labelStyle}>Opening balance</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                value={form.balance}
+                onChange={(e) => set('balance', parseFloat(e.target.value) || 0)}
+              />
+            </div>
+          )}
+
+          {/* Footer */}
+          <div style={footerStyle}>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }

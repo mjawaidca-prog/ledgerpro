@@ -1,7 +1,8 @@
+import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 
-const connectionString = process.env.DATABASE_URL ?? ''
+const connectionString = process.env.DATABASE_URL!
 const adapter = new PrismaPg({ connectionString })
 const prisma = new PrismaClient({ adapter })
 
@@ -11,34 +12,34 @@ async function main() {
   // ── Chart of Accounts ──────────────────────────────────────────────
   const coa = await Promise.all([
     // Assets
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '1010' }, update: {}, create: { code: '1010', name: 'Chase Business Checking', type: 'asset', detailType: 'Checking', balance: 98450 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '1020' }, update: {}, create: { code: '1020', name: 'Amex Business Credit Card', type: 'asset', detailType: 'Credit Card', balance: -22340 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '1030' }, update: {}, create: { code: '1030', name: 'Stripe Payouts Clearing', type: 'asset', detailType: 'Other Current Asset', balance: 44130 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '1200' }, update: {}, create: { code: '1200', name: 'Accounts Receivable', type: 'asset', detailType: 'Accounts Receivable', balance: 58430 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '1500' }, update: {}, create: { code: '1500', name: 'Inventory Asset', type: 'asset', detailType: 'Inventory', balance: 34200 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '1800' }, update: {}, create: { code: '1800', name: 'Fixed Assets', type: 'asset', detailType: 'Fixed Asset', balance: 85000 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '1010' }, update: { description: 'Primary operating account' }, create: { code: '1010', name: 'Chase Business Checking', type: 'asset', detailType: 'Checking', description: 'Primary operating account', balance: 98450 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '1020' }, update: { description: 'Corporate charge card' }, create: { code: '1020', name: 'Amex Business Credit Card', type: 'asset', detailType: 'Credit Card', description: 'Corporate charge card', balance: -22340 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '1030' }, update: { description: 'Payment processor clearing' }, create: { code: '1030', name: 'Stripe Payouts Clearing', type: 'asset', detailType: 'Other Current Asset', description: 'Payment processor clearing', balance: 44130 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '1200' }, update: { description: 'Money owed by customers' }, create: { code: '1200', name: 'Accounts Receivable', type: 'asset', detailType: 'Accounts Receivable', description: 'Money owed by customers', balance: 58430 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '1500' }, update: { description: 'Goods held for resale' }, create: { code: '1500', name: 'Inventory Asset', type: 'asset', detailType: 'Inventory', description: 'Goods held for resale', balance: 34200 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '1800' }, update: { description: 'Property & equipment' }, create: { code: '1800', name: 'Fixed Assets', type: 'asset', detailType: 'Fixed Asset', description: 'Property & equipment', balance: 85000 } }),
     // Liabilities
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '2000' }, update: {}, create: { code: '2000', name: 'Accounts Payable', type: 'liability', detailType: 'Accounts Payable', balance: 18700 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '2100' }, update: {}, create: { code: '2100', name: 'Sales Tax Payable', type: 'liability', detailType: 'Other Current Liability', balance: 3240 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '2200' }, update: {}, create: { code: '2200', name: 'Payroll Liabilities', type: 'liability', detailType: 'Other Current Liability', balance: 9800 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '2500' }, update: {}, create: { code: '2500', name: 'Long-term Debt', type: 'liability', detailType: 'Long Term Liability', balance: 120000 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '2000' }, update: { description: 'Money owed to vendors' }, create: { code: '2000', name: 'Accounts Payable', type: 'liability', detailType: 'Accounts Payable', description: 'Money owed to vendors', balance: 18700 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '2100' }, update: { description: 'Sales tax collected' }, create: { code: '2100', name: 'Sales Tax Payable', type: 'liability', detailType: 'Other Current Liability', description: 'Sales tax collected', balance: 3240 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '2200' }, update: { description: 'Withholdings owed' }, create: { code: '2200', name: 'Payroll Liabilities', type: 'liability', detailType: 'Other Current Liability', description: 'Withholdings owed', balance: 9800 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '2500' }, update: { description: 'Term loans & notes' }, create: { code: '2500', name: 'Long-term Debt', type: 'liability', detailType: 'Long Term Liability', description: 'Term loans & notes', balance: 120000 } }),
     // Equity
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '3000' }, update: {}, create: { code: '3000', name: "Owner's Equity", type: 'equity', detailType: "Owner's Equity", balance: 250000 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '3100' }, update: {}, create: { code: '3100', name: 'Retained Earnings', type: 'equity', detailType: 'Retained Earnings', balance: 89000 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '3000' }, update: { description: 'Contributed capital' }, create: { code: '3000', name: "Owner's Equity", type: 'equity', detailType: "Owner's Equity", description: 'Contributed capital', balance: 250000 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '3100' }, update: { description: 'Accumulated profits' }, create: { code: '3100', name: 'Retained Earnings', type: 'equity', detailType: 'Retained Earnings', description: 'Accumulated profits', balance: 89000 } }),
     // Income
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '4000' }, update: {}, create: { code: '4000', name: 'Sales Income', type: 'income', detailType: 'Sales', balance: 84210 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '4100' }, update: {}, create: { code: '4100', name: 'Service Revenue', type: 'income', detailType: 'Service/Fee Income', balance: 22400 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '4200' }, update: {}, create: { code: '4200', name: 'Other Income', type: 'income', detailType: 'Other Income', balance: 1800 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '4000' }, update: { description: 'Revenue from goods sold' }, create: { code: '4000', name: 'Sales Income', type: 'income', detailType: 'Sales', description: 'Revenue from goods sold', balance: 84210 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '4100' }, update: { description: 'Revenue from services' }, create: { code: '4100', name: 'Service Revenue', type: 'income', detailType: 'Service/Fee Income', description: 'Revenue from services', balance: 22400 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '4200' }, update: { description: 'Miscellaneous income' }, create: { code: '4200', name: 'Other Income', type: 'income', detailType: 'Other Income', description: 'Miscellaneous income', balance: 1800 } }),
     // Expenses
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '5000' }, update: {}, create: { code: '5000', name: 'Cost of Goods Sold', type: 'expense', detailType: 'Supplies & Materials', balance: 28400 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6000' }, update: {}, create: { code: '6000', name: 'Payroll Expense', type: 'expense', detailType: 'Wages & Salaries', balance: 36800 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6100' }, update: {}, create: { code: '6100', name: 'Rent & Lease', type: 'expense', detailType: 'Rent & Lease', balance: 7000 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6200' }, update: {}, create: { code: '6200', name: 'Software & Subscriptions', type: 'expense', detailType: 'Software', balance: 2840 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6300' }, update: {}, create: { code: '6300', name: 'Office Supplies', type: 'expense', detailType: 'Office Expenses', balance: 480 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6400' }, update: {}, create: { code: '6400', name: 'Marketing & Advertising', type: 'expense', detailType: 'Advertising', balance: 3200 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6500' }, update: {}, create: { code: '6500', name: 'Travel & Entertainment', type: 'expense', detailType: 'Travel', balance: 1240 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6600' }, update: {}, create: { code: '6600', name: 'Bank Charges & Fees', type: 'expense', detailType: 'Bank Charges', balance: 180 } }),
-    prisma.chartOfAccountsEntry.upsert({ where: { code: '6700' }, update: {}, create: { code: '6700', name: 'Insurance', type: 'expense', detailType: 'Insurance', balance: 1800 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '5000' }, update: { description: 'Direct costs of sales' }, create: { code: '5000', name: 'Cost of Goods Sold', type: 'expense', detailType: 'Supplies & Materials', description: 'Direct costs of sales', balance: 28400 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6000' }, update: { description: 'Salaries and wages' }, create: { code: '6000', name: 'Payroll Expense', type: 'expense', detailType: 'Wages & Salaries', description: 'Salaries and wages', balance: 36800 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6100' }, update: { description: 'Office lease' }, create: { code: '6100', name: 'Rent & Lease', type: 'expense', detailType: 'Rent & Lease', description: 'Office lease', balance: 7000 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6200' }, update: { description: 'SaaS tools' }, create: { code: '6200', name: 'Software & Subscriptions', type: 'expense', detailType: 'Software', description: 'SaaS tools', balance: 2840 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6300' }, update: { description: 'Office consumables' }, create: { code: '6300', name: 'Office Supplies', type: 'expense', detailType: 'Office Expenses', description: 'Office consumables', balance: 480 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6400' }, update: { description: 'Campaigns & ads' }, create: { code: '6400', name: 'Marketing & Advertising', type: 'expense', detailType: 'Advertising', description: 'Campaigns & ads', balance: 3200 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6500' }, update: { description: 'Business travel' }, create: { code: '6500', name: 'Travel & Entertainment', type: 'expense', detailType: 'Travel', description: 'Business travel', balance: 1240 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6600' }, update: { description: 'Transaction fees' }, create: { code: '6600', name: 'Bank Charges & Fees', type: 'expense', detailType: 'Bank Charges', description: 'Transaction fees', balance: 180 } }),
+    prisma.chartOfAccountsEntry.upsert({ where: { code: '6700' }, update: { description: 'Business insurance' }, create: { code: '6700', name: 'Insurance', type: 'expense', detailType: 'Insurance', description: 'Business insurance', balance: 1800 } }),
   ])
 
   const coaMap: Record<string, { id: string; code: string }> = Object.fromEntries(coa.map((c) => [c.code, c]))
@@ -258,13 +259,46 @@ async function main() {
     await prisma.bill.upsert({ where: { id: bill.id }, update: {}, create: bill })
   }
 
+  // ── Bank feed: items to review / excluded (populate Banking tabs) ──
+  const feedTxns = [
+    { id: 'txn-101', accountId: stripePayouts.id, date: new Date('2026-05-18'), description: 'Stripe payout',   merchant: 'Stripe',          amount: 4820.00,  suggestedCategoryId: coaMap['4000'].id, status: 'to_review' as const, source: 'feed' as const, matchRef: '2 invoices' },
+    { id: 'txn-102', accountId: amexCard.id,      date: new Date('2026-05-17'), description: 'AWS',             merchant: 'Amazon Web Services', amount: -1284.30, suggestedCategoryId: coaMap['6200'].id, status: 'to_review' as const, source: 'feed' as const },
+    { id: 'txn-103', accountId: chaseChecking.id, date: new Date('2026-05-16'), description: 'WeWork',          merchant: 'WeWork',          amount: -3500.00, suggestedCategoryId: coaMap['6100'].id, status: 'to_review' as const, source: 'feed' as const },
+    { id: 'txn-104', accountId: amexCard.id,      date: new Date('2026-05-15'), description: 'Delta Air Lines', merchant: 'Delta',           amount: -642.40,  suggestedCategoryId: coaMap['6500'].id, status: 'to_review' as const, source: 'feed' as const },
+    { id: 'txn-105', accountId: chaseChecking.id, date: new Date('2026-05-14'), description: 'Gusto',           merchant: 'Gusto',           amount: -89.00,   suggestedCategoryId: coaMap['6600'].id, status: 'to_review' as const, source: 'feed' as const },
+    { id: 'txn-106', accountId: stripePayouts.id, date: new Date('2026-05-13'), description: 'Shopify payout',  merchant: 'Shopify',         amount: 2140.55,  suggestedCategoryId: coaMap['4000'].id, status: 'to_review' as const, source: 'feed' as const },
+    { id: 'txn-107', accountId: amexCard.id,      date: new Date('2026-05-12'), description: 'Staples',         merchant: 'Staples',         amount: -142.18,  suggestedCategoryId: coaMap['6300'].id, status: 'to_review' as const, source: 'feed' as const },
+    { id: 'txn-108', accountId: chaseChecking.id, date: new Date('2026-05-11'), description: 'Payment — Vertex Partners', merchant: 'Vertex Partners', amount: 23110.00, suggestedCategoryId: coaMap['4000'].id, status: 'to_review' as const, source: 'feed' as const, matchRef: 'INV-1044' },
+    { id: 'txn-201', accountId: chaseChecking.id, date: new Date('2026-05-03'), description: 'Owner transfer → savings', merchant: 'Transfer', amount: -5000.00, status: 'excluded' as const, source: 'feed' as const, excludeReason: 'Transfer' },
+    { id: 'txn-202', accountId: stripePayouts.id, date: new Date('2026-05-02'), description: 'Stripe payout (dup)', merchant: 'Stripe',      amount: 4820.00,  status: 'excluded' as const, source: 'feed' as const, excludeReason: 'Duplicate' },
+  ]
+  for (const txn of feedTxns) {
+    await prisma.transaction.upsert({ where: { id: txn.id }, update: {}, create: txn })
+  }
+
+  // ── Monthly snapshots (cash-on-hand + income/expense trends) ───────
+  const snapshots = [
+    { periodKey: '2025-10', label: 'Oct', cashOnHand: 96400,  income: 58400, expenses: 38200 },
+    { periodKey: '2025-11', label: 'Nov', cashOnHand: 102300, income: 64900, expenses: 40500 },
+    { periodKey: '2025-12', label: 'Dec', cashOnHand: 88100,  income: 61200, expenses: 39800 },
+    { periodKey: '2026-01', label: 'Jan', cashOnHand: 109600, income: 72400, expenses: 44100 },
+    { periodKey: '2026-02', label: 'Feb', cashOnHand: 118200, income: 69800, expenses: 41200 },
+    { periodKey: '2026-03', label: 'Mar', cashOnHand: 112900, income: 78600, expenses: 46900 },
+    { periodKey: '2026-04', label: 'Apr', cashOnHand: 131400, income: 80100, expenses: 43400 },
+    { periodKey: '2026-05', label: 'May', cashOnHand: 142580, income: 84210, expenses: 41980 },
+  ]
+  for (const s of snapshots) {
+    await prisma.monthlySnapshot.upsert({ where: { periodKey: s.periodKey }, update: s, create: s })
+  }
+
   console.log('Seed complete!')
   console.log(`  ${coa.length} chart of accounts entries`)
   console.log('  3 bank accounts')
   console.log('  6 contacts')
-  console.log(`  ${txns.length} transactions`)
+  console.log(`  ${txns.length + feedTxns.length} transactions (${feedTxns.length} bank-feed)`)
   console.log(`  ${invoices.length} invoices`)
   console.log(`  ${bills.length} bills`)
+  console.log(`  ${snapshots.length} monthly snapshots`)
 }
 
 main()

@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { trpc } from '@/lib/trpc/client'
 import {
   ArrowLeft,
   ChevronRight,
@@ -128,11 +129,19 @@ export function InvoiceEditor({
   const [scheduleReminders, setScheduleReminders] = useState(true)
   const [custMenuOpen, setCustMenuOpen] = useState(false)
 
-  // Customer state
+  // Customer state — when editing, seed from the invoice's real customer
   const [selectedCust, setSelectedCust] = useState(() => {
     if (!isNew && initialData) {
       const found = CUSTOMERS.find((c) => c.id === initialData.customerId)
-      return found ?? CUSTOMERS[0]
+      if (found) return found
+      const words = initialData.customerName.split(' ').filter(Boolean)
+      return {
+        id: initialData.customerId,
+        name: initialData.customerName,
+        email: initialData.customerEmail,
+        color: '#4b5666',
+        initials: words.slice(0, 2).map((w) => w[0].toUpperCase()).join(''),
+      }
     }
     return CUSTOMERS[0]
   })
@@ -219,6 +228,54 @@ export function InvoiceEditor({
 
   const isEditing = !isNew && initialData !== null
   const pageTitle = isEditing ? `Edit ${id}` : 'New invoice'
+
+  const createInvoice = trpc.invoices.create.useMutation()
+  const updateInvoice = trpc.invoices.update.useMutation()
+  const saving = createInvoice.isPending || updateInvoice.isPending
+
+  const handleSave = useCallback(
+    async (status: 'draft' | 'sent') => {
+      const payloadLines = lines.map((l) => {
+        const qty = parseFloat(String(l.qty)) || 0
+        const rate = parseFloat(String(l.rate)) || 0
+        return {
+          description: l.desc || 'Item',
+          subDescription: l.sub || undefined,
+          qty,
+          rate,
+          taxRate: l.tax === 'none' ? 0 : (parseFloat(l.tax) || 0) / 100,
+          amount: qty * rate,
+        }
+      })
+
+      const base = {
+        issueDate,
+        dueDate,
+        amount: totals.total,
+        status,
+        notes,
+        terms: termsText,
+        lines: payloadLines,
+        customerName: selectedCust.name,
+      }
+
+      try {
+        if (isNew) {
+          await createInvoice.mutateAsync({ id: invoiceNum, ...base })
+        } else {
+          await updateInvoice.mutateAsync({ id: initialData!.id, customerId: selectedCust.id, ...base })
+        }
+        router.push('/invoices')
+        router.refresh()
+      } catch {
+        alert('Could not save the invoice. Please try again.')
+      }
+    },
+    [
+      isNew, invoiceNum, initialData, issueDate, dueDate, totals.total, notes,
+      termsText, lines, selectedCust, createInvoice, updateInvoice, router,
+    ],
+  )
   const statusBadge = initialData?.status ?? 'draft'
 
   return (
@@ -580,14 +637,14 @@ export function InvoiceEditor({
           </span>
         </span>
         <div className="spacer" />
-        <button className="btn btn-ghost" onClick={() => router.push('/invoices')}>
+        <button className="btn btn-ghost" onClick={() => router.push('/invoices')} disabled={saving}>
           Cancel
         </button>
-        <button className="btn btn-secondary">
+        <button className="btn btn-secondary" onClick={() => handleSave('draft')} disabled={saving}>
           <FileEdit />Save as draft
         </button>
-        <button className="btn btn-primary">
-          <Send />Send invoice
+        <button className="btn btn-primary" onClick={() => handleSave('sent')} disabled={saving}>
+          <Send />{saving ? 'Saving…' : 'Send invoice'}
         </button>
       </footer>
     </>

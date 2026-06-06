@@ -13,7 +13,8 @@ const InvoiceLineInput = z.object({
 
 const InvoiceCreateInput = z.object({
   id: z.string(),
-  customerId: z.string(),
+  customerId: z.string().optional(),
+  customerName: z.string().optional(),
   issueDate: z.string(),
   dueDate: z.string(),
   amount: z.number(),
@@ -26,6 +27,7 @@ const InvoiceCreateInput = z.object({
 const InvoiceUpdateInput = z.object({
   id: z.string(),
   customerId: z.string().optional(),
+  customerName: z.string().optional(),
   issueDate: z.string().optional(),
   dueDate: z.string().optional(),
   amount: z.number().optional(),
@@ -34,6 +36,28 @@ const InvoiceUpdateInput = z.object({
   terms: z.string().optional(),
   lines: z.array(InvoiceLineInput).optional(),
 })
+
+// Resolve a customer by id or name; create the contact on the fly if needed.
+async function resolveCustomerId(
+  customerId?: string,
+  customerName?: string,
+): Promise<string> {
+  if (customerId) {
+    const byId = await db.contact.findUnique({ where: { id: customerId } })
+    if (byId) return byId.id
+  }
+  if (customerName) {
+    const byName = await db.contact.findFirst({
+      where: { name: { equals: customerName, mode: 'insensitive' } },
+    })
+    if (byName) return byName.id
+    const created = await db.contact.create({
+      data: { name: customerName, company: customerName, type: 'customer', status: 'active' },
+    })
+    return created.id
+  }
+  throw new Error('A customer is required to save an invoice.')
+}
 
 export const invoicesRouter = router({
   list: publicProcedure
@@ -100,10 +124,11 @@ export const invoicesRouter = router({
   create: publicProcedure
     .input(InvoiceCreateInput)
     .mutation(async ({ input }) => {
+      const customerId = await resolveCustomerId(input.customerId, input.customerName)
       const invoice = await db.invoice.create({
         data: {
           id: input.id,
-          customerId: input.customerId,
+          customerId,
           issueDate: new Date(input.issueDate),
           dueDate: new Date(input.dueDate),
           amount: input.amount,
@@ -127,7 +152,9 @@ export const invoicesRouter = router({
     .mutation(async ({ input }) => {
       const { id, lines, ...rest } = input
       const data: Record<string, unknown> = {}
-      if (rest.customerId !== undefined) data.customerId = rest.customerId
+      if (rest.customerId !== undefined || rest.customerName !== undefined) {
+        data.customerId = await resolveCustomerId(rest.customerId, rest.customerName)
+      }
       if (rest.issueDate !== undefined) data.issueDate = new Date(rest.issueDate)
       if (rest.dueDate !== undefined) data.dueDate = new Date(rest.dueDate)
       if (rest.amount !== undefined) data.amount = rest.amount
