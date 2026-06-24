@@ -1,0 +1,163 @@
+/* ============================================================
+   LedgerPro — Design Tokens
+   CSS custom properties for the full design system.
+   Light + dark themes, density variants.
+   ============================================================ */
+
+/* ─── Light theme (default) ─── */
+:root,
+[data-theme="light"] {
+  /* Background layers */
+  --app-bg:       #f6f8fb;
+  --surface:      #ffffff;
+  --surface-2:    #f6f8fb;
+  --surface-3:    #eef1f6;
+  --sidebar-bg:   #131a24;
+
+  /* Borders */
+  --border:        #e3e8ef;
+  --border-strong: #cdd5e0;
+  --border-focus:  #1f6feb;
+
+  /* Text */
+  --text-strong:   #131a24;
+  --text:          #364150;
+  --text-muted:    #697587;
+  --text-faint:    #9aa6b8;
+
+  /* Primary / brand */
+  --primary:        #1f6feb;
+  --primary-hover:  #1857c4;
+  --primary-active: #18489b;
+  --primary-soft:   #eef4ff;
+  --primary-soft-border: #bcd1ff;
+  --on-primary:     #ffffff;
+
+  /* Semantic */
+  --accent:   #1f6feb;
+  --success:  #16a063;
+  --danger:   #e0484e;
+  --danger-soft: #fdecec;
+  --warning:  #d6961f;
+
+  /* Neutral */
+  --neutral-soft:        #eef1f6;
+  --neutral-soft-border: #cdd5e0;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(19, 26, 36, 0.06);
+  --shadow-sm: 0 2px 6px rgba(19, 26, 36, 0.08);
+  --shadow-md: 0 6px 18px rgba(19, 26, 36, 0.10);
+  --shadow-lg: 0 12px 32px rgba(19, 26, 36, 0.14);
+
+  /* Sidebar */
+  --side-border:      rgba(255, 255, 255, 0.08);
+  --side-text:        #9aa6b8;
+  --side-text-muted:  #697587;
+  --side-hover-bg:    rgba(255, 255, 255, 0.06);
+  --side-active-bg:   rgba(31, 111, 235, 0.18);
+  --side-active-text: #ffffff;
+
+  /* Raw color references (from tailwind config) */
+  --blue-500: #3074ef;
+  --blue-700: #1857c4;
+  --green-500: #16a063;
+  --red-500: #e0484e;
+  --amber-500: #d6961f;
+
+  /* Typography */
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Font sizes */
+  --text-micro: 11px;
+  --text-xs:    12px;
+  --text-sm:    13px;
+  --text-base:  14px;
+  --text-md:    15px;
+  --text-lg:    17px;
+  --text-xl:    20px;
+  --text-2xl:   24px;
+  --text-3xl:   30px;
+  --text-4xl:   40px;
+  --text-5xl:   52px;
+
+  /* Letter spacing */
+  --tracking-tight:  -0.012em;
+  --tracking-tighter: -0.02em;
+  --tracking-label:   0.10em;
+
+  /* Border radius */
+  --r-xs:  4px;
+  --r-sm:  6px;
+  --r-md:  8px;
+  --r-lg:  10px;
+  --r-xl:  14px;
+  --r-2xl: 20px;
+  --r-full: 999px;
+
+  /* Transitions */
+  --dur:      180ms;
+  --dur-fast: 120ms;
+  --dur-slow: 320ms;
+  --ease:     cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Density: comfortable (default) */
+  --density-cell-py: 12px;
+  --density-cell-px: 14px;
+  --density-row-gap: 0px;
+}
+
+/* ─── Dark theme ─── */
+[data-theme="dark"] {
+  --app-bg:       #0b0f17;
+  --surface:      #131a24;
+  --surface-2:    #1f2733;
+  --surface-3:    #364150;
+  --sidebar-bg:   #0b0f17;
+
+  --border:        #364150;
+  --border-strong: #4b5666;
+  --border-focus:  #5b8bf8;
+
+  --text-strong:   #fbfcfd;
+  --text:          #cdd5e0;
+  --text-muted:    #9aa6b8;
+  --text-faint:    #697587;
+
+  --primary:        #5b8bf8;
+  --primary-hover:  #8fb1ff;
+  --primary-active: #3074ef;
+  --primary-soft:   rgba(31, 111, 235, 0.18);
+  --primary-soft-border: rgba(31, 111, 235, 0.28);
+  --on-primary:     #ffffff;
+
+  --accent:   #5b8bf8;
+  --success:  #54c389;
+  --danger:   #ef7e83;
+  --danger-soft: rgba(224, 72, 78, 0.16);
+  --warning:  #f3cd80;
+
+  --neutral-soft:        #364150;
+  --neutral-soft-border: #4b5666;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.38);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.46);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.54);
+
+  --side-border:      rgba(255, 255, 255, 0.08);
+  --side-text:        #697587;
+  --side-text-muted:  #4b5666;
+  --side-hover-bg:    rgba(255, 255, 255, 0.04);
+  --side-active-bg:   rgba(31, 111, 235, 0.24);
+  --side-active-text: #dbe6ff;
+}
+
+/* ─── Density: compact ─── */
+[data-density="compact"] {
+  --density-cell-py: 6px;
+  --density-cell-px: 12px;
+  --density-row-gap: 0px;
+}

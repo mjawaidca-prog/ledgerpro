@@ -1,0 +1,100 @@
+/* ============================================================
+   LedgerPro — Global styles + component layer
+   Import tokens first, then build component classes.
+   ============================================================ */
+@import './tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    background: var(--app-bg);
+    color: var(--text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  ::selection { background: var(--primary-soft); }
+}
+
+/* ─── Type roles ─── */
+@layer components {
+  .t-display { font-family: var(--font-mono); font-size: var(--text-5xl); font-weight: 600; letter-spacing: var(--tracking-tight); color: var(--text-strong); line-height: 1; font-variant-numeric: tabular-nums; }
+  .t-h1 { font-size: var(--text-3xl); font-weight: 700; letter-spacing: var(--tracking-tight); color: var(--text-strong); line-height: 1.12; }
+  .t-h2 { font-size: var(--text-2xl); font-weight: 650; letter-spacing: var(--tracking-tight); color: var(--text-strong); line-height: 1.18; }
+  .t-h3 { font-size: var(--text-lg); font-weight: 600; color: var(--text-strong); line-height: 1.3; }
+  .t-body { font-size: var(--text-base); font-weight: 400; color: var(--text); line-height: 1.55; }
+  .t-caption { font-size: var(--text-xs); color: var(--text-muted); }
+  .t-label { font-family: var(--font-mono); font-size: var(--text-micro); font-weight: 600; text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-muted); }
+  .t-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .pos { color: var(--success); }
+  .neg { color: var(--danger); }
+}
+
+/* ─── App shell layout ─── */
+@layer components {
+  .app { display: flex; height: 100vh; width: 100%; }
+
+  /* Rail */
+  .rail { width: 248px; flex: none; background: var(--sidebar-bg); display: flex; flex-direction: column; padding: 12px 12px 10px; gap: 2px; }
+  .rail-nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; margin: 4px -4px; padding: 0 4px; }
+  .rail-nav::-webkit-scrollbar { width: 0; }
+
+  /* Main column */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  /* Topbar */
+  .topbar { height: 62px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--border); }
+
+  /* Content area */
+  .content { flex: 1; overflow-y: auto; padding: 22px 26px 60px; background: var(--app-bg); }
+
+  /* Org switcher */
+  .org-switch {
+    display: flex; align-items: center; gap: 10px; width: 100%; cursor: pointer;
+    background: rgba(255,255,255,0.04); border: 1px solid var(--side-border);
+    border-radius: var(--r-lg); padding: 9px 10px; margin-bottom: 8px;
+    transition: background var(--dur-fast) var(--ease);
+  }
+  .org-switch:hover { background: rgba(255,255,255,0.08); }
+  .org-switch .org-tile { width: 30px; height: 30px; border-radius: var(--r-md); background: linear-gradient(135deg, var(--blue-500), var(--blue-700)); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: none; }
+  .org-switch .org-meta { min-width: 0; flex: 1; }
+  .org-switch .org-name { display: block; color: #fff; font-size: var(--text-sm); font-weight: 650; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .org-switch .org-plan { display: block; color: var(--side-text-muted); font-size: 10.5px; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Nav item (in sidebar) */
+  .nav-item {
+    display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: var(--r-md);
+    color: var(--side-text); font-size: var(--text-sm); font-weight: 500;
+    cursor: pointer; position: relative;
+    transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  }
+  .nav-item svg { width: 18px; height: 18px; flex: none; color: var(--side-text-muted); transition: color var(--dur-fast) var(--ease); }
+  .nav-item:hover { background: var(--side-hover-bg); color: #fff; }
+  .nav-item:hover svg { color: var(--side-text); }
+  .nav-item.active { background: var(--side-active-bg); color: var(--side-active-text); font-weight: 600; }
+  .nav-item.active svg { color: #6ea2ff; }
+  .nav-item.active::before { content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--primary); }
+  .nav-item .count { margin-left: auto; font-family: var(--font-mono); font-size: 10px; background: var(--neutral-soft); color: var(--side-text); padding: 1px 7px; border-radius: var(--r-full); }
+  .nav-item.active .count { background: rgba(255,255,255,0.16); color: #fff; }
+
+  /* Sidebar foot / user area */
+  .rail .s-foot { margin-top: auto; padding-top: 6px; }
+  .rail .s-user {
+    display: flex; align-items: center; gap: 10px; padding: 9px 8px;
+    border-top: 1px solid var(--side-border); margin-top: 8px;
+    cursor: pointer; border-radius: var(--r-md);
+  }
+  .rail .s-user:hover { background: var(--side-hover-bg); }
+  .rail .s-user .av { width: 30px; height: 30px; border-radius: var(--r-full); background: var(--primary); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+  .rail .s-user .un { color: #fff; font-size: var(--text-sm); font-weight: 600; line-height: 1.2; }
+  .rail .s-user .ue { color: var(--side-text-muted); font-size: 11px; }
+}

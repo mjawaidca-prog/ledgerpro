@@ -1,4 +1,6 @@
-// LedgerPro Prisma Schema
+// prisma/schema.prisma
+// LedgerPro — PostgreSQL schema
+// Double-entry ledger with full audit trail
 
 generator client {
   provider = "prisma-client-js"
@@ -6,156 +8,276 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-model Account {
-  id              String       @id @default(cuid())
+// ─── AUTH & ORGANIZATION ────────────────────────────────────
+
+model User {
+  id            String     @id @default(cuid())
+  name          String
+  email         String     @unique
+  emailVerified DateTime?
+  passwordHash  String?    // bcrypt hash
+  image         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  company Company? @relation("CompanyOwner")
+}
+
+model Company {
+  id              String   @id @default(cuid())
   name            String
-  mask            String
-  kind            AccountKind
-  currentBalance  Decimal      @db.Decimal(15, 2)
-  glAccountCode   String?
-  syncStatus      String       @default("synced")
-  lastSyncedAt    DateTime?
-  displayColor    String?
-  logoInitials    String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  legalName       String?
+  fiscalYearStart DateTime
+  currency        String   @default("USD")
+  locale          String   @default("en-US")
+  timezone        String   @default("America/Edmonton")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  transactions    Transaction[]
-  bills           Bill[]       @relation("PaymentAccount")
+  ownerId String @unique
+  owner   User   @relation("CompanyOwner", fields: [ownerId], references: [id])
+
+  contacts         Contact[]
+  invoices         Invoice[]
+  bills            Bill[]
+  accounts         FinancialAccount[]
+  chartOfAccounts  ChartOfAccount[]
+  transactions     Transaction[]
+  journalEntries   JournalEntry[]
+  importBatches    ImportBatch[]
+  transferMatches  TransferMatch[]
 }
 
-model Transaction {
-  id                  String            @id @default(cuid())
-  accountId           String
-  date                DateTime
-  description         String
-  merchant            String?
-  amount              Decimal           @db.Decimal(15, 2)
-  categoryId          String?
-  suggestedCategoryId String?
-  status              TransactionStatus @default(to_review)
-  matchRef            String?
-  excludeReason       String?
-  importBatchId       String?
-  source              TransactionSource @default(feed)
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+// ─── CHART OF ACCOUNTS (GL) ─────────────────────────────────
 
-  account             Account                @relation(fields: [accountId], references: [id])
-  category            ChartOfAccountsEntry?  @relation("CategoryTransactions", fields: [categoryId], references: [id])
-  suggestedCategory   ChartOfAccountsEntry?  @relation("SuggestedCategoryTransactions", fields: [suggestedCategoryId], references: [id])
-}
+model ChartOfAccount {
+  id          String  @id @default(cuid())
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id])
 
-model Contact {
-  id                 String        @id @default(cuid())
-  name               String
-  company            String?
-  type               ContactType
-  email              String?
-  phone              String?
-  outstandingBalance Decimal       @default(0) @db.Decimal(15, 2)
-  status             ContactStatus @default(active)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-
-  invoices           Invoice[]
-  bills              Bill[]        @relation("VendorBills")
-}
-
-model Invoice {
-  id         String        @id
-  customerId String
-  issueDate  DateTime
-  dueDate    DateTime
-  amount     Decimal       @db.Decimal(15, 2)
-  status     InvoiceStatus @default(draft)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-
-  customer   Contact       @relation(fields: [customerId], references: [id])
-  lines      InvoiceLine[]
-}
-
-model InvoiceLine {
-  id          String   @id @default(cuid())
-  invoiceId   String
-  description String
-  qty         Decimal  @db.Decimal(10, 4)
-  rate        Decimal  @db.Decimal(15, 2)
-  taxRate     Decimal  @default(0) @db.Decimal(5, 4)
-  amount      Decimal  @db.Decimal(15, 2)
-
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
-}
-
-model Bill {
-  id               String     @id
-  kind             BillKind   @default(bill)
-  vendorId         String?
-  payee            String?
-  date             DateTime
-  categoryId       String?
-  paymentAccountId String?
-  amount           Decimal    @db.Decimal(15, 2)
-  status           BillStatus @default(draft)
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-
-  vendor           Contact?              @relation("VendorBills", fields: [vendorId], references: [id])
-  category         ChartOfAccountsEntry? @relation("CategoryBills", fields: [categoryId], references: [id])
-  paymentAccount   Account?              @relation("PaymentAccount", fields: [paymentAccountId], references: [id])
-}
-
-model ChartOfAccountsEntry {
-  id          String      @id @default(cuid())
-  code        String      @unique
+  code        String
   name        String
-  type        AccountType
-  detailType  String
-  description String?
+  type        GLType
+  detailType  String?
   parentCode  String?
-  balance     Decimal     @default(0) @db.Decimal(15, 2)
-  active      Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  description String?
+  balance     Decimal  @default(0) @db.Decimal(14, 2)
+  active      Boolean  @default(true)
 
-  categoryTransactions  Transaction[] @relation("CategoryTransactions")
-  suggestedTransactions Transaction[] @relation("SuggestedCategoryTransactions")
-  categoryBills         Bill[]        @relation("CategoryBills")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions Transaction[]  @relation("TransactionCategory")
+  billLines    BillLineItem[] @relation("BillLineCategory")
+  lineItems    InvoiceLineItem[] @relation("InvoiceLineCategory")
+
+  @@unique([companyId, code])
+  @@index([companyId, type])
+  @@index([parentCode])
 }
 
-model MonthlySnapshot {
-  id         String   @id @default(cuid())
-  label      String   // short month label, e.g. "May"
-  periodKey  String   @unique // sortable key, e.g. "2026-05"
-  cashOnHand Decimal  @db.Decimal(15, 2)
-  income     Decimal  @db.Decimal(15, 2)
-  expenses   Decimal  @db.Decimal(15, 2)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+enum GLType {
+  asset
+  liability
+  equity
+  income
+  expense
+}
+
+// ─── FINANCIAL ACCOUNTS (bank / credit card / clearing) ─────
+
+model FinancialAccount {
+  id             String       @id @default(cuid())
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id])
+
+  name           String
+  mask           String?
+  kind           AccountKind
+  currentBalance Decimal      @default(0) @db.Decimal(14, 2)
+  glAccountCode  String?      // e.g. "1010" — manual reference to ChartOfAccount.code
+
+  syncStatus      SyncStatus @default(manual)
+  lastSyncedAt    DateTime?
+  plaidItemId     String?
+  plaidAccessToken String?
+
+  displayColor   String?
+  logoInitials   String?
+  isActive       Boolean     @default(true)
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  transactions   Transaction[]  @relation("TxAccount")
+  imports        ImportBatch[]
+  bills          Bill[]         @relation("BillPaymentAccount")
+  columnMappings ColumnMapping[]
+  invoicePayments Invoice[]     @relation("InvoicePaymentAccount")
+
+  @@index([companyId])
 }
 
 enum AccountKind {
   checking
   savings
-  credit_card
-  payout_clearing
+  creditcard
+  payoutclearing
 }
 
-enum TransactionStatus {
-  to_review
+enum SyncStatus {
+  manual
+  connected
+  error
+  paused
+}
+
+// ─── COLUMN MAPPING PROFILES ────────────────────────────────
+
+model ColumnMapping {
+  id                  String           @id @default(cuid())
+  financialAccountId  String
+  account             FinancialAccount @relation(fields: [financialAccountId], references: [id])
+
+  profileName         String?
+  dateColumn          String
+  descriptionColumn   String
+  amountColumn        String?
+  debitColumn         String?
+  creditColumn        String?
+  balanceColumn       String?
+  signDirection       SignDirection    @default(normal)
+  skipRows            Int              @default(0)
+  dateFormat          String           @default("yyyy-MM-dd")
+
+  createdAt           DateTime         @default(now())
+
+  importBatches       ImportBatch[]
+
+  @@unique([financialAccountId, profileName])
+}
+
+enum SignDirection {
+  normal
+  inverted
+}
+
+// ─── TRANSACTIONS (bank / card line items) ──────────────────
+
+model Transaction {
+  id                 String        @id @default(cuid())
+  companyId          String
+  company            Company       @relation(fields: [companyId], references: [id])
+
+  financialAccountId String
+  account            FinancialAccount @relation("TxAccount", fields: [financialAccountId], references: [id])
+
+  date               DateTime
+  description        String
+  merchant           String?
+  rawStatementText   String?
+  amount             Decimal       @db.Decimal(14, 2)
+  currency           String        @default("USD")
+
+  categoryId         String?
+  category           ChartOfAccount? @relation("TransactionCategory", fields: [categoryId], references: [id])
+  suggestedCategoryId String?
+
+  status             TxStatus      @default(toreview)
+  excludeReason      String?
+  matchRef           String?
+  reconciledAt       DateTime?
+  reconciledBy       String?
+
+  importBatchId      String?
+  importBatch        ImportBatch?   @relation(fields: [importBatchId], references: [id])
+  source             TxSource      @default(manual)
+
+  transferMatch      TransferMatch? @relation("Transfers")
+  inflowTransferMatch TransferMatch? @relation("TransferInflow")
+  transferMatchId    String?        // set by transfer matching engine
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([companyId, financialAccountId, date])
+  @@index([status])
+  @@index([categoryId])
+  @@index([importBatchId])
+}
+
+enum TxStatus {
+  toreview
   categorized
   excluded
+  transfer
+  reconciled
 }
 
-enum TransactionSource {
+enum TxSource {
   feed
   csv
   ofx
   pdf
   manual
+}
+
+// ─── TRANSFER MATCHING ──────────────────────────────────────
+
+model TransferMatch {
+  id              String        @id @default(cuid())
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id])
+
+  outflowTxId     String        @unique
+  inflowTxId      String        @unique
+  amount          Decimal       @db.Decimal(14, 2)
+
+  matchDate       DateTime
+  matchConfidence Decimal       @default(1.0) @db.Decimal(3, 2)
+  confirmed       Boolean       @default(false)
+  confirmedAt     DateTime?
+  confirmedBy     String?
+
+  journalEntryId  String?       @unique
+  journalEntry    JournalEntry?
+
+  createdAt       DateTime      @default(now())
+
+  outflowTx       Transaction   @relation("Transfers", fields: [outflowTxId], references: [id])
+  inflowTx        Transaction   @relation("TransferInflow", fields: [inflowTxId], references: [id])
+
+  @@index([companyId, confirmed])
+}
+
+// ─── CONTACTS ───────────────────────────────────────────────
+
+model Contact {
+  id                String        @id @default(cuid())
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id])
+
+  name              String
+  companyName       String?
+  type              ContactType
+  email             String?
+  phone             String?
+  address           String?
+  outstandingBalance Decimal      @default(0) @db.Decimal(14, 2)
+  status            ContactStatus @default(active)
+  notes             String?
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  invoices          Invoice[]     @relation("InvoiceCustomer")
+  bills             Bill[]        @relation("BillVendor")
+
+  @@index([companyId, type])
+  @@index([companyId, status])
 }
 
 enum ContactType {
@@ -168,11 +290,108 @@ enum ContactStatus {
   inactive
 }
 
+// ─── INVOICES ──────────────────────────────────────────────
+
+model Invoice {
+  id              String      @id
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id])
+
+  customerId      String
+  customer        Contact     @relation("InvoiceCustomer", fields: [customerId], references: [id])
+
+  issueDate       DateTime
+  dueDate         DateTime
+  terms           String?
+  currency        String      @default("USD")
+
+  subtotal        Decimal     @db.Decimal(14, 2)
+  taxRate         Decimal?    @default(0) @db.Decimal(5, 3)
+  taxAmount       Decimal     @default(0) @db.Decimal(14, 2)
+  total           Decimal     @db.Decimal(14, 2)
+
+  status          InvoiceStatus @default(draft)
+  sentAt          DateTime?
+  paidAt          DateTime?
+  paidAmount      Decimal     @default(0) @db.Decimal(14, 2)
+
+  notes           String?
+  paymentAccountId String?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  paymentAccount  FinancialAccount? @relation("InvoicePaymentAccount", fields: [paymentAccountId], references: [id])
+  lineItems       InvoiceLineItem[]
+
+  @@index([companyId, customerId])
+  @@index([companyId, status])
+  @@index([issueDate])
+}
+
 enum InvoiceStatus {
   draft
   sent
   paid
   overdue
+  void
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  description String
+  quantity    Decimal  @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal  @db.Decimal(14, 2)
+  amount      Decimal  @db.Decimal(14, 2)
+  categoryId  String?
+  category    ChartOfAccount? @relation("InvoiceLineCategory", fields: [categoryId], references: [id])
+
+  sortOrder   Int      @default(0)
+}
+
+// ─── BILLS & EXPENSES ──────────────────────────────────────
+
+model Bill {
+  id              String      @id
+  companyId       String
+  company         Company     @relation(fields: [companyId], references: [id])
+
+  kind            BillKind
+  vendorId        String
+  vendor          Contact     @relation("BillVendor", fields: [vendorId], references: [id])
+
+  billDate        DateTime
+  dueDate         DateTime?
+  terms           String?
+  referenceNo     String?
+
+  subtotal        Decimal     @db.Decimal(14, 2)
+  taxRate         Decimal?    @default(0) @db.Decimal(5, 3)
+  taxAmount       Decimal     @default(0) @db.Decimal(14, 2)
+  total           Decimal     @db.Decimal(14, 2)
+  currency        String      @default("USD")
+
+  status          BillStatus  @default(draft)
+
+  paymentAccountId String?
+  paidAt          DateTime?
+  paidAmount      Decimal     @default(0) @db.Decimal(14, 2)
+
+  notes           String?
+  attachments     String[]    @default([])
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  paymentAccount  FinancialAccount? @relation("BillPaymentAccount", fields: [paymentAccountId], references: [id])
+  lineItems       BillLineItem[]
+
+  @@index([companyId, vendorId])
+  @@index([companyId, kind])
+  @@index([companyId, status])
 }
 
 enum BillKind {
@@ -185,12 +404,109 @@ enum BillStatus {
   open
   paid
   overdue
+  void
 }
 
-enum AccountType {
-  asset
-  liability
-  equity
-  income
-  expense
+model BillLineItem {
+  id          String   @id @default(cuid())
+  billId      String
+  bill        Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  description String
+  amount      Decimal  @db.Decimal(14, 2)
+  categoryId  String?
+  category    ChartOfAccount? @relation("BillLineCategory", fields: [categoryId], references: [id])
+
+  sortOrder   Int      @default(0)
+}
+
+// ─── DOUBLE-ENTRY JOURNAL ──────────────────────────────────
+
+model JournalEntry {
+  id              String        @id @default(cuid())
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id])
+
+  entryDate       DateTime
+  description     String
+  sourceType      JournalSource
+  sourceId        String?
+
+  lines           JournalLine[]
+
+  transferMatchId String?       @unique
+  transferMatch   TransferMatch? @relation(fields: [transferMatchId], references: [id])
+
+  createdBy       String?
+  createdAt       DateTime      @default(now())
+
+  @@index([companyId, entryDate])
+  @@index([sourceType, sourceId])
+}
+
+enum JournalSource {
+  invoice
+  bill
+  payment
+  transfer
+  manual
+}
+
+model JournalLine {
+  id              String        @id @default(cuid())
+  journalEntryId  String
+  journalEntry    JournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  glAccountCode   String        // e.g. "1010" — manual reference to ChartOfAccount.code
+  description     String?
+  debit           Decimal       @default(0) @db.Decimal(14, 2)
+  credit          Decimal       @default(0) @db.Decimal(14, 2)
+
+  @@index([glAccountCode])
+}
+
+// ─── IMPORT BATCHES ────────────────────────────────────────
+
+model ImportBatch {
+  id                   String           @id @default(cuid())
+  companyId            String
+  company              Company          @relation(fields: [companyId], references: [id])
+
+  financialAccountId   String
+  account              FinancialAccount @relation(fields: [financialAccountId], references: [id])
+
+  fileName             String
+  fileType             TxSource
+  fileSize             Int?
+
+  rowsParsed           Int
+  rowsImported         Int
+  duplicatesFound      Int              @default(0)
+  dateRangeStart       DateTime?
+  dateRangeEnd         DateTime?
+
+  columnMappingId      String?
+  columnMapping        ColumnMapping?   @relation(fields: [columnMappingId], references: [id])
+  mappingConfirmed     Boolean          @default(false)
+  importConfirmed      Boolean          @default(false)
+
+  errors               Json?
+
+  status               ImportStatus     @default(draft)
+
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  transactions         Transaction[]
+
+  @@index([companyId, financialAccountId])
+  @@index([status])
+}
+
+enum ImportStatus {
+  draft
+  mapped
+  confirmed
+  imported
+  error
 }
