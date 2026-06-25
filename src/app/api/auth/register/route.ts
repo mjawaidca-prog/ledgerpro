@@ -54,17 +54,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Hash password
+    const passwordHash = await hash(password, 12);
+
+    // Find free trial plan (outside transaction)
+    const freePlan = await db.plan.findFirst({
+      where: { name: 'Free Trial' },
+    });
+    if (!freePlan) throw new Error('No free trial plan found. Run seed first.');
+
     // Create everything in a transaction
     const result = await db.$transaction(async (tx) => {
-      // Hash password
-      const passwordHash = await hash(password, 12);
-
-      // Find free trial plan
-      const freePlan = await tx.plan.findFirst({
-        where: { name: 'Free Trial' },
-      });
-      if (!freePlan) throw new Error('No free trial plan found');
-
       // Create user
       const user = await tx.user.create({
         data: { name, email, passwordHash },
