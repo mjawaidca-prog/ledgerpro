@@ -89,15 +89,16 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    function sourceLink(sourceType: string, sourceId: string | null): string | null {
-      if (!sourceId) return null;
+    function sourceLink(sourceType: string, sourceId: string | null, journalEntryId: string): string | null {
+      // For all types, the journal entry itself is always linkable
+      if (sourceType === 'manual') return `/journal/${journalEntryId}`;
+      if (!sourceId) return `/journal/${journalEntryId}`; // fallback: link to journal entry
       switch (sourceType) {
         case 'invoice': return `/invoices/${sourceId}`;
         case 'bill': return `/expenses/${sourceId}`;
-        case 'payment': return sourceId?.startsWith('BILL') ? `/expenses/${sourceId}` : `/invoices/${sourceId}`;
-        case 'transfer': return null;
-        case 'manual': return null;
-        default: return null;
+        case 'payment': return sourceId.startsWith('BILL') ? `/expenses/${sourceId}` : `/invoices/${sourceId}`;
+        case 'transfer': return `/journal/${journalEntryId}`;
+        default: return `/journal/${journalEntryId}`;
       }
     }
 
@@ -120,7 +121,7 @@ export async function GET(req: NextRequest) {
         description: line.description || entry.description,
         sourceType: entry.sourceType,
         sourceId: entry.sourceId,
-        sourceLink: sourceLink(entry.sourceType, entry.sourceId),
+        sourceLink: sourceLink(entry.sourceType, entry.sourceId, entry.id),
         debit: Number(line.debit),
         credit: Number(line.credit),
         glAccountCode: line.glAccountCode,
