@@ -30,7 +30,7 @@ const reports = [
     href: '/reports/cash-flow',
     icon: BarChart3,
     color: 'bg-[var(--warning-soft)] text-[var(--warning)]',
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     title: 'Accounts Receivable Aging',
@@ -38,7 +38,7 @@ const reports = [
     href: '/reports/ar-aging',
     icon: FileText,
     color: 'bg-[var(--danger-soft)] text-[var(--danger)]',
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     title: 'Accounts Payable Aging',
@@ -46,7 +46,7 @@ const reports = [
     href: '/reports/ap-aging',
     icon: Receipt,
     color: 'bg-[var(--warning-soft)] text-[var(--warning)]',
-    comingSoon: true,
+    comingSoon: false,
   },
   {
     title: 'Expense by Category',
@@ -54,7 +54,7 @@ const reports = [
     href: '/reports/expense-breakdown',
     icon: TrendingDown,
     color: 'bg-[var(--danger-soft)] text-[var(--danger)]',
-    comingSoon: true,
+    comingSoon: false,
   },
 ];
 
