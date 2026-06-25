@@ -11,7 +11,7 @@ import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import {
-  Building2, CreditCard, Plus, Upload, Search, Check, X, ArrowRightLeft,
+  Building2, CreditCard, Plus, Upload, Search, Check, X, ArrowRightLeft, FileText,
   Loader2, ChevronDown, FileUp, AlertTriangle, MoreHorizontal,
 } from 'lucide-react';
 
@@ -140,6 +140,32 @@ export default function BankingPage() {
   }, [fetchTransactions]);
 
   // ─── Transaction actions ───
+
+  const [postingGL, setPostingGL] = useState(false);
+
+  async function postToGL() {
+    const categorized = transactions.filter((t) => t.status === 'categorized');
+    if (categorized.length === 0) {
+      setToast({ message: 'No categorized transactions to post', type: 'danger' });
+      return;
+    }
+    setPostingGL(true);
+    try {
+      const res = await fetch('/api/transactions/post-gl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionIds: categorized.map((t) => t.id) }),
+      });
+      const json = await res.json();
+      setToast({ message: `Posted ${json.data.posted} transactions to General Ledger`, type: 'success' });
+      fetchTransactions();
+      fetchAccounts();
+    } catch {
+      setToast({ message: 'Failed to post to GL', type: 'danger' });
+    } finally {
+      setPostingGL(false);
+    }
+  }
 
   async function categorizeTransaction(txId: string, categoryId: string) {
     try {
@@ -341,9 +367,15 @@ export default function BankingPage() {
           <p className="sub">Review, categorize, and reconcile transactions.</p>
         </div>
         <div className="spacer" />
-        <Button onClick={openWizard}>
-          <Upload size={16} /> Import Statement
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={postToGL} disabled={postingGL}>
+            {postingGL ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+            Post to GL
+          </Button>
+          <Button onClick={openWizard}>
+            <Upload size={16} /> Import Statement
+          </Button>
+        </div>
       </div>
 
       {/* Account cards */}
