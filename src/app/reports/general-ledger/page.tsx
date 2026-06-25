@@ -7,7 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format, startOfMonth, endOfMonth, subMonths, startOfYear, startOfQuarter, endOfQuarter } from 'date-fns';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar, Download } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar, Download, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { exportGL } from '@/lib/export';
 
 interface GLRow {
@@ -24,11 +24,23 @@ interface GLRow {
   contraAccounts: { code: string; description: string | null; debit: number; credit: number; link: string }[];
 }
 
+interface GLGroup {
+  glAccountCode: string;
+  accountName: string;
+  accountType: string;
+  entryCount: number;
+  totalDebit: number;
+  totalCredit: number;
+  netChange: number;
+  link: string;
+}
+
 interface GLData {
   account: { code: string; name: string; type: string } | null;
   period: { startDate: string; endDate: string };
   balances: { opening: number; closing: number };
   rows: GLRow[];
+  grouped: GLGroup[] | null;
   totals: { debits: number; credits: number };
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
@@ -189,7 +201,53 @@ function GLContent() {
         </div>
       )}
 
-      {/* GL Lines */}
+      {/* Grouped view — all accounts */}
+      {data.grouped && data.grouped.length > 0 && (
+        <Card>
+          <CardHeader><h2 className="text-sm font-semibold text-[var(--text-strong)]">General Ledger — All Accounts ({data.grouped.length} active)</h2></CardHeader>
+          <CardBody className="p-0">
+            <div className="divide-y divide-[var(--border)]">
+              {data.grouped.map((g) => (
+                <div
+                  key={g.glAccountCode}
+                  onClick={() => router.push(g.link)}
+                  className="flex items-center gap-4 px-5 py-3.5 hover:bg-[var(--primary-soft)] cursor-pointer transition-colors group"
+                >
+                  <div className={cn(
+                    'w-2 h-2 rounded-full shrink-0',
+                    g.accountType === 'asset' || g.accountType === 'expense' ? 'bg-[var(--primary)]' : 'bg-[var(--success)]'
+                  )} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-[var(--text-strong)] group-hover:text-[var(--primary)] transition-colors">
+                      {g.glAccountCode} — {g.accountName}
+                    </div>
+                    <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                      {g.entryCount} entr{g.entryCount !== 1 ? 'ies' : 'y'} · {g.accountType}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-mono tabular-nums font-medium text-[var(--text)]">
+                      {g.netChange !== 0 && (
+                        <span className={g.netChange >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}>
+                          {g.netChange >= 0 ? '+' : '−'}{money(Math.abs(g.netChange))}
+                        </span>
+                      )}
+                      {g.netChange === 0 && <span className="text-[var(--text-faint)]">—</span>}
+                    </div>
+                    <div className="text-xs text-[var(--text-faint)]">
+                      D {money(g.totalDebit)} / C {money(g.totalCredit)}
+                    </div>
+                  </div>
+                  <ExternalLink size={14} className="text-[var(--text-faint)] opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                </div>
+              ))}
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Detail Lines — single account */}
+      {data.rows && data.rows.length > 0 && (
       <Card>
         <CardBody className="p-0">
           <div className="overflow-x-auto">
@@ -267,6 +325,12 @@ function GLContent() {
           </div>
         </CardBody>
       </Card>
+      )}
+
+      {/* Empty state when no data at all */}
+      {(!data.grouped || data.grouped.length === 0) && (!data.rows || data.rows.length === 0) && (
+        <Card><CardBody className="p-12 text-center text-[var(--text-muted)]">No journal entries found for the selected period.</CardBody></Card>
+      )}
 
       {/* Pagination */}
       {data.pagination.totalPages > 1 && (

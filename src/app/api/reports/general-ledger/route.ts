@@ -144,6 +144,46 @@ export async function GET(req: NextRequest) {
     const closingBalance = rows.length > 0 ? rows[rows.length - 1].balance : openingBalance;
     const total = periodLines.length;
 
+    // When viewing ALL accounts (no code filter), group by GL account
+    let grouped: any[] | null = null;
+    if (!code) {
+      // Get all unique account codes in this period
+      const allCodes = [...new Set(periodLines.map((l) => l.glAccountCode))];
+      const allAccounts = await db.chartOfAccount.findMany({
+        where: { code: { in: allCodes } },
+        select: { code: true, name: true, type: true },
+      });
+      const acctMap = new Map(allAccounts.map((a) => [a.code, a]));
+
+      // Group lines by account code
+      const groups: Record<string, { lines: typeof periodLines; totalDebit: number; totalCredit: number }> = {};
+      for (const line of periodLines) {
+        if (!groups[line.glAccountCode]) groups[line.glAccountCode] = { lines: [], totalDebit: 0, totalCredit: 0 };
+        groups[line.glAccountCode].lines.push(line);
+        groups[line.glAccountCode].totalDebit += Number(line.debit);
+        groups[line.glAccountCode].totalCredit += Number(line.credit);
+      }
+
+      grouped = Object.entries(groups)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([glCode, g]) => {
+          const acct = acctMap.get(glCode);
+          const net = g.totalDebit - g.totalCredit;
+          const acctType = acct?.type || 'expense';
+          const balanceEffect = (acctType === 'asset' || acctType === 'expense') ? net : -net;
+          return {
+            glAccountCode: glCode,
+            accountName: acct?.name || glCode,
+            accountType: acctType,
+            entryCount: g.lines.length,
+            totalDebit: Math.round(g.totalDebit * 100) / 100,
+            totalCredit: Math.round(g.totalCredit * 100) / 100,
+            netChange: Math.round(balanceEffect * 100) / 100,
+            link: `/reports/general-ledger?code=${glCode}&name=${encodeURIComponent(acct?.name || '')}`,
+          };
+        });
+    }
+
     return NextResponse.json({
       data: {
         account: account ? { code: account.code, name: account.name, type: account.type } : null,
@@ -152,7 +192,8 @@ export async function GET(req: NextRequest) {
           opening: Math.round(openingBalance * 100) / 100,
           closing: closingBalance,
         },
-        rows,
+        rows: code ? rows : [],
+        grouped: code ? null : grouped,
         totals: { debits: totalDebits, credits: totalCredits },
         pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       },
