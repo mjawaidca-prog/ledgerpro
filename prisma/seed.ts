@@ -6,25 +6,79 @@ const db = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding Northwind Trading with full audit trail...\n');
 
+  // ─── Plans ───
+
+  const plans = await Promise.all([
+    db.plan.upsert({ where: { id: 'plan_free' }, update: {}, create: { id: 'plan_free', name: 'Free Trial', monthlyPrice: 0, annualPrice: 0, maxUsers: 1, maxCompanies: 1, maxTransactions: 100, maxBankAccounts: 1, csvExport: true, pdfReports: false, bankFeeds: false, customReports: false, prioritySupport: false, whiteLabel: false } }),
+    db.plan.upsert({ where: { id: 'plan_basic' }, update: {}, create: { id: 'plan_basic', name: 'Basic', stripePriceId: 'price_basic_monthly', monthlyPrice: 29, annualPrice: 290, maxUsers: 2, maxCompanies: 1, maxTransactions: 1000, maxBankAccounts: 3, csvExport: true, pdfReports: true, bankFeeds: false, customReports: false, prioritySupport: false, whiteLabel: false } }),
+    db.plan.upsert({ where: { id: 'plan_pro' }, update: {}, create: { id: 'plan_pro', name: 'Pro', stripePriceId: 'price_pro_monthly', monthlyPrice: 79, annualPrice: 790, maxUsers: 10, maxCompanies: 5, maxTransactions: 10000, maxBankAccounts: 10, csvExport: true, pdfReports: true, bankFeeds: true, customReports: true, prioritySupport: true, whiteLabel: false } }),
+    db.plan.upsert({ where: { id: 'plan_enterprise' }, update: {}, create: { id: 'plan_enterprise', name: 'Enterprise', stripePriceId: 'price_enterprise_monthly', monthlyPrice: 199, annualPrice: 1990, maxUsers: 50, maxCompanies: 25, maxTransactions: 100000, maxBankAccounts: 50, csvExport: true, pdfReports: true, bankFeeds: true, customReports: true, prioritySupport: true, whiteLabel: true } }),
+  ]);
+  console.log(`  ✓ ${plans.length} subscription plans`);
+
   // ─── User & Company ───
 
   const passwordHash = await hash('ledgerpro2026', 12);
+
+  // Demo user 1: Rosa at Northwind Trading
   const user = await db.user.upsert({
     where: { email: 'rosa@northwindtrading.com' },
     update: {},
     create: { name: 'Rosa Alvarez', email: 'rosa@northwindtrading.com', passwordHash },
   });
   const company = await db.company.upsert({
-    where: { ownerId: user.id },
+    where: { id: 'northwind_main' },
     update: {},
     create: {
+      id: 'northwind_main',
       name: 'Northwind Trading', legalName: 'Northwind Trading LLC',
       fiscalYearStart: new Date('2026-01-01'), currency: 'USD',
-      locale: 'en-US', timezone: 'America/Edmonton', ownerId: user.id,
+      locale: 'en-US', timezone: 'America/Edmonton',
     },
   });
+  // Create membership instead of owner relation
+  await db.membership.upsert({
+    where: { userId_companyId: { userId: user.id, companyId: company.id } },
+    update: {},
+    create: { userId: user.id, companyId: company.id, role: 'owner' },
+  });
+  // Create trial subscription
+  const trialEnd = new Date(); trialEnd.setDate(trialEnd.getDate() + 30);
+  const periodEnd = new Date(); periodEnd.setMonth(periodEnd.getMonth() + 1);
+  await db.subscription.upsert({
+    where: { id: 'sub_northwind' },
+    update: {},
+    create: { id: 'sub_northwind', companyId: company.id, planId: 'plan_pro', status: 'trialing', trialEndsAt: trialEnd, currentPeriodStart: new Date(), currentPeriodEnd: periodEnd },
+  });
   const cid = company.id;
-  console.log(`  ✓ User: ${user.email} / password: ledgerpro2026`);
+  console.log(`  ✓ User: ${user.email} / password: ledgerpro2026 | Company: ${company.name} (Pro trial)`);
+
+  // Demo user 2: Accountant with multiple companies
+  const accountantHash = await hash('demo2026', 12);
+  const accountant = await db.user.upsert({
+    where: { email: 'accountant@nexvarelab.com' },
+    update: {},
+    create: { name: 'Alex Morgan', email: 'accountant@nexvarelab.com', passwordHash: accountantHash },
+  });
+  // Create 2 additional companies for the accountant
+  const company2 = await db.company.upsert({
+    where: { id: 'atlas_logistics' },
+    update: {},
+    create: { id: 'atlas_logistics', name: 'Atlas Logistics', fiscalYearStart: new Date('2026-01-01'), currency: 'USD', locale: 'en-US', timezone: 'America/Chicago' },
+  });
+  const company3 = await db.company.upsert({
+    where: { id: 'brightline_studio' },
+    update: {},
+    create: { id: 'brightline_studio', name: 'Brightline Studio', fiscalYearStart: new Date('2026-01-01'), currency: 'USD', locale: 'en-US', timezone: 'America/Los_Angeles' },
+  });
+  for (const c of [company, company2, company3]) {
+    await db.membership.upsert({
+      where: { userId_companyId: { userId: accountant.id, companyId: c.id } },
+      update: {},
+      create: { userId: accountant.id, companyId: c.id, role: c.id === company.id ? 'bookkeeper' : 'owner' },
+    });
+  }
+  console.log(`  ✓ Accountant: ${accountant.email} / password: demo2026 | 3 companies`);
 
   // ─── Clear existing data for clean re-seed ───
   await db.journalLine.deleteMany({ where: { journalEntry: { companyId: cid } } });

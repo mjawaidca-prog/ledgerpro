@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { Loader2 } from 'lucide-react';
@@ -95,6 +96,12 @@ export default function LoginPage() {
           </form>
         </div>
 
+        <p className="text-center text-xs text-[var(--text-muted)] mt-4">
+          Don&apos;t have an account?{' '}
+          <Link href="/register" className="text-[var(--accent)] hover:text-[var(--primary)] font-medium">
+            Create free account
+          </Link>
+        </p>
         <p className="text-center text-xs text-[var(--text-faint)] mt-6">
           LedgerPro — Small-business accounting
         </p>

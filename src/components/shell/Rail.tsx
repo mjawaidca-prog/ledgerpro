@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
+import { CompanySwitcher } from './CompanySwitcher';
+import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard,
   FileText,
@@ -11,12 +13,13 @@ import {
   BookOpen,
   BarChart3, Scale,
   Users,
-  ChevronDown,
+  LogOut,
 } from 'lucide-react';
 
 interface RailProps {
   companyName: string;
   companyPlan: string;
+  companyId: string | null;
   userName: string;
   userEmail: string;
 }
@@ -33,22 +36,16 @@ const navItems = [
   { href: '/contacts',      label: 'Contacts',           icon: Users },
 ];
 
-export function Rail({ companyName, companyPlan, userName, userEmail }: RailProps) {
+export function Rail({ companyName, companyPlan, companyId, userName, userEmail }: RailProps) {
   const pathname = usePathname();
 
   return (
     <aside className="rail">
       {/* Org switcher */}
-      <button className="org-switch">
-        <div className="org-tile">N</div>
-        <div className="org-meta">
-          <span className="org-name">{companyName}</span>
-          <span className="org-plan">{companyPlan}</span>
-        </div>
-        <span className="chev">
-          <ChevronDown size={16} />
-        </span>
-      </button>
+      <CompanySwitcher
+        activeCompanyId={companyId}
+        activeCompanyName={companyName}
+      />
 
       {/* Navigation */}
       <nav className="rail-nav">
@@ -73,12 +70,19 @@ export function Rail({ companyName, companyPlan, userName, userEmail }: RailProp
       {/* User footer */}
       <div className="s-foot">
         <div className="s-user">
-          <div className="av">{userName.charAt(0)}</div>
-          <div>
+          <div className="av">{userName?.charAt(0) || '?'}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="un">{userName}</div>
             <div className="ue">{userEmail}</div>
           </div>
         </div>
+        <button
+          onClick={() => signOut({ callbackUrl: '/login' })}
+          className="nav-item"
+          style={{ width: '100%', marginTop: 4 }}
+        >
+          <LogOut size={18} /> Sign Out
+        </button>
       </div>
     </aside>
   );

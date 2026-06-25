@@ -14,16 +14,19 @@ datasource db {
 // ─── AUTH & ORGANIZATION ────────────────────────────────────
 
 model User {
-  id            String     @id @default(cuid())
-  name          String
-  email         String     @unique
-  emailVerified DateTime?
-  passwordHash  String?    // bcrypt hash
-  image         String?
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  id                     String     @id @default(cuid())
+  name                   String
+  email                  String     @unique
+  emailVerified          DateTime?
+  emailVerificationToken String?
+  passwordHash           String?    // bcrypt hash
+  image                  String?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
 
-  company Company? @relation("CompanyOwner")
+  memberships            Membership[]
+  auditLogs              AuditLog[]
+  notifications          Notification[]
 }
 
 model Company {
@@ -37,8 +40,8 @@ model Company {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  ownerId String @unique
-  owner   User   @relation("CompanyOwner", fields: [ownerId], references: [id])
+  memberships     Membership[]
+  subscriptions   Subscription[]
 
   contacts         Contact[]
   invoices         Invoice[]
@@ -49,6 +52,91 @@ model Company {
   journalEntries   JournalEntry[]
   importBatches    ImportBatch[]
   transferMatches  TransferMatch[]
+  auditLogs        AuditLog[]
+  budgets          Budget[]
+  periodCloses     PeriodClose[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  companyId String
+  role      UserRole @default(viewer)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, companyId])
+  @@index([companyId, role])
+}
+
+enum UserRole {
+  owner
+  admin
+  bookkeeper
+  viewer
+}
+
+// ─── SUBSCRIPTION & PLANS ───────────────────────────────────
+
+model Plan {
+  id            String   @id @default(cuid())
+  name          String   // "Free Trial", "Basic", "Pro", "Enterprise"
+  stripePriceId String?
+  monthlyPrice  Decimal  @db.Decimal(10, 2)
+  annualPrice   Decimal  @db.Decimal(10, 2)
+
+  maxUsers        Int     @default(1)
+  maxCompanies    Int     @default(1)
+  maxTransactions Int     @default(500)
+  maxBankAccounts Int     @default(1)
+  csvExport       Boolean @default(true)
+  pdfReports      Boolean @default(false)
+  bankFeeds       Boolean @default(false)
+  customReports   Boolean @default(false)
+  prioritySupport Boolean @default(false)
+  whiteLabel      Boolean @default(false)
+
+  features        Json?
+
+  subscriptions   Subscription[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Subscription {
+  id              String             @id @default(cuid())
+  companyId       String
+  company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planId          String
+  plan            Plan               @relation(fields: [planId], references: [id])
+
+  status          SubscriptionStatus @default(trialing)
+  trialEndsAt     DateTime?
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  canceledAt      DateTime?
+
+  stripeSubscriptionId String?
+  stripeCustomerId     String?
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([companyId])
+  @@index([status])
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+  expired
 }
 
 // ─── CHART OF ACCOUNTS (GL) ─────────────────────────────────
@@ -509,4 +597,120 @@ enum ImportStatus {
   confirmed
   imported
   error
+}
+
+// ─── AUDIT LOG ─────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  action      String      // e.g. "invoice.create", "transaction.categorize"
+  entityType  String      // "invoice", "transaction", "contact", "journal_entry"
+  entityId    String?
+  changes     Json?       // { before, after } diff
+  metadata    Json?       // IP, user agent, etc.
+
+  createdAt   DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([entityType, entityId])
+}
+
+// ─── BUDGETS ───────────────────────────────────────────────
+
+model Budget {
+  id            String       @id @default(cuid())
+  companyId     String
+  company       Company      @relation(fields: [companyId], references: [id])
+
+  name          String
+  fiscalYear    Int
+  period        BudgetPeriod // monthly, quarterly, annual
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  lines         BudgetLine[]
+
+  @@unique([companyId, name, fiscalYear])
+}
+
+model BudgetLine {
+  id            String   @id @default(cuid())
+  budgetId      String
+  budget        Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  glAccountCode String
+  amount        Decimal  @db.Decimal(14, 2)
+  period        String?  // e.g. "2026-01" for monthly
+
+  @@index([glAccountCode])
+}
+
+enum BudgetPeriod {
+  monthly
+  quarterly
+  annual
+}
+
+// ─── PERIOD CLOSE ──────────────────────────────────────────
+
+model PeriodClose {
+  id            String      @id @default(cuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id])
+
+  periodStart   DateTime
+  periodEnd     DateTime
+  closedBy      String?
+  closedAt      DateTime?
+
+  status        CloseStatus @default(draft)
+  notes         String?
+
+  createdAt     DateTime    @default(now())
+
+  @@unique([companyId, periodStart, periodEnd])
+}
+
+enum CloseStatus {
+  draft
+  closed
+  reopened
+}
+
+// ─── NOTIFICATIONS ─────────────────────────────────────────
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId   String
+
+  type        NotificationType
+  title       String
+  body        String
+  actionUrl   String?
+  read        Boolean          @default(false)
+
+  createdAt   DateTime         @default(now())
+
+  @@index([userId, read])
+  @@index([companyId, createdAt])
+}
+
+enum NotificationType {
+  invoice_overdue
+  bill_due
+  reconciliation_needed
+  import_complete
+  transfer_detected
+  period_close_reminder
+  subscription_expiring
+  member_joined
+  system
 }

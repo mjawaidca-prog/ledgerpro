@@ -4,16 +4,26 @@ import { NextResponse } from 'next/server';
 export default withAuth(
   function middleware(req) {
     const { pathname } = req.nextUrl;
+    const token = req.nextauth.token;
 
-    // Allow auth routes
-    if (pathname.startsWith('/api/auth') || pathname === '/login') {
+    // Allow public routes
+    if (
+      pathname === '/login' ||
+      pathname === '/register' ||
+      pathname.startsWith('/api/auth')
+    ) {
       return NextResponse.next();
     }
 
-    // API routes: inject companyId header for tenant isolation
+    // API routes: inject companyId + userId headers for tenant isolation
     if (pathname.startsWith('/api/')) {
       const requestHeaders = new Headers(req.headers);
-      requestHeaders.set('x-company-id', req.nextauth.token?.companyId as string);
+      if (token?.activeCompanyId) {
+        requestHeaders.set('x-company-id', token.activeCompanyId as string);
+      }
+      if (token?.id) {
+        requestHeaders.set('x-user-id', token.id as string);
+      }
 
       return NextResponse.next({
         request: { headers: requestHeaders },
@@ -26,8 +36,12 @@ export default withAuth(
     callbacks: {
       authorized: ({ token, req }) => {
         const { pathname } = req.nextUrl;
-        // Allow public paths
-        if (pathname === '/login' || pathname.startsWith('/api/auth')) {
+        // Allow public paths without authentication
+        if (
+          pathname === '/login' ||
+          pathname === '/register' ||
+          pathname.startsWith('/api/auth')
+        ) {
           return true;
         }
         return !!token;

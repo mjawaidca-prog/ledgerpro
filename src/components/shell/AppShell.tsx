@@ -8,6 +8,7 @@ import { Topbar } from './Topbar';
 interface AppShellProps {
   companyName: string;
   companyPlan?: string;
+  companyId?: string | null;
   userName?: string;
   userEmail?: string;
   children: React.ReactNode;
@@ -16,6 +17,7 @@ interface AppShellProps {
 export function AppShell({
   companyName,
   companyPlan = 'Business',
+  companyId = null,
   userName = 'Rosa Alvarez',
   userEmail = 'rosa@northwindtrading.com',
   children,
@@ -50,6 +52,7 @@ export function AppShell({
       <Rail
         companyName={companyName}
         companyPlan={companyPlan}
+        companyId={companyId}
         userName={userName}
         userEmail={userEmail}
       />

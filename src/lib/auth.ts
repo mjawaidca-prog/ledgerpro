@@ -4,7 +4,7 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { db } from '@/lib/db';
 import { compare } from 'bcryptjs';
 
-// Extend the built-in session types
+// Extend the built-in session types for multi-company
 declare module 'next-auth' {
   interface Session {
     user: {
@@ -12,16 +12,18 @@ declare module 'next-auth' {
       email: string;
       name: string;
       image?: string;
-      companyId: string;
-      companyName: string;
+      activeCompanyId: string | null;
+      activeCompanyName: string | null;
+      availableCompanies: { id: string; name: string; role: string }[];
     };
   }
 }
 
 declare module 'next-auth/jwt' {
   interface JWT {
-    companyId: string;
-    companyName: string;
+    activeCompanyId: string | null;
+    activeCompanyName: string | null;
+    availableCompanies: { id: string; name: string; role: string }[];
   }
 }
 
@@ -48,7 +50,11 @@ export const authOptions: NextAuthOptions = {
 
         const user = await db.user.findUnique({
           where: { email: credentials.email },
-          include: { company: true },
+          include: {
+            memberships: {
+              include: { company: true },
+            },
+          },
         });
 
         if (!user || !user.passwordHash) {
@@ -60,13 +66,21 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Invalid email or password');
         }
 
+        // Get first company (or null if no memberships)
+        const primaryMembership = user.memberships[0] || null;
+
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           image: user.image,
-          companyId: user.company?.id,
-          companyName: user.company?.name,
+          activeCompanyId: primaryMembership?.company?.id || null,
+          activeCompanyName: primaryMembership?.company?.name || null,
+          availableCompanies: user.memberships.map((m) => ({
+            id: m.company.id,
+            name: m.company.name,
+            role: m.role,
+          })),
         };
       },
     }),
@@ -75,15 +89,17 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.companyId = (user as any).companyId;
-        token.companyName = (user as any).companyName;
+        token.activeCompanyId = (user as any).activeCompanyId;
+        token.activeCompanyName = (user as any).activeCompanyName;
+        token.availableCompanies = (user as any).availableCompanies || [];
       }
       return token;
     },
     async session({ session, token }) {
       session.user.id = token.id as string;
-      session.user.companyId = token.companyId as string;
-      session.user.companyName = token.companyName as string;
+      session.user.activeCompanyId = token.activeCompanyId as string | null;
+      session.user.activeCompanyName = token.activeCompanyName as string | null;
+      session.user.availableCompanies = (token.availableCompanies as any[]) || [];
       return session;
     },
   },
