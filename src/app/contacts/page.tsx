@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { DataTable } from '@/components/ui/DataTable';
 import { Button } from '@/components/ui/Button';
@@ -72,6 +73,7 @@ function avatarColor(name: string, type: 'customer' | 'supplier'): string {
 // ─── Page ───
 
 export default function ContactsPage() {
+  const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -419,6 +421,7 @@ export default function ContactsPage() {
         columns={columns}
         data={contacts}
         rowKey={(row) => row.id}
+        onRowClick={(row) => router.push(`/contacts?id=${row.id}`)}
         emptyMessage={loading ? 'Loading...' : 'No contacts found.'}
       />
 

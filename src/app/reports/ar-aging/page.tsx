@@ -127,7 +127,7 @@ export default function ARAgingPage() {
               <div key={key} className="mb-4">
                 <div className={cn('text-sm font-semibold px-1 py-1', BUCKET_COLORS[key])}>{BUCKET_LABELS[key]} ({bucket.count})</div>
                 {bucket.invoices.map((inv) => (
-                  <div key={inv.id} className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-[var(--surface-3)] text-sm">
+                  <div key={inv.id} onClick={() => router.push(`/invoices/${inv.id}`)} className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-[var(--primary-soft)] text-sm cursor-pointer group transition-colors">
                     <div className="flex-1 min-w-0">
                       <span className="font-medium text-[var(--text-strong)]">{inv.customerName}</span>
                       <span className="text-[var(--text-muted)] ml-2">{inv.invoiceId}</span>

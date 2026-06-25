@@ -99,7 +99,7 @@ export default function CashFlowPage() {
         <CardBody>
           <div className="space-y-2">
             {data.monthly.map((m) => (
-              <div key={m.month} className="flex items-center gap-3">
+              <div key={m.month} onClick={() => router.push(`/reports/general-ledger?start=${m.month}-01&end=${m.month}-28`)} className="flex items-center gap-3 cursor-pointer hover:bg-[var(--primary-soft)] rounded px-1 py-0.5 transition-colors group">
                 <div className="w-10 text-xs text-[var(--text-muted)] text-right shrink-0">{new Date(m.month + '-01').toLocaleDateString('en-US', { month: 'short' })}</div>
                 <div className="flex-1 flex gap-0.5 h-6">
                   <div className="bg-[var(--success)] rounded-l-sm h-full transition-all" style={{ width: `${(m.inflow / maxAbs) * 100}%`, minWidth: m.inflow > 0 ? '2px' : '0' }} title={`Inflow: ${money(m.inflow)}`} />

@@ -132,9 +132,9 @@ export default function ProfitLossPage() {
             </CardHeader>
             <div className="divide-y divide-[var(--border)]">
               {data.revenue.map((item) => (
-                <div key={item.code} className="flex items-center gap-4 px-5 py-3">
+                <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
                   <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
-                  <span className="text-sm text-[var(--text-strong)] flex-1">{item.name}</span>
+                  <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{item.name}</span>
                   <span className="font-mono tabular-nums text-sm font-semibold text-[var(--text-strong)]">
                     {money(item.amount)}
                   </span>
@@ -176,9 +176,9 @@ export default function ProfitLossPage() {
               {data.expenses
                 .filter((e) => e.code !== '5000') // Exclude COGS
                 .map((item) => (
-                  <div key={item.code} className="flex items-center gap-4 px-5 py-3">
+                  <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
                     <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
-                    <span className="text-sm text-[var(--text-strong)] flex-1">
+                    <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">
                       {item.name}
                       {!item.amount && <span className="text-[var(--text-faint)] ml-2">— no activity</span>}
                     </span>

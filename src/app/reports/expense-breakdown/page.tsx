@@ -90,10 +90,10 @@ export default function ExpenseBreakdownPage() {
         <CardBody>
           <div className="space-y-3">
             {data.categories.map((cat) => (
-              <div key={cat.code}>
+              <div key={cat.code} onClick={() => router.push(`/reports/general-ledger?code=${cat.code}&name=${encodeURIComponent(cat.name)}`)} className="cursor-pointer group">
                 <div className="flex items-center justify-between text-sm mb-1">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium text-[var(--text-strong)] truncate">{cat.name}</span>
+                    <span className="font-medium text-[var(--text-strong)] truncate group-hover:text-[var(--primary)] transition-colors">{cat.name}</span>
                     <span className="text-xs text-[var(--text-faint)] shrink-0">{cat.code}</span>
                   </div>
                   <div className="flex items-center gap-3 ml-4 shrink-0">
