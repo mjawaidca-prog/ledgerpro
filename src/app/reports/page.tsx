@@ -6,10 +6,24 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
-  ArrowRight, Receipt, Building2,
+  ArrowRight, Receipt, Building2, Scale, BookOpen,
 } from 'lucide-react';
 
 const reports = [
+  {
+    title: 'Trial Balance',
+    description: 'All GL accounts with debit and credit balances — the foundation of double-entry accounting.',
+    href: '/reports/trial-balance',
+    icon: Scale,
+    color: 'bg-[var(--success-soft)] text-[var(--success)]',
+  },
+  {
+    title: 'General Ledger',
+    description: 'Full transaction history for any account with running balance and source links.',
+    href: '/reports/general-ledger',
+    icon: BookOpen,
+    color: 'bg-[var(--primary-soft)] text-[var(--accent)]',
+  },
   {
     title: 'Profit & Loss',
     description: 'Revenue, expenses, and net income over a period.',
