@@ -396,27 +396,6 @@ async function main() {
       ]},
     },
   });
-  await postJE(new Date('2026-05-20'), 'Bill BILL-2044 — AWS (cloud hosting May)',
-    'bill', 'BILL-2044', [
-    { code: '6100', debit: 1884.30, credit: 0, description: 'AWS cloud hosting' },
-    { code: '2200', debit: 0, credit: 2044.47, description: 'AP for BILL-2044' },
-    { code: '6100', debit: 0, credit: 0, description: 'dummy' }, // tax handled via AP net — simplified
-  ]);
-  // Fix: the tax goes to expense too for simplicity
-  await postJE(new Date('2026-05-20'), 'Bill BILL-2044 tax — AWS',
-    'bill', 'BILL-2044-tax', [
-    { code: '6100', debit: 160.17, credit: 0 },
-    { code: '2200', debit: 0, credit: 0 }, // net zero — corrected below
-  ]);
-  // Actually let me fix: the first JE has AP credit = 2044.47 but expense debit only 1884.30. Need to fix.
-  // Delete the bad entries and redo properly.
-  await db.journalLine.deleteMany({ where: { journalEntry: { sourceId: { in: ['BILL-2044', 'BILL-2044-tax'] } } } });
-  await db.journalEntry.deleteMany({ where: { sourceId: { in: ['BILL-2044', 'BILL-2044-tax'] } } });
-  // Reverse the balance effects
-  await db.chartOfAccount.update({ where: { id: accounts['6100'].id }, data: { balance: { increment: new Prisma.Decimal(-1884.30 - 160.17) } } });
-  await db.chartOfAccount.update({ where: { id: accounts['2200'].id }, data: { balance: { increment: new Prisma.Decimal(2044.47) } } });
-
-  // Redo properly:
   await postJE(new Date('2026-05-20'), 'Bill BILL-2044 — AWS (cloud hosting)', 'bill', 'BILL-2044', [
     { code: '6100', debit: 1884.30, credit: 0, description: 'AWS cloud hosting' },
     { code: '6100', debit: 160.17, credit: 0, description: 'Sales tax on AWS' },

@@ -94,7 +94,7 @@ export async function GET(req: NextRequest) {
       switch (sourceType) {
         case 'invoice': return `/invoices/${sourceId}`;
         case 'bill': return `/expenses/${sourceId}`;
-        case 'payment': return `/invoices/${sourceId}`;
+        case 'payment': return sourceId?.startsWith('BILL') ? `/expenses/${sourceId}` : `/invoices/${sourceId}`;
         case 'transfer': return null;
         case 'manual': return null;
         default: return null;
