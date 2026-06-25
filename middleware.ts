@@ -18,11 +18,13 @@ export default withAuth(
     // API routes: inject companyId + userId headers for tenant isolation
     if (pathname.startsWith('/api/')) {
       const requestHeaders = new Headers(req.headers);
-      if (token?.activeCompanyId) {
-        requestHeaders.set('x-company-id', token.activeCompanyId as string);
+      // Support both old and new JWT formats
+      const companyId = (token as any)?.activeCompanyId || (token as any)?.companyId;
+      if (companyId) {
+        requestHeaders.set('x-company-id', companyId as string);
       }
-      if (token?.id) {
-        requestHeaders.set('x-user-id', token.id as string);
+      if (token?.id || (token as any)?.sub) {
+        requestHeaders.set('x-user-id', (token?.id || (token as any)?.sub) as string);
       }
 
       return NextResponse.next({
