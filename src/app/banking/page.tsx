@@ -96,9 +96,9 @@ export default function BankingPage() {
     try {
       const res = await fetch('/api/accounts');
       const json = await res.json();
-      setAccounts(json.data);
+      setAccounts(Array.isArray(json.data) ? json.data : []);
     } catch {
-      // ignore
+      setAccounts([]);
     }
   }, []);
 
@@ -113,9 +113,9 @@ export default function BankingPage() {
 
       const res = await fetch(`/api/transactions?${params.toString()}`);
       const json = await res.json();
-      setTransactions(json.data);
+      setTransactions(Array.isArray(json.data) ? json.data : []);
     } catch {
-      // ignore
+      setTransactions([]);
     } finally {
       setTxLoading(false);
     }
@@ -125,7 +125,7 @@ export default function BankingPage() {
     try {
       const res = await fetch('/api/transfers');
       const json = await res.json();
-      setTransfers(json.data);
+      setTransfers(Array.isArray(json.data) ? json.data : []);
     } catch {
       // ignore
     }
