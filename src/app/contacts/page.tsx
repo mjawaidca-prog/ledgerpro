@@ -109,7 +109,7 @@ export default function ContactsPage() {
       if (!res.ok) throw new Error('Failed to fetch contacts');
 
       const json = await res.json();
-      setContacts(json.data);
+      setContacts(Array.isArray(json.data) ? json.data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {

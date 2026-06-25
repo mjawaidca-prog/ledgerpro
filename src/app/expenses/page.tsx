@@ -53,7 +53,7 @@ export default function ExpensesPage() {
       const res = await fetch(`/api/bills?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to load expenses');
       const json = await res.json();
-      setBills(json.data);
+      setBills(Array.isArray(json.data) ? json.data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {

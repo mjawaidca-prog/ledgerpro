@@ -232,7 +232,7 @@ export default function BankingPage() {
     try {
       const res = await fetch('/api/import/parse', { method: 'POST', body: formData });
       const json = await res.json();
-      setWizardParsed(json.data);
+      setWizardParsed(json.data || null);
 
       // Auto-map common column names
       const auto: Record<string, string> = {};

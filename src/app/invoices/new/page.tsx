@@ -79,7 +79,7 @@ export default function NewInvoicePage() {
   useEffect(() => {
     fetch('/api/contacts?type=customer&status=active&limit=100')
       .then((r) => r.json())
-      .then((json) => setCustomers(json.data))
+      .then((json) => setCustomers(Array.isArray(json.data) ? json.data : []))
       .catch(() => {});
   }, []);
 

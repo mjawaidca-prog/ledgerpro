@@ -62,7 +62,7 @@ export default function ChartOfAccountsPage() {
       const res = await fetch(`/api/coa?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to load');
       const json = await res.json();
-      setAccounts(json.data);
+      setAccounts(Array.isArray(json.data) ? json.data : []);
       setSummary(json.summary);
       setTotalAccounts(json.totalAccounts);
     } catch (err) {

@@ -64,7 +64,7 @@ export default function JournalDetailPage() {
       const res = await fetch(`/api/journal/${id}`);
       if (!res.ok) throw new Error('Not found');
       const json = await res.json();
-      setEntry(json.data);
+      setEntry(json.data || null);
     } catch (err: any) {
       setError(err.message);
     } finally { setLoading(false); }
