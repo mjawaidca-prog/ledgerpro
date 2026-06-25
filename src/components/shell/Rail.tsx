@@ -26,6 +26,7 @@ const navItems = [
   { href: '/invoices',      label: 'Sales & Invoices',   icon: FileText },
   { href: '/expenses',      label: 'Expenses',           icon: Receipt },
   { href: '/banking',       label: 'Banking',            icon: Building2 },
+  { href: '/journal',       label: 'Journal',            icon: FileText },
   { href: '/chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
   { href: '/reports/trial-balance', label: 'Trial Balance', icon: Scale },
   { href: '/reports',       label: 'Reports',            icon: BarChart3 },
