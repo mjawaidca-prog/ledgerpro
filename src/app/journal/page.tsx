@@ -85,7 +85,7 @@ export default function JournalListPage() {
                 {entries.map((entry) => {
                   const totalDebit = entry.lines.reduce((s, l) => s + Number(l.debit), 0);
                   return (
-                    <div key={entry.id} className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-3)] transition-colors cursor-pointer group">
+                    <div key={entry.id} onClick={() => router.push(`/journal/${entry.id}`)} className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-3)] transition-colors cursor-pointer group">
                       <div className="flex items-center gap-4 min-w-0">
                         <div className={cn(
                           'w-9 h-9 rounded-lg grid place-items-center flex-none',
