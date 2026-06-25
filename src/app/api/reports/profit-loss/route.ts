@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const year = searchParams.get('year') ?? new Date().getFullYear().toString();
     const period = searchParams.get('period') ?? 'year'; // month, quarter, year
@@ -13,15 +17,16 @@ export async function GET(req: NextRequest) {
     // Fetch all income and expense accounts
     const [incomeAccounts, expenseAccounts, invoices, bills] = await Promise.all([
       db.chartOfAccount.findMany({
-        where: { type: 'income', active: true },
+        where: { type: 'income', active: true, companyId },
         orderBy: { code: 'asc' },
       }),
       db.chartOfAccount.findMany({
-        where: { type: 'expense', active: true },
+        where: { type: 'expense', active: true, companyId },
         orderBy: { code: 'asc' },
       }),
       db.invoice.findMany({
         where: {
+          companyId,
           issueDate: { gte: startDate, lte: endDate },
           status: { not: 'void' },
         },
@@ -29,6 +34,7 @@ export async function GET(req: NextRequest) {
       }),
       db.bill.findMany({
         where: {
+          companyId,
           billDate: { gte: startDate, lte: endDate },
           status: { in: ['paid', 'open', 'overdue'] },
         },

@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendInvoice } from '@/lib/email';
 import { db } from '@/lib/db';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const { invoiceId } = body;
 
@@ -15,7 +19,7 @@ export async function POST(req: NextRequest) {
     }
 
     const invoice = await db.invoice.findUnique({
-      where: { id: invoiceId },
+      where: { id: invoiceId, companyId },
       include: { customer: true },
     });
 
@@ -47,7 +51,7 @@ export async function POST(req: NextRequest) {
 
     // Update invoice: mark as sent
     await db.invoice.update({
-      where: { id: invoiceId },
+      where: { id: invoiceId, companyId },
       data: {
         status: 'sent',
         sentAt: new Date(),

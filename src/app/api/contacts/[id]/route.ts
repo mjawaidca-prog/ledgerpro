@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 import { contactUpdateSchema } from '@/lib/validators/contact';
 
 // GET /api/contacts/[id] — single contact
@@ -8,8 +9,11 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const contact = await db.contact.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: {
         invoices: {
           select: { id: true, total: true, status: true, issueDate: true },
@@ -44,6 +48,9 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const parsed = contactUpdateSchema.safeParse(body);
 
@@ -54,7 +61,7 @@ export async function PUT(
       );
     }
 
-    const existing = await db.contact.findUnique({ where: { id: params.id } });
+    const existing = await db.contact.findUnique({ where: { id: params.id, companyId } });
     if (!existing) {
       return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
     }
@@ -80,7 +87,10 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const existing = await db.contact.findUnique({ where: { id: params.id } });
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
+    const existing = await db.contact.findUnique({ where: { id: params.id, companyId } });
 
     if (!existing) {
       return NextResponse.json({ error: 'Contact not found' }, { status: 404 });

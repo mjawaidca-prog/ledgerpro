@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const accounts = await db.financialAccount.findMany({
-      where: { isActive: true },
+      where: { companyId, isActive: true },
       orderBy: { kind: 'asc' },
       include: {
         _count: { select: { transactions: true } },
@@ -29,6 +33,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const { name, kind, mask, glAccountCode, displayColor, logoInitials } = body;
 
@@ -44,7 +51,7 @@ export async function POST(req: NextRequest) {
         glAccountCode: glAccountCode || null,
         displayColor: displayColor || '#1f6feb',
         logoInitials: logoInitials || name.slice(0, 2).toUpperCase(),
-        companyId: 'default',
+        companyId,
       },
     });
 

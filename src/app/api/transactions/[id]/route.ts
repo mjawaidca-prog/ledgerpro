@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const { categoryId, status, matchRef } = body;
 
-    const existing = await db.transaction.findUnique({ where: { id: params.id } });
+    const existing = await db.transaction.findUnique({ where: { id: params.id, companyId } });
     if (!existing) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
 
     const updateData: any = {};

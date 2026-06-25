@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 // GET — single journal entry with full line details
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const entry = await db.journalEntry.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: {
         lines: {
           select: { id: true, glAccountCode: true, description: true, debit: true, credit: true },
@@ -22,7 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     // Get account names for each line
     const codes = [...new Set(entry.lines.map((l) => l.glAccountCode))];
     const accounts = await db.chartOfAccount.findMany({
-      where: { code: { in: codes } },
+      where: { code: { in: codes }, companyId },
       select: { code: true, name: true, type: true },
     });
     const acctMap = new Map(accounts.map((a) => [a.code, a]));
@@ -52,6 +56,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 // PUT — update a manual journal entry (reverse old, post new)
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const { entryDate, description, lines } = body as {
       entryDate?: string;
@@ -60,7 +67,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     };
 
     const existing = await db.journalEntry.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: { lines: true },
     });
 
@@ -88,7 +95,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     // Reverse old entry's balance effects
     for (const line of existing.lines) {
-      const acct = await db.chartOfAccount.findFirst({ where: { code: line.glAccountCode } });
+      const acct = await db.chartOfAccount.findFirst({ where: { code: line.glAccountCode, companyId } });
       if (!acct) continue;
       const net = Number(line.debit) - Number(line.credit);
       const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? -net : net;
@@ -98,7 +105,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       });
       if (acct.parentCode) {
         await db.chartOfAccount.updateMany({
-          where: { code: acct.parentCode, companyId: existing.companyId },
+          where: { code: acct.parentCode, companyId },
           data: { balance: { increment: new Prisma.Decimal(balanceChange) } },
         });
       }
@@ -124,7 +131,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     // Apply new balance effects
     for (const line of newLines) {
-      const acct = await db.chartOfAccount.findFirst({ where: { code: line.glAccountCode } });
+      const acct = await db.chartOfAccount.findFirst({ where: { code: line.glAccountCode, companyId } });
       if (!acct) continue;
       const net = line.debit - line.credit;
       const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? net : -net;
@@ -134,14 +141,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       });
       if (acct.parentCode) {
         await db.chartOfAccount.updateMany({
-          where: { code: acct.parentCode, companyId: existing.companyId },
+          where: { code: acct.parentCode, companyId },
           data: { balance: { increment: new Prisma.Decimal(balanceChange) } },
         });
       }
     }
 
     const updated = await db.journalEntry.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: { lines: true },
     });
 
@@ -155,8 +162,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 // DELETE — void a journal entry (reverse balances, keep record for audit trail)
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const existing = await db.journalEntry.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: { lines: true },
     });
 
@@ -170,7 +180,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     // Reverse balance effects
     for (const line of existing.lines) {
-      const acct = await db.chartOfAccount.findFirst({ where: { code: line.glAccountCode } });
+      const acct = await db.chartOfAccount.findFirst({ where: { code: line.glAccountCode, companyId } });
       if (!acct) continue;
       const net = Number(line.debit) - Number(line.credit);
       const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? -net : net;
@@ -180,7 +190,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       });
       if (acct.parentCode) {
         await db.chartOfAccount.updateMany({
-          where: { code: acct.parentCode, companyId: existing.companyId },
+          where: { code: acct.parentCode, companyId },
           data: { balance: { increment: new Prisma.Decimal(balanceChange) } },
         });
       }
@@ -188,7 +198,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     // Delete lines then entry
     await db.journalLine.deleteMany({ where: { journalEntryId: params.id } });
-    await db.journalEntry.delete({ where: { id: params.id } });
+    await db.journalEntry.delete({ where: { id: params.id, companyId } });
 
     return NextResponse.json({ data: { deleted: true, id: params.id } });
   } catch (error: any) {

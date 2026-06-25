@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 import { billUpdateSchema } from '@/lib/validators/bill';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const bill = await db.bill.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: {
         vendor: true,
         lineItems: { orderBy: { sortOrder: 'asc' } },
@@ -23,6 +27,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const parsed = billUpdateSchema.safeParse(body);
 
@@ -33,13 +40,13 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       );
     }
 
-    const existing = await db.bill.findUnique({ where: { id: params.id } });
+    const existing = await db.bill.findUnique({ where: { id: params.id, companyId } });
     if (!existing) return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
 
     const { lineItems, ...billData } = parsed.data;
 
     await db.bill.update({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       data: {
         ...billData,
         billDate: billData.billDate ? new Date(billData.billDate) : undefined,
@@ -61,7 +68,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     }
 
     const updated = await db.bill.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: {
         vendor: { select: { id: true, name: true, companyName: true } },
         lineItems: { orderBy: { sortOrder: 'asc' } },
@@ -77,7 +84,10 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const existing = await db.bill.findUnique({ where: { id: params.id } });
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
+    const existing = await db.bill.findUnique({ where: { id: params.id, companyId } });
     if (!existing) return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
     if (existing.status === 'paid') {
       return NextResponse.json({ error: 'Cannot delete a paid bill. Void it instead.' }, { status: 400 });

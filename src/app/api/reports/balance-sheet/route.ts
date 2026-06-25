@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
 
@@ -11,6 +15,7 @@ export async function GET(req: NextRequest) {
       where: {
         type: { in: ['asset', 'liability', 'equity'] },
         active: true,
+        companyId,
       },
       orderBy: { code: 'asc' },
     });

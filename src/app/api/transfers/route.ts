@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { postTransfer } from '@/lib/journal';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 /**
  * GET /api/transfers
  * Detects potential transfer pairs across all accounts.
  * Logic from HANDOFF §6.2: outflow on one account ≈ inflow on another, same date ±3 days.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     // Find unmatched outflows (negative amounts, not already in a transfer)
     const outflows = await db.transaction.findMany({
       where: {
+        companyId,
         status: { in: ['toreview', 'categorized'] },
         transferMatchId: null,
         amount: { lt: 0 },
@@ -24,6 +29,7 @@ export async function GET() {
     // Find unmatched inflows (positive amounts, not already in a transfer)
     const inflows = await db.transaction.findMany({
       where: {
+        companyId,
         status: { in: ['toreview', 'categorized'] },
         transferMatchId: null,
         amount: { gt: 0 },
@@ -75,6 +81,9 @@ export async function GET() {
  */
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { outflowTxId, inflowTxId } = await req.json();
 
     if (!outflowTxId || !inflowTxId) {
@@ -96,7 +105,7 @@ export async function POST(req: NextRequest) {
     // Create the transfer match
     const match = await db.transferMatch.create({
       data: {
-        companyId: 'default',
+        companyId,
         outflowTxId,
         inflowTxId,
         amount: Math.abs(Number(outflow.amount)),
@@ -133,7 +142,7 @@ export async function POST(req: NextRequest) {
         Math.abs(Number(outflow.amount)),
         `Transfer: ${outflow.description} → ${inflow.description}`,
         match.id,
-        'default',
+        companyId,
       );
 
       // Link journal entry to transfer match

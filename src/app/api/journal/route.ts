@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 import { postJournalEntry } from '@/lib/journal';
 
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
-    const { entryDate, description, lines, companyId } = body as {
+    const { entryDate, description, lines } = body as {
       entryDate: string;
       description: string;
       lines: { glAccountCode: string; description?: string; debit: number; credit: number }[];
-      companyId?: string;
     };
 
     if (!entryDate || !description || !lines?.length) {
@@ -18,14 +21,6 @@ export async function POST(req: NextRequest) {
 
     if (lines.length < 2) {
       return NextResponse.json({ error: 'Journal entry must have at least 2 lines (debit and credit)' }, { status: 400 });
-    }
-
-    // Get companyId from the first company if not provided
-    let cid = companyId;
-    if (!cid) {
-      const company = await db.company.findFirst();
-      if (!company) return NextResponse.json({ error: 'No company found' }, { status: 400 });
-      cid = company.id;
     }
 
     const entry = await postJournalEntry(
@@ -40,7 +35,7 @@ export async function POST(req: NextRequest) {
           credit: l.credit || 0,
         })),
       },
-      cid
+      companyId
     );
 
     return NextResponse.json({ data: entry }, { status: 201 });
@@ -52,12 +47,16 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const page = parseInt(searchParams.get('page') ?? '1');
     const limit = parseInt(searchParams.get('limit') ?? '20');
 
     const [entries, total] = await Promise.all([
       db.journalEntry.findMany({
+        where: { companyId },
         orderBy: { entryDate: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -67,7 +66,7 @@ export async function GET(req: NextRequest) {
           },
         },
       }),
-      db.journalEntry.count(),
+      db.journalEntry.count({ where: { companyId } }),
     ]);
 
     return NextResponse.json({

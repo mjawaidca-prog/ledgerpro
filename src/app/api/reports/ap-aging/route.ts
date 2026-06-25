@@ -1,14 +1,19 @@
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
     const asOfDate = new Date(asOf);
 
     const bills = await db.bill.findMany({
       where: {
+        companyId,
         status: { in: ['open', 'overdue'] },
       },
       include: {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 /*
   POST /api/import/confirm
@@ -10,6 +11,9 @@ import { db } from '@/lib/db';
 */
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const { accountId, mappedRows, skipDuplicates } = body;
 
@@ -65,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     const batch = await db.importBatch.create({
       data: {
-        companyId: 'default',
+        companyId,
         financialAccountId: accountId,
         fileName: 'statement-import',
         fileType: 'csv',
@@ -83,7 +87,7 @@ export async function POST(req: NextRequest) {
 
     await db.transaction.createMany({
       data: rowsToImport.map((row) => ({
-        companyId: 'default',
+        companyId,
         financialAccountId: accountId,
         date: new Date(row.date),
         description: row.description || 'Unknown',

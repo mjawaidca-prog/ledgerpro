@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const type = searchParams.get('type');
     const search = searchParams.get('search');
     const activeOnly = searchParams.get('activeOnly') !== 'false';
 
-    const where: any = {};
+    const where: any = { companyId };
     if (type && ['asset', 'liability', 'equity', 'income', 'expense'].includes(type)) {
       where.type = type;
     }

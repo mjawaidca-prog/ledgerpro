@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const now = new Date();
     const yearStart = new Date(now.getFullYear(), 0, 1);
 
@@ -17,23 +21,23 @@ export async function GET(req: NextRequest) {
       overdueInvoices,
     ] = await Promise.all([
       db.invoice.findMany({
-        where: { status: { not: 'void' } },
+        where: { companyId, status: { not: 'void' } },
         select: { total: true, paidAmount: true, status: true, issueDate: true },
       }),
       db.bill.findMany({
-        where: { status: { in: ['paid', 'open', 'overdue'] } },
+        where: { companyId, status: { in: ['paid', 'open', 'overdue'] } },
         select: { total: true, paidAmount: true, status: true },
       }),
-      db.chartOfAccount.findMany({ where: { type: 'expense', active: true }, select: { name: true, balance: true } }),
-      db.chartOfAccount.findMany({ where: { type: 'income', active: true }, select: { balance: true } }),
-      db.financialAccount.findMany({ where: { isActive: true }, select: { id: true, name: true, currentBalance: true, kind: true, mask: true } }),
+      db.chartOfAccount.findMany({ where: { companyId, type: 'expense', active: true }, select: { name: true, balance: true } }),
+      db.chartOfAccount.findMany({ where: { companyId, type: 'income', active: true }, select: { balance: true } }),
+      db.financialAccount.findMany({ where: { companyId, isActive: true }, select: { id: true, name: true, currentBalance: true, kind: true, mask: true } }),
       db.transaction.findMany({
-        where: { date: { gte: yearStart }, status: { not: 'excluded' } },
+        where: { companyId, date: { gte: yearStart }, status: { not: 'excluded' } },
         select: { amount: true, date: true },
         orderBy: { date: 'asc' },
       }),
       db.invoice.findMany({
-        where: { status: { in: ['sent', 'overdue'] } },
+        where: { companyId, status: { in: ['sent', 'overdue'] } },
         include: { customer: { select: { name: true, companyName: true } } },
         orderBy: { dueDate: 'asc' },
         take: 10,

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const accountId = searchParams.get('accountId');
     const status = searchParams.get('status');
@@ -14,7 +18,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') ?? '50');
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: any = { companyId };
     if (accountId) where.financialAccountId = accountId;
     if (status) {
       if (status === 'needsreview') {

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
     const asOfDate = new Date(asOf);
@@ -10,14 +14,14 @@ export async function GET(req: NextRequest) {
 
     // Get all active GL accounts
     const accounts = await db.chartOfAccount.findMany({
-      where: { active: true },
+      where: { active: true, companyId },
       orderBy: { code: 'asc' },
     });
 
     // Get ALL journal lines up to asOf date
     const journalLines = await db.journalLine.findMany({
       where: {
-        journalEntry: { entryDate: { lte: asOfDate } },
+        journalEntry: { entryDate: { lte: asOfDate }, companyId },
       },
       select: { glAccountCode: true, debit: true, credit: true },
     });
@@ -73,7 +77,7 @@ export async function GET(req: NextRequest) {
     }
 
     const jeCount = await db.journalEntry.count({
-      where: { entryDate: { lte: asOfDate } },
+      where: { entryDate: { lte: asOfDate }, companyId },
     });
 
     return NextResponse.json({

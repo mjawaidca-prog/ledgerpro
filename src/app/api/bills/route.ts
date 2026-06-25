@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 import { billSchema } from '@/lib/validators/bill';
 
 function generateBillId(kind: 'bill' | 'expense'): string {
@@ -9,6 +10,9 @@ function generateBillId(kind: 'bill' | 'expense'): string {
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const kind = searchParams.get('kind');
     const status = searchParams.get('status');
@@ -20,7 +24,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') ?? '25');
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: any = { companyId };
     if (kind && ['bill', 'expense'].includes(kind)) where.kind = kind;
     if (status && ['draft', 'open', 'paid', 'overdue', 'void'].includes(status)) where.status = status;
     if (vendorId) where.vendorId = vendorId;
@@ -64,6 +68,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const parsed = billSchema.safeParse(body);
 
@@ -80,7 +87,7 @@ export async function POST(req: NextRequest) {
       data: {
         id: generateBillId(billData.kind),
         ...billData,
-        companyId: 'default',
+        companyId,
         billDate: new Date(billData.billDate),
         dueDate: billData.dueDate ? new Date(billData.dueDate) : null,
         lineItems: {

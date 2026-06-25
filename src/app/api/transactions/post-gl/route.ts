@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 
 // POST — post categorized bank transactions to the General Ledger
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const { transactionIds } = body as { transactionIds: string[] };
 
@@ -12,7 +16,7 @@ export async function POST(req: NextRequest) {
     }
 
     const transactions = await db.transaction.findMany({
-      where: { id: { in: transactionIds }, status: 'categorized' },
+      where: { id: { in: transactionIds }, companyId, status: 'categorized' },
       include: { account: { select: { glAccountCode: true } }, category: { select: { code: true, name: true } } },
     });
 
@@ -72,7 +76,7 @@ export async function POST(req: NextRequest) {
 
       // Update GL balances
       for (const l of entryLines) {
-        const acct = await db.chartOfAccount.findFirst({ where: { code: l.code } });
+        const acct = await db.chartOfAccount.findFirst({ where: { code: l.code, companyId: tx.companyId } });
         if (!acct) continue;
         const net = l.debit - l.credit;
         const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? net : -net;
@@ -97,7 +101,7 @@ export async function POST(req: NextRequest) {
 
       // Update financial account balance
       if (glCode) {
-        const finAcct = await db.financialAccount.findFirst({ where: { glAccountCode: glCode } });
+        const finAcct = await db.financialAccount.findFirst({ where: { glAccountCode: glCode, companyId: tx.companyId } });
         if (finAcct) {
           await db.financialAccount.update({
             where: { id: finAcct.id },

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 import { invoiceUpdateSchema } from '@/lib/validators/invoice';
 
 export async function GET(
@@ -7,8 +8,11 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const invoice = await db.invoice.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: {
         customer: true,
         lineItems: { orderBy: { sortOrder: 'asc' } },
@@ -32,6 +36,9 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const parsed = invoiceUpdateSchema.safeParse(body);
 
@@ -42,7 +49,7 @@ export async function PUT(
       );
     }
 
-    const existing = await db.invoice.findUnique({ where: { id: params.id } });
+    const existing = await db.invoice.findUnique({ where: { id: params.id, companyId } });
     if (!existing) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
@@ -51,7 +58,7 @@ export async function PUT(
 
     // Update invoice header
     await db.invoice.update({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       data: {
         ...invoiceData,
         issueDate: invoiceData.issueDate ? new Date(invoiceData.issueDate) : undefined,
@@ -76,7 +83,7 @@ export async function PUT(
     }
 
     const updated = await db.invoice.findUnique({
-      where: { id: params.id },
+      where: { id: params.id, companyId },
       include: {
         customer: { select: { id: true, name: true, companyName: true } },
         lineItems: { orderBy: { sortOrder: 'asc' } },
@@ -95,7 +102,10 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const existing = await db.invoice.findUnique({ where: { id: params.id } });
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
+    const existing = await db.invoice.findUnique({ where: { id: params.id, companyId } });
     if (!existing) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }

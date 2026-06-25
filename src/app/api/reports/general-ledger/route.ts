@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, userId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const code = searchParams.get('code');
     const startDate = searchParams.get('start') ?? '2026-01-01';
@@ -16,12 +20,12 @@ export async function GET(req: NextRequest) {
 
     // Get account info
     const account = code
-      ? await db.chartOfAccount.findFirst({ where: { code } })
+      ? await db.chartOfAccount.findFirst({ where: { code, companyId } })
       : null;
 
     // Get ALL journal lines before endDate for this account to compute running balance
     const allLinesWhere: any = {
-      journalEntry: { entryDate: { lte: end } },
+      journalEntry: { entryDate: { lte: end }, companyId },
     };
     if (code) allLinesWhere.glAccountCode = code;
 
@@ -58,6 +62,7 @@ export async function GET(req: NextRequest) {
       db.journalLine.findMany({
         where: {
           journalEntryId: { in: entryIds },
+          journalEntry: { companyId },
           ...(code ? { glAccountCode: code } : {}),
         },
         include: {
@@ -71,7 +76,7 @@ export async function GET(req: NextRequest) {
       }),
       entryIds.length > 0
         ? db.journalLine.findMany({
-            where: { journalEntryId: { in: entryIds } },
+            where: { journalEntryId: { in: entryIds }, journalEntry: { companyId } },
             select: { journalEntryId: true, glAccountCode: true, description: true, debit: true, credit: true },
           })
         : [],
@@ -150,7 +155,7 @@ export async function GET(req: NextRequest) {
       // Get all unique account codes in this period
       const allCodes = [...new Set(periodLines.map((l) => l.glAccountCode))];
       const allAccounts = await db.chartOfAccount.findMany({
-        where: { code: { in: allCodes } },
+        where: { code: { in: allCodes }, companyId },
         select: { code: true, name: true, type: true },
       });
       const acctMap = new Map(allAccounts.map((a) => [a.code, a]));

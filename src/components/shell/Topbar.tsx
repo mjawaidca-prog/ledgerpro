@@ -3,6 +3,7 @@
 import { cn } from '@/lib/cn';
 import { Segmented } from '@/components/ui/Segmented';
 import { Button } from '@/components/ui/Button';
+import { GlobalSearch } from './GlobalSearch';
 import {
   Search,
   Moon,
@@ -27,7 +28,7 @@ export function Topbar({
   onDensityChange,
   userName,
 }: TopbarProps) {
-  return (
+  return (<>
     <header className="topbar">
       {/* Search */}
       <div className="topbar-search">
@@ -81,5 +82,7 @@ export function Topbar({
         <ChevronDown size={16} />
       </button>
     </header>
+    <GlobalSearch />
+    </>
   );
 }

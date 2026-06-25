@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 import { contactSchema } from '@/lib/validators/contact';
 
 // GET /api/contacts — list all contacts
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const type = searchParams.get('type');          // customer | supplier
     const status = searchParams.get('status');      // active | inactive
@@ -13,10 +17,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') ?? '50');
     const skip = (page - 1) * limit;
 
-    const where: any = {};
-
-    // In production: filter by companyId from session
-    // where.companyId = session.user.companyId;
+    const where: any = { companyId };
 
     if (type && ['customer', 'supplier'].includes(type)) {
       where.type = type;
@@ -65,6 +66,9 @@ export async function GET(req: NextRequest) {
 // POST /api/contacts — create a new contact
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const parsed = contactSchema.safeParse(body);
 
@@ -78,7 +82,7 @@ export async function POST(req: NextRequest) {
     const contact = await db.contact.create({
       data: {
         ...parsed.data,
-        companyId: 'default', // TODO: replace with session user's companyId
+        companyId,
       },
     });
 

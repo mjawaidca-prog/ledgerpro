@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireCompany } from '@/lib/api-helpers';
 import { invoiceSchema } from '@/lib/validators/invoice';
 import { postInvoiceToLedger } from '@/lib/journal';
 
@@ -10,6 +11,9 @@ function generateInvoiceId(): string {
 
 export async function GET(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status');
     const customerId = searchParams.get('customerId');
@@ -20,7 +24,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') ?? '25');
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: any = { companyId };
 
     if (status && ['draft', 'sent', 'paid', 'overdue', 'void'].includes(status)) {
       where.status = status;
@@ -74,6 +78,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+
     const body = await req.json();
     const parsed = invoiceSchema.safeParse(body);
 
@@ -88,7 +95,7 @@ export async function POST(req: NextRequest) {
 
     // Look up customer name for journal description
     const customer = await db.contact.findUnique({
-      where: { id: invoiceData.customerId },
+      where: { id: invoiceData.customerId, companyId },
       select: { name: true },
     });
 
@@ -96,7 +103,7 @@ export async function POST(req: NextRequest) {
       data: {
         id: generateInvoiceId(),
         ...invoiceData,
-        companyId: 'default',
+        companyId,
         issueDate: new Date(invoiceData.issueDate),
         dueDate: new Date(invoiceData.dueDate),
         lineItems: {
@@ -122,7 +129,7 @@ export async function POST(req: NextRequest) {
         invoice.id,
         customer?.name ?? 'Unknown',
         Number(invoice.total),
-        'default', // companyId — replace with session
+        companyId,
       );
     }
 
