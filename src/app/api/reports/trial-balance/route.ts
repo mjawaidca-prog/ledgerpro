@@ -6,6 +6,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
     const asOfDate = new Date(asOf);
+    asOfDate.setHours(23, 59, 59, 999);
 
     // Get all active GL accounts
     const accounts = await db.chartOfAccount.findMany({
@@ -13,19 +14,12 @@ export async function GET(req: NextRequest) {
       orderBy: { code: 'asc' },
     });
 
-    // Get journal lines up to asOf date to compute actual debits/credits
+    // Get ALL journal lines up to asOf date
     const journalLines = await db.journalLine.findMany({
       where: {
-        journalEntry: {
-          entryDate: { lte: asOfDate },
-        },
+        journalEntry: { entryDate: { lte: asOfDate } },
       },
-      include: {
-        journalEntry: {
-          select: { id: true, entryDate: true, description: true, sourceType: true, sourceId: true },
-        },
-      },
-      orderBy: { journalEntry: { entryDate: 'asc' } },
+      select: { glAccountCode: true, debit: true, credit: true },
     });
 
     // Aggregate debits/credits per GL account
@@ -38,25 +32,20 @@ export async function GET(req: NextRequest) {
       activity[line.glAccountCode].credits += Number(line.credit);
     }
 
-    // Build trial balance rows
-    // For asset/expense accounts: normal balance is debit (debit increases, credit decreases)
-    // For liability/equity/income accounts: normal balance is credit
+    // Build trial balance rows — balances come ONLY from journal entries
     const rows = accounts.map((acct) => {
       const act = activity[acct.code] || { debits: 0, credits: 0 };
-      const seededBalance = Number(acct.balance);
-
-      // Calculate the net based on type
       let debitBalance = 0;
       let creditBalance = 0;
 
       if (acct.type === 'asset' || acct.type === 'expense') {
-        // Normal debit balance: balance = seed + debits - credits
-        const net = seededBalance + act.debits - act.credits;
+        // Normal debit balance
+        const net = act.debits - act.credits;
         if (net >= 0) debitBalance = net;
         else creditBalance = Math.abs(net);
       } else {
-        // Normal credit balance: balance = seed + credits - debits
-        const net = seededBalance + act.credits - act.debits;
+        // Normal credit balance (liability, equity, income)
+        const net = act.credits - act.debits;
         if (net >= 0) creditBalance = net;
         else debitBalance = Math.abs(net);
       }
@@ -77,12 +66,15 @@ export async function GET(req: NextRequest) {
     const totalCredits = Math.round(rows.reduce((s, r) => s + r.credit, 0) * 100) / 100;
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.02;
 
-    // Group by type for display
     const grouped: Record<string, typeof rows> = {};
     for (const row of rows) {
       if (!grouped[row.type]) grouped[row.type] = [];
       grouped[row.type].push(row);
     }
+
+    const jeCount = await db.journalEntry.count({
+      where: { entryDate: { lte: asOfDate } },
+    });
 
     return NextResponse.json({
       data: {
@@ -93,6 +85,7 @@ export async function GET(req: NextRequest) {
         totalCredits,
         isBalanced,
         accountCount: rows.length,
+        journalEntryCount: jeCount,
       },
     });
   } catch (error) {

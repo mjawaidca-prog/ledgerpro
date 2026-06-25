@@ -4,91 +4,115 @@ import { db } from '@/lib/db';
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const code = searchParams.get('code'); // GL account code
+    const code = searchParams.get('code');
     const startDate = searchParams.get('start') ?? '2026-01-01';
-    const endDate = searchParams.get('end') ?? '2026-12-31';
+    const endDate = searchParams.get('end') ?? new Date().toISOString().slice(0, 10);
     const page = parseInt(searchParams.get('page') ?? '1');
-    const limit = parseInt(searchParams.get('limit') ?? '50');
+    const limit = parseInt(searchParams.get('limit') ?? '100');
 
-    const where: any = {
-      journalEntry: {
-        entryDate: { gte: new Date(startDate), lte: new Date(endDate) },
-      },
-    };
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // end of day
 
-    if (code) {
-      where.glAccountCode = code;
-    }
-
-    // Get the account info
+    // Get account info
     const account = code
       ? await db.chartOfAccount.findFirst({ where: { code } })
       : null;
 
-    // Get total count
-    const total = await db.journalLine.count({ where });
+    // Get ALL journal lines before endDate for this account to compute running balance
+    const allLinesWhere: any = {
+      journalEntry: { entryDate: { lte: end } },
+    };
+    if (code) allLinesWhere.glAccountCode = code;
 
-    // Get journal lines for this GL account
-    const lines = await db.journalLine.findMany({
-      where,
-      include: {
-        journalEntry: {
-          select: {
-            id: true,
-            entryDate: true,
-            description: true,
-            sourceType: true,
-            sourceId: true,
-          },
-        },
-      },
-      orderBy: { journalEntry: { entryDate: 'desc' } },
-      skip: (page - 1) * limit,
-      take: limit,
+    const allLines = await db.journalLine.findMany({
+      where: allLinesWhere,
+      include: { journalEntry: { select: { entryDate: true } } },
+      orderBy: { journalEntry: { entryDate: 'asc' } },
     });
 
-    // For each journal entry, get the contra lines (other legs of same entry)
-    const entryIds = [...new Set(lines.map((l) => l.journalEntryId))];
-    const allEntryLines = entryIds.length > 0
-      ? await db.journalLine.findMany({
-          where: { journalEntryId: { in: entryIds } },
-          include: {
-            journalEntry: {
-              select: { id: true, sourceType: true, sourceId: true },
-            },
-          },
-        })
-      : [];
+    // Compute opening balance (all entries before startDate)
+    let openingBalance = 0;
+    const accountType = account?.type;
+    for (const line of allLines) {
+      const entryDate = new Date(line.journalEntry.entryDate);
+      if (entryDate < start) {
+        if (accountType === 'asset' || accountType === 'expense') {
+          openingBalance += Number(line.debit) - Number(line.credit);
+        } else {
+          openingBalance += Number(line.credit) - Number(line.debit);
+        }
+      }
+    }
 
-    // Map entry ID → contra lines
+    // Get journal lines for the selected period
+    const periodLines = allLines.filter((l) => {
+      const d = new Date(l.journalEntry.entryDate);
+      return d >= start && d <= end;
+    });
+
+    // Get full entry details for period lines
+    const entryIds = [...new Set(periodLines.map((l) => l.journalEntryId))];
+
+    const [detailedLines, allEntryLines] = await Promise.all([
+      db.journalLine.findMany({
+        where: {
+          journalEntryId: { in: entryIds },
+          ...(code ? { glAccountCode: code } : {}),
+        },
+        include: {
+          journalEntry: {
+            select: { id: true, entryDate: true, description: true, sourceType: true, sourceId: true },
+          },
+        },
+        orderBy: { journalEntry: { entryDate: 'desc' } },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      entryIds.length > 0
+        ? db.journalLine.findMany({
+            where: { journalEntryId: { in: entryIds } },
+            select: { journalEntryId: true, glAccountCode: true, description: true, debit: true, credit: true },
+          })
+        : [],
+    ]);
+
+    // Build contra lookup
     const contraByEntry: Record<string, { code: string; description: string | null; debit: number; credit: number }[]> = {};
-    for (const line of allEntryLines) {
-      if (!contraByEntry[line.journalEntryId]) contraByEntry[line.journalEntryId] = [];
-      contraByEntry[line.journalEntryId].push({
-        code: line.glAccountCode,
-        description: line.description,
-        debit: Number(line.debit),
-        credit: Number(line.credit),
+    for (const l of allEntryLines) {
+      if (!contraByEntry[l.journalEntryId]) contraByEntry[l.journalEntryId] = [];
+      contraByEntry[l.journalEntryId].push({
+        code: l.glAccountCode,
+        description: l.description,
+        debit: Number(l.debit),
+        credit: Number(l.credit),
       });
     }
 
-    // Resolve source document links
     function sourceLink(sourceType: string, sourceId: string | null): string | null {
       if (!sourceId) return null;
       switch (sourceType) {
         case 'invoice': return `/invoices/${sourceId}`;
         case 'bill': return `/expenses/${sourceId}`;
-        case 'payment': return null;
+        case 'payment': return `/invoices/${sourceId}`;
         case 'transfer': return null;
         case 'manual': return null;
         default: return null;
       }
     }
 
-    const rows = lines.map((line) => {
+    // Build rows with running balance
+    let runningBalance = openingBalance;
+    const rows = detailedLines.map((line) => {
       const entry = line.journalEntry;
       const contras = (contraByEntry[line.journalEntryId] || [])
         .filter((c) => c.code !== line.glAccountCode);
+
+      const netEffect = accountType === 'asset' || accountType === 'expense'
+        ? Number(line.debit) - Number(line.credit)
+        : Number(line.credit) - Number(line.debit);
+
+      runningBalance += netEffect;
 
       return {
         id: line.id,
@@ -100,45 +124,36 @@ export async function GET(req: NextRequest) {
         debit: Number(line.debit),
         credit: Number(line.credit),
         glAccountCode: line.glAccountCode,
-        contraAccounts: contras.map((c) => ({
-          code: c.code,
-          description: c.description,
-          debit: c.debit,
-          credit: c.credit,
-          link: `/reports/general-ledger?code=${c.code}`,
-        })),
+        balance: Math.round(runningBalance * 100) / 100,
+        contraAccounts: contras
+          .filter((c) => c.code !== line.glAccountCode)
+          .slice(0, 3)
+          .map((c) => ({
+            code: c.code,
+            description: c.description,
+            debit: c.debit,
+            credit: c.credit,
+            link: `/reports/general-ledger?code=${c.code}`,
+          })),
       };
     });
 
-    // Running balance
-    let runningBalance = account ? Number(account.balance) : 0;
-    const rowsWithBalance = rows.reverse().map((row) => {
-      if (account) {
-        if (account.type === 'asset' || account.type === 'expense') {
-          runningBalance = runningBalance - row.credit + row.debit;
-        } else {
-          runningBalance = runningBalance + row.credit - row.debit;
-        }
-      }
-      return { ...row, balance: Math.round(runningBalance * 100) / 100 };
-    }).reverse();
-
-    // Totals
     const totalDebits = Math.round(rows.reduce((s, r) => s + r.debit, 0) * 100) / 100;
     const totalCredits = Math.round(rows.reduce((s, r) => s + r.credit, 0) * 100) / 100;
+    const closingBalance = rows.length > 0 ? rows[rows.length - 1].balance : openingBalance;
+    const total = periodLines.length;
 
     return NextResponse.json({
       data: {
-        account: account ? {
-          code: account.code,
-          name: account.name,
-          type: account.type,
-          balance: Number(account.balance),
-        } : null,
+        account: account ? { code: account.code, name: account.name, type: account.type } : null,
         period: { startDate, endDate },
-        rows: rowsWithBalance,
+        balances: {
+          opening: Math.round(openingBalance * 100) / 100,
+          closing: closingBalance,
+        },
+        rows,
         totals: { debits: totalDebits, credits: totalCredits },
-        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+        pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       },
     });
   } catch (error) {

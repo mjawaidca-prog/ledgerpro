@@ -6,8 +6,8 @@ import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
-import { format } from 'date-fns';
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, subMonths, startOfYear, startOfQuarter, endOfQuarter } from 'date-fns';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar } from 'lucide-react';
 
 interface GLRow {
   id: string;
@@ -24,12 +24,22 @@ interface GLRow {
 }
 
 interface GLData {
-  account: { code: string; name: string; type: string; balance: number } | null;
+  account: { code: string; name: string; type: string } | null;
   period: { startDate: string; endDate: string };
+  balances: { opening: number; closing: number };
   rows: GLRow[];
   totals: { debits: number; credits: number };
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
+
+const DATE_PRESETS = [
+  { label: 'This month', get: () => ({ start: format(startOfMonth(new Date()), 'yyyy-MM-dd'), end: format(new Date(), 'yyyy-MM-dd') }) },
+  { label: 'Last month', get: () => ({ start: format(startOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd'), end: format(endOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd') }) },
+  { label: 'This quarter', get: () => ({ start: format(startOfQuarter(new Date()), 'yyyy-MM-dd'), end: format(new Date(), 'yyyy-MM-dd') }) },
+  { label: 'Year to date', get: () => ({ start: format(startOfYear(new Date()), 'yyyy-MM-dd'), end: format(new Date(), 'yyyy-MM-dd') }) },
+  { label: 'FY 2026', get: () => ({ start: '2026-01-01', end: '2026-12-31' }) },
+  { label: 'Custom', get: () => ({ start: '2026-01-01', end: new Date().toISOString().slice(0, 10) }) },
+];
 
 const SOURCE_ICONS: Record<string, React.ReactNode> = {
   invoice: <FileText size={14} />,
@@ -44,7 +54,13 @@ function GLContent() {
   const searchParams = useSearchParams();
   const code = searchParams.get('code') || '';
   const name = searchParams.get('name') || '';
+  const urlStart = searchParams.get('start');
+  const urlEnd = searchParams.get('end');
 
+  const today = new Date().toISOString().slice(0, 10);
+  const [startDate, setStartDate] = useState(urlStart || '2026-01-01');
+  const [endDate, setEndDate] = useState(urlEnd || today);
+  const [activePreset, setActivePreset] = useState(urlStart ? 'Custom' : 'FY 2026');
   const [data, setData] = useState<GLData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +70,7 @@ function GLContent() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ code, page: String(page), limit: '50' });
+      const params = new URLSearchParams({ code, start: startDate, end: endDate, page: String(page), limit: '100' });
       const res = await fetch(`/api/reports/general-ledger?${params}`);
       if (!res.ok) throw new Error('Failed to fetch general ledger');
       const json = await res.json();
@@ -64,9 +80,17 @@ function GLContent() {
     } finally {
       setLoading(false);
     }
-  }, [code, page]);
+  }, [code, startDate, endDate, page]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  function applyPreset(preset: typeof DATE_PRESETS[0]) {
+    const { start, end } = preset.get();
+    setStartDate(start);
+    setEndDate(end);
+    setActivePreset(preset.label);
+    setPage(1);
+  }
 
   if (loading) {
     return (
@@ -111,13 +135,53 @@ function GLContent() {
         </div>
       </div>
 
+      {/* Date presets */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Calendar size={14} className="text-[var(--text-muted)]" />
+        {DATE_PRESETS.map((preset) => (
+          <button
+            key={preset.label}
+            onClick={() => applyPreset(preset)}
+            className={cn(
+              'text-xs px-3 py-1.5 rounded-full font-medium transition-colors',
+              activePreset === preset.label
+                ? 'bg-[var(--primary)] text-white'
+                : 'bg-[var(--surface-3)] text-[var(--text-muted)] hover:text-[var(--text)]'
+            )}
+          >
+            {preset.label}
+          </button>
+        ))}
+        {activePreset === 'Custom' && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+            <span className="text-xs text-[var(--text-faint)]">to</span>
+            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+          </div>
+        )}
+      </div>
+
       {/* Summary bar */}
       {data.account && (
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <Card><CardBody className="p-3"><div className="text-xs text-[var(--text-muted)]">Opening Balance</div><div className="text-lg font-mono font-bold text-[var(--text-strong)]">{money(data.account.balance)}</div></CardBody></Card>
-          <Card><CardBody className="p-3"><div className="text-xs text-[var(--text-muted)]">Total Debits</div><div className="text-lg font-mono font-bold text-[var(--text)]">{money(data.totals.debits)}</div></CardBody></Card>
-          <Card><CardBody className="p-3"><div className="text-xs text-[var(--text-muted)]">Total Credits</div><div className="text-lg font-mono font-bold text-[var(--text)]">{money(data.totals.credits)}</div></CardBody></Card>
-          <Card><CardBody className="p-3"><div className="text-xs text-[var(--text-muted)]">Closing Balance</div><div className="text-lg font-mono font-bold text-[var(--text-strong)]">{money(data.rows.length > 0 ? data.rows[0].balance : data.account.balance)}</div></CardBody></Card>
+          <Card><CardBody className="p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">Opening Balance</div>
+            <div className="text-lg font-mono font-bold text-[var(--text-strong)]">{money(data.balances.opening)}</div>
+            <div className="text-micro text-[var(--text-faint)] mt-0.5">Before {format(new Date(startDate), 'MMM d')}</div>
+          </CardBody></Card>
+          <Card><CardBody className="p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">Period Debits</div>
+            <div className="text-lg font-mono font-bold text-[var(--text)]">{money(data.totals.debits)}</div>
+          </CardBody></Card>
+          <Card><CardBody className="p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">Period Credits</div>
+            <div className="text-lg font-mono font-bold text-[var(--text)]">{money(data.totals.credits)}</div>
+          </CardBody></Card>
+          <Card><CardBody className="p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">Closing Balance</div>
+            <div className={cn('text-lg font-mono font-bold', data.balances.closing >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]')}>{money(data.balances.closing, true)}</div>
+            <div className="text-micro text-[var(--text-faint)] mt-0.5">As of {format(new Date(endDate), 'MMM d')}</div>
+          </CardBody></Card>
         </div>
       )}
 

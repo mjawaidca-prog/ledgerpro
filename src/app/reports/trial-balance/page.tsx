@@ -7,7 +7,8 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
-import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar } from 'lucide-react';
+import { format as formatDate, startOfMonth, subMonths, endOfMonth, startOfYear, startOfQuarter } from 'date-fns';
 
 interface TBRow {
   code: string;
@@ -45,7 +46,22 @@ export default function TrialBalancePage() {
   const [data, setData] = useState<TBData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  const today = new Date().toISOString().slice(0, 10);
+  const [asOf, setAsOf] = useState(today);
+  const [activePreset, setActivePreset] = useState('Today');
+
+  const presets = [
+    { label: 'Today', value: today },
+    { label: 'End of last month', value: formatDate(endOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd') },
+    { label: 'End of Q1', value: '2026-03-31' },
+    { label: 'End of Q2', value: '2026-06-30' },
+    { label: 'FY 2025', value: '2025-12-31' },
+  ];
+
+  function applyPreset(label: string, value: string) {
+    setActivePreset(label);
+    setAsOf(value);
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -95,7 +111,24 @@ export default function TrialBalancePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)]" />
+          <div className="flex items-center gap-1">
+            <Calendar size={14} className="text-[var(--text-muted)]" />
+            {presets.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => applyPreset(p.label, p.value)}
+                className={cn(
+                  'text-xs px-2.5 py-1 rounded-full font-medium transition-colors',
+                  activePreset === p.label
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'bg-[var(--surface-3)] text-[var(--text-muted)] hover:text-[var(--text)]'
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <input type="date" value={asOf} onChange={(e) => { setAsOf(e.target.value); setActivePreset('Custom'); }} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)]" />
           <div className={cn(
             'flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full font-medium',
             data.isBalanced ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-[var(--danger-soft)] text-[var(--danger)]'
