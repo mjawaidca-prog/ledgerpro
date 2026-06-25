@@ -9,7 +9,7 @@ import {
   Receipt,
   Building2,
   BookOpen,
-  BarChart3,
+  BarChart3, Scale,
   Users,
   ChevronDown,
 } from 'lucide-react';
@@ -27,6 +27,7 @@ const navItems = [
   { href: '/expenses',      label: 'Expenses',           icon: Receipt },
   { href: '/banking',       label: 'Banking',            icon: Building2 },
   { href: '/chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
+  { href: '/reports/trial-balance', label: 'Trial Balance', icon: Scale },
   { href: '/reports',       label: 'Reports',            icon: BarChart3 },
   { href: '/contacts',      label: 'Contacts',           icon: Users },
 ];

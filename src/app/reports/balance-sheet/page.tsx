@@ -7,7 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
-import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
 
 interface AccountLine {
   code: string;
@@ -36,17 +36,23 @@ interface BalanceSheetData {
   totalLiabilitiesAndEquity: number;
 }
 
-function AccountRow({ account, indent }: { account: AccountLine; indent?: boolean }) {
+function AccountRow({ account, indent, router }: { account: AccountLine; indent?: boolean; router: any }) {
   return (
-    <div className={cn('flex items-center justify-between py-2 px-3 rounded-md hover:bg-[var(--surface-3)]', indent && 'pl-8')}>
+    <div
+      onClick={() => router.push(`/reports/general-ledger?code=${account.code}&name=${encodeURIComponent(account.name)}`)}
+      className={cn('flex items-center justify-between py-2 px-3 rounded-md hover:bg-[var(--primary-soft)] cursor-pointer transition-colors group', indent && 'pl-8')}
+    >
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-[var(--text-strong)] truncate">{account.name}</div>
+        <div className="text-sm font-medium text-[var(--text-strong)] truncate group-hover:text-[var(--primary)] transition-colors">{account.name}</div>
         <div className="text-xs text-[var(--text-muted)]">
           {account.code}{account.detailType ? ` · ${account.detailType}` : ''}
         </div>
       </div>
-      <div className="text-sm font-mono tabular-nums text-[var(--text)] ml-4">
-        {money(account.balance)}
+      <div className="flex items-center gap-2 ml-4">
+        <ExternalLink size={12} className="text-[var(--text-faint)] opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="text-sm font-mono tabular-nums text-[var(--text)]">
+          {money(account.balance)}
+        </div>
       </div>
     </div>
   );
@@ -167,7 +173,7 @@ export default function BalanceSheetPage() {
               Current Assets
             </div>
             {data.assets.current.accounts.map((a) => (
-              <AccountRow key={a.code} account={a} />
+              <AccountRow key={a.code} account={a} router={router} />
             ))}
             <SectionHeader title="Total Current Assets" total={data.assets.current.total} borderTop />
 
@@ -177,7 +183,7 @@ export default function BalanceSheetPage() {
             </div>
             {data.assets.nonCurrent.accounts.length > 0 ? (
               data.assets.nonCurrent.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} />
+                <AccountRow key={a.code} account={a} router={router} />
               ))
             ) : (
               <div className="text-sm text-[var(--text-faint)] px-3 py-2 italic">No non-current assets</div>
@@ -206,7 +212,7 @@ export default function BalanceSheetPage() {
                 Current Liabilities
               </div>
               {data.liabilities.current.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} />
+                <AccountRow key={a.code} account={a} router={router} />
               ))}
               {data.liabilities.current.accounts.length === 0 && (
                 <div className="text-sm text-[var(--text-faint)] px-3 py-2 italic">No current liabilities</div>
@@ -220,7 +226,7 @@ export default function BalanceSheetPage() {
                     Non-Current Liabilities
                   </div>
                   {data.liabilities.nonCurrent.accounts.map((a) => (
-                    <AccountRow key={a.code} account={a} />
+                    <AccountRow key={a.code} account={a} router={router} />
                   ))}
                   <SectionHeader title="Total Non-Current Liabilities" total={data.liabilities.nonCurrent.total} borderTop />
                 </>
@@ -243,7 +249,7 @@ export default function BalanceSheetPage() {
             </CardHeader>
             <CardBody className="space-y-0">
               {data.equity.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} />
+                <AccountRow key={a.code} account={a} router={router} />
               ))}
               <div className="flex items-center justify-between py-3 px-3 mt-1 border-t border-[var(--border)]">
                 <span className="text-sm font-bold text-[var(--text-strong)]">Total Equity</span>
