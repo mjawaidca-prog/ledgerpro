@@ -9,7 +9,8 @@ import { Alert } from '@/components/ui/Alert';
 import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
-import { Search, Upload, Download, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Search, Upload, Download, Loader2, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import type { Column } from '@/components/ui/DataTable';
 
 interface COAEntry {
@@ -42,6 +43,7 @@ const typeColors: Record<string, string> = {
 };
 
 export default function ChartOfAccountsPage() {
+  const router = useRouter();
   const [accounts, setAccounts] = useState<COAEntry[]>([]);
   const [summary, setSummary] = useState<Summary>({ assets: 0, liabilities: 0, equity: 0, income: 0, expenses: 0 });
   const [totalAccounts, setTotalAccounts] = useState(0);
@@ -247,10 +249,14 @@ export default function ChartOfAccountsPage() {
                 <div className="border-t border-[var(--border)]">
                   {parentEntries.map((parent) => (
                     <div key={parent.code}>
-                      <div className="flex items-center gap-4 px-5 py-2.5 bg-[var(--surface-2)] text-sm">
+                      <div
+                        onClick={() => router.push(`/reports/general-ledger?code=${parent.code}&name=${encodeURIComponent(parent.name)}`)}
+                        className="flex items-center gap-4 px-5 py-2.5 bg-[var(--surface-2)] text-sm cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group"
+                      >
                         <span className="font-mono text-[var(--text-muted)] w-[60px]">{parent.code}</span>
-                        <span className="font-medium text-[var(--text-strong)] flex-1">{parent.name}</span>
+                        <span className="font-medium text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{parent.name}</span>
                         <span className="text-xs text-[var(--text-muted)]">{parent.detailType}</span>
+                        <ExternalLink size={12} className="text-[var(--text-faint)] opacity-0 group-hover:opacity-100 mr-1 transition-opacity" />
                         <span className={cn(
                           'font-mono tabular-nums text-sm font-semibold w-[120px] text-right',
                           Number(parent.balance) >= 0 ? 'text-[var(--text-strong)]' : 'text-[var(--danger)]'
@@ -261,10 +267,15 @@ export default function ChartOfAccountsPage() {
                       {entries
                         .filter(a => a.parentCode === parent.code)
                         .map((child) => (
-                          <div key={child.code} className="flex items-center gap-4 px-5 py-2.5 border-t border-[var(--border)] hover:bg-[var(--surface-2)] text-sm">
+                          <div
+                            key={child.code}
+                            onClick={() => router.push(`/reports/general-ledger?code=${child.code}&name=${encodeURIComponent(child.name)}`)}
+                            className="flex items-center gap-4 px-5 py-2.5 border-t border-[var(--border)] hover:bg-[var(--primary-soft)] text-sm cursor-pointer group transition-colors"
+                          >
                             <span className="font-mono text-[var(--text-faint)] w-[60px] pl-6">{child.code}</span>
-                            <span className="text-[var(--text)] flex-1">{child.name}</span>
+                            <span className="text-[var(--text)] flex-1 group-hover:text-[var(--primary)] transition-colors">{child.name}</span>
                             <span className="text-xs text-[var(--text-muted)]">{child.detailType}</span>
+                            <ExternalLink size={12} className="text-[var(--text-faint)] opacity-0 group-hover:opacity-100 mr-1 transition-opacity" />
                             <span className={cn(
                               'font-mono tabular-nums text-sm font-semibold w-[120px] text-right',
                               Number(child.balance) >= 0 ? 'text-[var(--text-strong)]' : 'text-[var(--danger)]'
