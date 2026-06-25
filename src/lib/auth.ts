@@ -92,14 +92,20 @@ export const authOptions: NextAuthOptions = {
         token.activeCompanyId = (user as any).activeCompanyId;
         token.activeCompanyName = (user as any).activeCompanyName;
         token.availableCompanies = (user as any).availableCompanies || [];
+        // Migration: carry forward old format for backward compatibility
+        token.companyId = (user as any).activeCompanyId || (user as any).companyId;
+        token.companyName = (user as any).activeCompanyName || (user as any).companyName;
       }
       return token;
     },
     async session({ session, token }) {
       session.user.id = token.id as string;
-      session.user.activeCompanyId = token.activeCompanyId as string | null;
-      session.user.activeCompanyName = token.activeCompanyName as string | null;
+      session.user.activeCompanyId = (token.activeCompanyId || token.companyId) as string | null;
+      session.user.activeCompanyName = (token.activeCompanyName || token.companyName) as string | null;
       session.user.availableCompanies = (token.availableCompanies as any[]) || [];
+      // Migration: preserve old fields for backward compat
+      (session.user as any).companyId = (token.activeCompanyId || token.companyId) as string | null;
+      (session.user as any).companyName = (token.activeCompanyName || token.companyName) as string | null;
       return session;
     },
   },
