@@ -23,7 +23,6 @@ const reports = [
     href: '/reports/balance-sheet',
     icon: Building2,
     color: 'bg-[var(--primary-soft)] text-[var(--accent)]',
-    comingSoon: true,
   },
   {
     title: 'Cash Flow Statement',

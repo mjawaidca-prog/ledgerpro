@@ -38,6 +38,8 @@
   --success:  #16a063;
   --danger:   #e0484e;
   --danger-soft: #fdecec;
+  --success-soft: #e7f6ee;
+  --warning-soft: #fdf4e3;
   --warning:  #d6961f;
 
   /* Neutral */
@@ -137,6 +139,8 @@
   --success:  #54c389;
   --danger:   #ef7e83;
   --danger-soft: rgba(224, 72, 78, 0.16);
+  --success-soft: rgba(22, 160, 99, 0.16);
+  --warning-soft: rgba(214, 150, 31, 0.16);
   --warning:  #f3cd80;
 
   --neutral-soft:        #364150;
