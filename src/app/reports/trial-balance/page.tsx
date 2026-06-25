@@ -7,7 +7,8 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
-import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar, Download } from 'lucide-react';
+import { exportTrialBalance } from '@/lib/export';
 import { format as formatDate, startOfMonth, subMonths, endOfMonth, startOfYear, startOfQuarter } from 'date-fns';
 
 interface TBRow {
@@ -111,6 +112,9 @@ export default function TrialBalancePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button onClick={() => exportTrialBalance(data)} className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:text-[var(--primary)] bg-[var(--primary-soft)] px-3 py-1.5 rounded-full transition-colors">
+            <Download size={13} /> Export CSV
+          </button>
           <div className="flex items-center gap-1">
             <Calendar size={14} className="text-[var(--text-muted)]" />
             {presets.map((p) => (

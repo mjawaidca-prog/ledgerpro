@@ -464,32 +464,87 @@ async function main() {
   await db.financialAccount.update({ where: { id: amexCard.id }, data: { currentBalance: -amexBal } });
   console.log('   10. Financial account balances synced from GL');
 
-  // ─── Bank transactions (imported from CSV) for banking page demo ───
+  // ─── Bank transactions (posted to GL as journal entries) ───
   const txnData = [
-    { date: new Date('2026-05-12'), description: 'Stripe payout — May', amount: 4820.00, categoryCode: '4000' },
-    { date: new Date('2026-05-11'), description: 'AWS — cloud hosting', amount: -1284.30, categoryCode: '6100' },
-    { date: new Date('2026-05-10'), description: 'Office rent — May', amount: -3500.00, categoryCode: '6300' },
-    { date: new Date('2026-05-09'), description: 'Payment — Vertex Partners', amount: 23110.00, categoryCode: '4000' },
-    { date: new Date('2026-05-07'), description: 'Payroll — bi-weekly', amount: -18400.00, categoryCode: '6200' },
-    { date: new Date('2026-05-05'), description: 'Shopify payout', amount: 2140.55, categoryCode: '4000' },
-    { date: new Date('2026-05-04'), description: 'Staples — office supplies', amount: -142.18, categoryCode: '6600' },
-    { date: new Date('2026-06-01'), description: 'Client payment — Acme Corp', amount: 15000.00, categoryCode: '4100' },
-    { date: new Date('2026-06-02'), description: 'Google Workspace — annual', amount: -720.00, categoryCode: '6100' },
-    { date: new Date('2026-06-03'), description: 'WeWork — June rent', amount: -3600.00, categoryCode: '6300' },
-    { date: new Date('2026-06-05'), description: 'Transfer to savings', amount: -5000.00, categoryCode: '1020' },
-    { date: new Date('2026-06-05'), description: 'Transfer from checking', amount: 5000.00, categoryCode: '1010' },
+    { date: new Date('2026-05-12'), description: 'Stripe payout — May', amount: 4820.00, catCode: '4000' },
+    { date: new Date('2026-05-11'), description: 'AWS — cloud hosting', amount: -1284.30, catCode: '6100' },
+    { date: new Date('2026-05-10'), description: 'Office rent — May', amount: -3500.00, catCode: '6300' },
+    { date: new Date('2026-05-09'), description: 'Payment — Vertex Partners', amount: 23110.00, catCode: '4000' },
+    { date: new Date('2026-05-07'), description: 'Payroll — bi-weekly', amount: -18400.00, catCode: '6200' },
+    { date: new Date('2026-05-05'), description: 'Shopify payout', amount: 2140.55, catCode: '4000' },
+    { date: new Date('2026-05-04'), description: 'Staples — office supplies', amount: -142.18, catCode: '6600' },
+    { date: new Date('2026-06-01'), description: 'Client payment — Acme Corp', amount: 15000.00, catCode: '4100' },
+    { date: new Date('2026-06-02'), description: 'Google Workspace — annual', amount: -720.00, catCode: '6100' },
+    { date: new Date('2026-06-03'), description: 'WeWork — June rent', amount: -3600.00, catCode: '6300' },
+    { date: new Date('2026-06-05'), description: 'Transfer to savings', amount: -5000.00, catCode: '1020' },
+    { date: new Date('2026-06-05'), description: 'Transfer from checking', amount: 5000.00, catCode: '1010' },
   ];
+
   for (const t of txnData) {
-    await db.transaction.create({
+    const isInflow = t.amount > 0;
+    const absAmount = Math.abs(t.amount);
+
+    // Create transaction record
+    const tx = await db.transaction.create({
       data: {
-        companyId: cid, financialAccountId: chaseChecking.id,
-        date: t.date, description: t.description, amount: t.amount,
-        categoryId: accounts[t.categoryCode]?.id,
-        status: 'categorized', source: 'csv',
+        companyId: cid,
+        financialAccountId: chaseChecking.id,
+        date: t.date,
+        description: t.description,
+        amount: t.amount,
+        categoryId: accounts[t.catCode]?.id,
+        status: 'categorized',
+        source: 'csv',
       },
     });
+
+    // Post to GL immediately
+    let entryLines: { code: string; description: string; debit: number; credit: number }[];
+    if (isInflow) {
+      entryLines = [
+        { code: '1010', description: t.description, debit: absAmount, credit: 0 },
+        { code: t.catCode, description: `Revenue — ${t.description}`, debit: 0, credit: absAmount },
+      ];
+    } else {
+      entryLines = [
+        { code: t.catCode, description: t.description, debit: absAmount, credit: 0 },
+        { code: '1010', description: `Payment — ${t.description}`, debit: 0, credit: absAmount },
+      ];
+    }
+
+    const entry = await db.journalEntry.create({
+      data: {
+        companyId: cid,
+        entryDate: t.date,
+        description: t.description,
+        sourceType: 'payment',
+        sourceId: tx.id,
+        lines: { create: entryLines.map((l) => ({ glAccountCode: l.code, description: l.description, debit: l.debit, credit: l.credit })) },
+      },
+    });
+
+    // Update GL balances
+    for (const l of entryLines) {
+      const acct = accounts[l.code];
+      if (!acct) continue;
+      const net = l.debit - l.credit;
+      const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? net : -net;
+      await db.chartOfAccount.update({ where: { id: acct.id }, data: { balance: { increment: balanceChange } } });
+      if (acct.parentCode && accounts[acct.parentCode]) {
+        await db.chartOfAccount.update({ where: { id: accounts[acct.parentCode].id }, data: { balance: { increment: balanceChange } } });
+      }
+    }
+
+    // Link transaction to GL entry
+    await db.transaction.update({ where: { id: tx.id }, data: { status: 'reconciled', matchRef: entry.id } });
   }
-  console.log(`  ✓ ${txnData.length} bank transactions created for banking page`);
+
+  // Sync financial account balances from GL
+  const chaseFinalBal = Number((await db.chartOfAccount.findUnique({ where: { id: accounts['1010'].id } }))!.balance);
+  const amexFinalBal = Number((await db.chartOfAccount.findUnique({ where: { id: accounts['2110'].id } }))!.balance);
+  await db.financialAccount.update({ where: { id: chaseChecking.id }, data: { currentBalance: chaseFinalBal } });
+  await db.financialAccount.update({ where: { id: amexCard.id }, data: { currentBalance: -amexFinalBal } });
+  console.log(`  ✓ ${txnData.length} bank transactions created and posted to GL`);
 
   // ─── Final balances report ───
   console.log('\n  📊 Final GL Balances:');
