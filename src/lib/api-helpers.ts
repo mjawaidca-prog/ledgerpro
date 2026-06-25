@@ -15,7 +15,7 @@ export async function requireCompany(
   const headerCompanyId = req.headers.get('x-company-id');
   const headerUserId = req.headers.get('x-user-id');
 
-  if (headerCompanyId && headerUserId) {
+  if (headerCompanyId && headerCompanyId !== 'undefined' && headerUserId && headerUserId !== 'undefined') {
     // Verify membership if roles specified
     if (opts?.roles?.length) {
       const membership = await db.membership.findUnique({
@@ -34,21 +34,26 @@ export async function requireCompany(
 
   // Fallback to session
   const session = await getServerSession();
+  const user = session?.user as any;
 
-  if (!session?.user?.activeCompanyId) {
+  // Support old session format during migration (companyId → activeCompanyId)
+  const resolvedCompanyId = user?.activeCompanyId || user?.companyId || null;
+  const resolvedUserId = user?.id || null;
+
+  if (!resolvedCompanyId) {
     return {
       companyId: null,
       userId: null,
-      error: NextResponse.json({ error: 'Unauthorized — no company selected' }, { status: 401 }),
+      error: NextResponse.json({ error: 'Unauthorized — no company selected. Please log out and back in.' }, { status: 401 }),
     };
   }
 
-  if (opts?.roles?.length) {
+  if (opts?.roles?.length && resolvedUserId && resolvedCompanyId) {
     const membership = await db.membership.findUnique({
       where: {
         userId_companyId: {
-          userId: session.user.id,
-          companyId: session.user.activeCompanyId,
+          userId: resolvedUserId,
+          companyId: resolvedCompanyId,
         },
       },
     });
@@ -62,8 +67,8 @@ export async function requireCompany(
   }
 
   return {
-    companyId: session.user.activeCompanyId,
-    userId: session.user.id,
+    companyId: resolvedCompanyId,
+    userId: resolvedUserId,
     error: null,
   };
 }

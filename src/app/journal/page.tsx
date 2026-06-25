@@ -41,9 +41,9 @@ export default function JournalListPage() {
       try {
         const res = await fetch(`/api/journal?page=${page}&limit=25`);
         const json = await res.json();
-        setEntries(json.data);
-        setTotalPages(json.pagination.totalPages);
-      } catch { /* ignore */ } finally { setLoading(false); }
+        setEntries(Array.isArray(json.data) ? json.data : []);
+        setTotalPages(json.pagination?.totalPages || 1);
+      } catch { setEntries([]); } finally { setLoading(false); }
     }
     load();
   }, [page]);

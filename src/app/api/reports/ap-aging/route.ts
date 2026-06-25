@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req);
+    const { companyId, userId, error } = await requireCompany(req);
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
