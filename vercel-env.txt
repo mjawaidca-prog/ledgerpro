@@ -1,0 +1,5 @@
+DATABASE_URL=postgresql://postgres:k1W2HHYQijHHZR3S@db.xdniuuetrsflynxvnqzc.supabase.co:5432/postgres
+DIRECT_URL=postgresql://postgres:k1W2HHYQijHHZR3S@db.xdniuuetrsflynxvnqzc.supabase.co:5432/postgres
+NEXTAUTH_SECRET=zQStnLNaj2SQJOO+rQi8rURSoea+PJ4hyzF52z8yewU=
+NEXTAUTH_URL=https://ledger.nexvarlab.com
+RESEND_API_KEY=
