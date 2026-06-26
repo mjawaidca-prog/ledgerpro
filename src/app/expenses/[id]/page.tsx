@@ -133,7 +133,7 @@ export default function EditBillPage() {
   }
 
   if (loading) {
-    return <AppShell companyName="Northwind Trading" companyPlan="Business">
+    return <AppShell>
       <div className="flex items-center justify-center h-64 text-[var(--text-muted)]">
         <Loader2 size={24} className="animate-spin" />
       </div>
@@ -143,7 +143,7 @@ export default function EditBillPage() {
   const statusVariant = status === 'paid' ? 'paid' as const : status === 'overdue' ? 'overdue' as const : status === 'draft' ? 'draft' as const : status === 'void' ? 'draft' as const : 'pending' as const;
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => router.push('/expenses')}
           className="w-[38px] h-[38px] grid place-items-center rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:border-[var(--border-strong)] transition-colors">

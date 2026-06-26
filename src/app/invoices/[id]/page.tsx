@@ -10,7 +10,7 @@ import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import {
-  ArrowLeft, Plus, Trash2, Save, Send, Search, X, Loader2, MoreHorizontal,
+  ArrowLeft, Plus, Trash2, Save, Send, Search, X, Loader2, MoreHorizontal, Printer, Mail,
 } from 'lucide-react';
 
 interface CustomerOption {
@@ -165,7 +165,7 @@ export default function EditInvoicePage() {
 
   if (loading) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="flex items-center justify-center h-64 text-[var(--text-muted)]">
           <Loader2 size={24} className="animate-spin" />
         </div>
@@ -175,7 +175,7 @@ export default function EditInvoicePage() {
 
   if (error && !selectedCustomer) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <Alert variant="danger">{error}</Alert>
       </AppShell>
     );
@@ -186,7 +186,7 @@ export default function EditInvoicePage() {
     status === 'draft' ? 'draft' as const : status === 'void' ? 'draft' as const : 'pending' as const;
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <button
@@ -211,6 +211,20 @@ export default function EditInvoicePage() {
           <>
             <Button variant="secondary" onClick={() => handleSave('draft')} disabled={saving}>
               <Save size={16} /> Save
+            </Button>
+            <Button variant="secondary" onClick={() => window.open(`/pay/${id}`, '_blank')}>
+              <Printer size={14} /> Print / PDF
+            </Button>
+            <Button variant="secondary" onClick={async () => {
+              const email = prompt('Send invoice to email:', selectedCustomer?.email || '');
+              if (!email) return;
+              try {
+                const res = await fetch('/api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoiceId: id, to: email }) });
+                const json = await res.json();
+                alert(json.data?.success ? 'Invoice emailed successfully!' : 'Failed to send: ' + (json.data?.error || json.error));
+              } catch { alert('Failed to send email'); }
+            }}>
+              <Mail size={14} /> Email
             </Button>
             <Button onClick={() => handleSave('sent')} disabled={saving}>
               {saving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}

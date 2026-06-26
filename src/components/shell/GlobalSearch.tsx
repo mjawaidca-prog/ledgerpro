@@ -42,7 +42,15 @@ export function GlobalSearch() {
       if (e.key === 'Escape') setOpen(false);
     }
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    // Register callback so Topbar can open this
+    (window as any).__openGlobalSearch = () => {
+      setOpen(true);
+      setTimeout(() => inputRef.current?.focus(), 50);
+    };
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      delete (window as any).__openGlobalSearch;
+    };
   }, []);
 
   // Debounced search

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { cn } from '@/lib/cn';
 import { CompanySwitcher } from './CompanySwitcher';
 import { signOut } from 'next-auth/react';
@@ -14,6 +15,9 @@ import {
   BarChart3, Scale,
   Users,
   LogOut,
+  Settings,
+  Shield,
+  Briefcase,
 } from 'lucide-react';
 
 interface RailProps {
@@ -22,49 +26,58 @@ interface RailProps {
   companyId: string | null;
   userName: string;
   userEmail: string;
+  className?: string;
 }
 
-const navItems = [
+const mainNavItems = [
   { href: '/',              label: 'Dashboard',          icon: LayoutDashboard },
   { href: '/invoices',      label: 'Sales & Invoices',   icon: FileText },
   { href: '/expenses',      label: 'Expenses',           icon: Receipt },
   { href: '/banking',       label: 'Banking',            icon: Building2 },
   { href: '/journal',       label: 'Journal',            icon: FileText },
   { href: '/chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
-  { href: '/reports/trial-balance', label: 'Trial Balance', icon: Scale },
   { href: '/reports',       label: 'Reports',            icon: BarChart3 },
   { href: '/contacts',      label: 'Contacts',           icon: Users },
 ];
 
-export function Rail({ companyName, companyPlan, companyId, userName, userEmail }: RailProps) {
+const settingsNavItems = [
+  { href: '/recurring',                label: 'Recurring',          icon: FileText },
+  { href: '/settings/categorization',  label: 'Categorization',     icon: Shield },
+  { href: '/settings',                 label: 'Company Settings',    icon: Settings },
+  { href: '/settings/period-close',    label: 'Period Close',       icon: Shield },
+  { href: '/settings/audit-log',       label: 'Audit Log',          icon: FileText },
+];
+
+export function Rail({ companyName, companyPlan, companyId, userName, userEmail, className }: RailProps) {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const availableCompanies = (session?.user as any)?.availableCompanies || [];
+  const isAccountant = availableCompanies.length > 1;
+
+  function renderLink(item: { href: string; label: string; icon: any }) {
+    const Icon = item.icon;
+    const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+    return (
+      <Link key={item.href} href={item.href} className={cn('nav-item', isActive && 'active')}>
+        <Icon size={18} />
+        <span>{item.label}</span>
+      </Link>
+    );
+  }
 
   return (
-    <aside className="rail">
-      {/* Org switcher */}
-      <CompanySwitcher
-        activeCompanyId={companyId}
-        activeCompanyName={companyName}
-      />
+    <aside className={cn('rail', className)}>
+      <CompanySwitcher activeCompanyId={companyId} activeCompanyName={companyName} />
 
-      {/* Navigation */}
       <nav className="rail-nav">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = pathname === item.href ||
-            (item.href !== '/' && pathname.startsWith(item.href));
+        {mainNavItems.map(renderLink)}
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn('nav-item', isActive && 'active')}
-            >
-              <Icon size={18} />
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
+        <div style={{ height: 1, background: 'var(--side-border)', margin: '6px 8px' }} />
+
+        {/* Accountant — only visible for multi-company users */}
+        {isAccountant && renderLink({ href: '/accountant', label: 'Accountant', icon: Briefcase })}
+
+        {settingsNavItems.map(renderLink)}
       </nav>
 
       {/* User footer */}

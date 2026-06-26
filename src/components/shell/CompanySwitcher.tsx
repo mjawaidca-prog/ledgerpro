@@ -26,15 +26,18 @@ export function CompanySwitcher({
   const [open, setOpen] = useState(false);
   const [companies, setCompanies] = useState<CompanyInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
 
   useEffect(() => {
-    if (open) {
+    if (open && !fetched) {
+      setLoading(true);
       fetch('/api/companies')
         .then((r) => r.json())
         .then((json) => setCompanies(json.data || []))
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => { setLoading(false); setFetched(true); });
     }
-  }, [open]);
+  }, [open, fetched]);
 
   async function handleSwitch(companyId: string) {
     setLoading(true);
@@ -64,7 +67,7 @@ export function CompanySwitcher({
         <span className="org-meta">
           <span className="org-name">{activeCompanyName || 'Select Company'}</span>
           <span className="org-plan">
-            {companies.find(c => c.id === activeCompanyId)?.plan || 'Loading...'}
+            {loading ? 'Loading...' : companies.find(c => c.id === activeCompanyId)?.plan || activeCompanyId ? 'Current' : 'Select company'}
           </span>
         </span>
         <span className="chev" style={{ marginLeft: 'auto' }}>

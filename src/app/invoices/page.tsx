@@ -11,7 +11,8 @@ import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format, isPast } from 'date-fns';
-import { Plus, Search, Upload, Download, ArrowUpRight, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Plus, Search, Download, ArrowUpRight, MoreHorizontal, Trash2 } from 'lucide-react';
+import { exportInvoices } from '@/lib/export';
 import type { Column } from '@/components/ui/DataTable';
 
 interface Invoice {
@@ -209,15 +210,14 @@ export default function InvoicesPage() {
   );
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="content-head">
         <div>
           <h1 className="greet">Sales & Invoices</h1>
           <p className="sub">Manage invoices and track payments.</p>
         </div>
         <div className="spacer" />
-        <Button variant="secondary"><Upload size={16} /> Import</Button>
-        <Button variant="secondary"><Download size={16} /> Export</Button>
+        <Button variant="secondary" onClick={() => exportInvoices(invoices)}><Download size={16} /> Export</Button>
         <Button onClick={() => router.push('/invoices/new')}>
           <Plus size={16} /> New Invoice
         </Button>

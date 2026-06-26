@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { z } from 'zod';
+import crypto from 'crypto';
 
 const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -57,6 +58,9 @@ export async function POST(req: NextRequest) {
     // Hash password
     const passwordHash = await hash(password, 12);
 
+    // Generate email verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+
     // Find free trial plan (outside transaction)
     const freePlan = await db.plan.findFirst({
       where: { name: 'Free Trial' },
@@ -67,7 +71,7 @@ export async function POST(req: NextRequest) {
     const result = await db.$transaction(async (tx) => {
       // Create user
       const user = await tx.user.create({
-        data: { name, email, passwordHash },
+        data: { name, email, passwordHash, emailVerificationToken: verificationToken },
       });
 
       // Create company
@@ -131,6 +135,7 @@ export async function POST(req: NextRequest) {
         userId: result.user.id,
         companyId: result.company.id,
         companyName: result.company.name,
+        verificationToken: process.env.NODE_ENV === 'development' ? verificationToken : undefined,
         message: 'Registration successful. You can now sign in.',
       },
     }, { status: 201 });

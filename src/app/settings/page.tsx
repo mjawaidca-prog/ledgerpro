@@ -6,7 +6,8 @@ import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
-import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2 } from 'lucide-react';
+import { BUSINESS_TYPES, PROVINCE_OPTIONS } from '@/lib/taxes';
+import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar } from 'lucide-react';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -14,7 +15,10 @@ export default function SettingsPage() {
   const [subscription, setSubscription] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', legalName: '', currency: '', locale: '', timezone: '' });
+  const [form, setForm] = useState({
+    name: '', legalName: '', businessType: 'corporation', businessNumber: '', gstNumber: '',
+    province: 'AB', fiscalYearStart: '', fiscalYearEnd: '', currency: 'CAD', locale: 'en-CA', timezone: 'America/Edmonton',
+  });
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,7 +31,15 @@ export default function SettingsPage() {
         const comp = compRes.data?.[0];
         if (comp) {
           setCompany(comp);
-          setForm({ name: comp.name || '', legalName: '', currency: 'USD', locale: 'en-US', timezone: 'America/Edmonton' });
+          setForm({
+            name: comp.name || '', legalName: comp.legalName || '',
+            businessType: comp.businessType || 'corporation',
+            businessNumber: comp.businessNumber || '', gstNumber: comp.gstNumber || '',
+            province: comp.province || 'AB',
+            fiscalYearStart: comp.fiscalYearStart ? new Date(comp.fiscalYearStart).toISOString().slice(0, 10) : '',
+            fiscalYearEnd: comp.fiscalYearEnd ? new Date(comp.fiscalYearEnd).toISOString().slice(0, 10) : '',
+            currency: comp.currency || 'CAD', locale: comp.locale || 'en-CA', timezone: comp.timezone || 'America/Edmonton',
+          });
         }
         setSubscription(subRes.data);
       } catch {} finally { setLoading(false); }
@@ -39,7 +51,12 @@ export default function SettingsPage() {
     e.preventDefault();
     setSaving(true); setMessage(null);
     try {
-      // Update company — stub for now (PUT endpoint not built yet)
+      const res = await fetch('/api/companies', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error('Failed');
       setMessage('Settings saved.');
     } catch { setMessage('Failed to save.'); }
     finally { setSaving(false); }
@@ -64,10 +81,21 @@ export default function SettingsPage() {
             <CardBody>
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div><label className="text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)]">Company Name</label><input type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border border-[var(--border)] rounded-lg px-3 py-2 mt-1 text-sm bg-[var(--surface)]" /></div>
-                  <div><label className="text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)]">Legal Name</label><input type="text" value={form.legalName} onChange={e => setForm({...form, legalName: e.target.value})} className="w-full border border-[var(--border)] rounded-lg px-3 py-2 mt-1 text-sm bg-[var(--surface)]" /></div>
-                  <div><label className="text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)]">Currency</label><select value={form.currency} onChange={e => setForm({...form, currency: e.target.value})} className="w-full border border-[var(--border)] rounded-lg px-3 py-2 mt-1 text-sm bg-[var(--surface)]"><option>USD</option><option>CAD</option><option>GBP</option><option>EUR</option></select></div>
-                  <div><label className="text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)]">Time Zone</label><select value={form.timezone} onChange={e => setForm({...form, timezone: e.target.value})} className="w-full border border-[var(--border)] rounded-lg px-3 py-2 mt-1 text-sm bg-[var(--surface)]"><option>America/Edmonton</option><option>America/New_York</option><option>America/Chicago</option><option>America/Denver</option><option>America/Los_Angeles</option></select></div>
+                  <div className="field"><label>Company Name</label><input type="text" className="input" value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>
+                  <div className="field"><label>Legal Name</label><input type="text" className="input" value={form.legalName} onChange={e => setForm({...form, legalName: e.target.value})} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="field"><label>Business Type</label><select className="input" value={form.businessType} onChange={e => setForm({...form, businessType: e.target.value})}>{BUSINESS_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
+                  <div className="field"><label>Province</label><select className="input" value={form.province} onChange={e => setForm({...form, province: e.target.value})}>{PROVINCE_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="field"><label>Business Number (BN)</label><input type="text" className="input" value={form.businessNumber} onChange={e => setForm({...form, businessNumber: e.target.value})} maxLength={9} /></div>
+                  <div className="field"><label>GST/HST Number</label><input type="text" className="input" value={form.gstNumber} onChange={e => setForm({...form, gstNumber: e.target.value})} /></div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="field"><label>Fiscal Year Start</label><input type="date" className="input" value={form.fiscalYearStart} onChange={e => setForm({...form, fiscalYearStart: e.target.value})} /></div>
+                  <div className="field"><label>Fiscal Year End</label><input type="date" className="input" value={form.fiscalYearEnd} onChange={e => setForm({...form, fiscalYearEnd: e.target.value})} /></div>
+                  <div className="field"><label>Currency</label><select className="input" value={form.currency} onChange={e => setForm({...form, currency: e.target.value})}><option>CAD</option><option>USD</option><option>EUR</option><option>GBP</option></select></div>
                 </div>
                 <Button type="submit" disabled={saving}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Changes</Button>
               </form>

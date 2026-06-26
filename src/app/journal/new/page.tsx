@@ -161,7 +161,7 @@ export default function NewJournalEntryPage() {
   };
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="max-w-3xl">
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { Button } from '@/components/ui/Button';
@@ -42,7 +42,7 @@ const expenseCategories = [
   { code: '5000', name: 'Cost of Goods Sold' },
 ];
 
-export default function NewBillPage() {
+function NewBillContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialKind = (searchParams.get('kind') as 'bill' | 'expense') || 'expense';
@@ -124,7 +124,7 @@ export default function NewBillPage() {
   }
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => router.push('/expenses')}
           className="w-[38px] h-[38px] grid place-items-center rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:border-[var(--border-strong)] transition-colors">
@@ -370,5 +370,13 @@ export default function NewBillPage() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+export default function NewBillPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 size={24} className="animate-spin text-[var(--text-muted)]" /></div>}>
+      <NewBillContent />
+    </Suspense>
   );
 }

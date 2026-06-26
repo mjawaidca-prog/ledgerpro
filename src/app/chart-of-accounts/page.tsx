@@ -10,7 +10,8 @@ import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { useRouter } from 'next/navigation';
-import { Search, Upload, Download, Loader2, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { exportChartOfAccounts } from '@/lib/export';
 import type { Column } from '@/components/ui/DataTable';
 
 interface COAEntry {
@@ -149,7 +150,7 @@ export default function ChartOfAccountsPage() {
 
   if (loading) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="flex items-center justify-center h-64 text-[var(--text-muted)]">
           <Loader2 size={24} className="animate-spin" />
         </div>
@@ -158,15 +159,14 @@ export default function ChartOfAccountsPage() {
   }
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="content-head">
         <div>
           <h1 className="greet">Chart of Accounts</h1>
           <p className="sub">The complete ledger structure for Northwind Trading — {totalAccounts} accounts.</p>
         </div>
         <div className="spacer" />
-        <Button variant="secondary"><Upload size={16} /> Import</Button>
-        <Button variant="secondary"><Download size={16} /> Export</Button>
+        <Button variant="secondary" onClick={() => exportChartOfAccounts(accounts)}><Download size={16} /> Export</Button>
         <Button><PlusIcon /> New Account</Button>
       </div>
 

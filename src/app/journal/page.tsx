@@ -54,7 +54,7 @@ export default function JournalListPage() {
   };
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">Journal Entries</h1>

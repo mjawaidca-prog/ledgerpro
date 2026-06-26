@@ -125,3 +125,33 @@ export async function auditLog(
     console.error('[auditLog] Failed to record:', action, e);
   }
 }
+
+/**
+ * Guards mutation APIs against edits to closed periods.
+ * If the given date falls within any closed period, returns a 409 Conflict response.
+ * Returns null if the date is in an open period (mutation allowed).
+ */
+export async function closedPeriodGuard(
+  companyId: string,
+  date: Date
+): Promise<NextResponse | null> {
+  const closed = await db.periodClose.findFirst({
+    where: {
+      companyId,
+      status: 'closed',
+      periodStart: { lte: date },
+      periodEnd: { gte: date },
+    },
+  });
+
+  if (closed) {
+    return NextResponse.json(
+      {
+        error: `This date falls within a closed period (${closed.periodStart.toISOString().slice(0, 10)} — ${closed.periodEnd.toISOString().slice(0, 10)}). Changes to closed periods are not allowed.`,
+      },
+      { status: 409 }
+    );
+  }
+
+  return null;
+}

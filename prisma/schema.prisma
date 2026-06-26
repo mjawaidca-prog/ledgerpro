@@ -30,15 +30,21 @@ model User {
 }
 
 model Company {
-  id              String   @id @default(cuid())
-  name            String
-  legalName       String?
-  fiscalYearStart DateTime
-  currency        String   @default("USD")
-  locale          String   @default("en-US")
-  timezone        String   @default("America/Edmonton")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String             @id @default(cuid())
+  name             String
+  legalName        String?
+  fiscalYearStart  DateTime           // e.g. 2025-01-01
+  fiscalYearEnd    DateTime?          // e.g. 2025-12-31 (auto: +1y -1d, editable)
+  businessType     BusinessType?      // sole_proprietor, partnership, corporation, etc.
+  businessNumber   String?            // Canada: BN (9 digits)
+  gstNumber        String?            // GST/HST registration number
+  province         CanadianProvince?  // AB, BC, MB, NB, NL, NS, NT, NU, ON, PE, QC, SK, YT
+  currency         String   @default("CAD")
+  locale           String   @default("en-CA")
+  timezone         String   @default("America/Edmonton")
+  onboardingComplete Boolean @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   memberships     Membership[]
   subscriptions   Subscription[]
@@ -52,9 +58,36 @@ model Company {
   journalEntries   JournalEntry[]
   importBatches    ImportBatch[]
   transferMatches  TransferMatch[]
-  auditLogs        AuditLog[]
-  budgets          Budget[]
-  periodCloses     PeriodClose[]
+  auditLogs           AuditLog[]
+  budgets             Budget[]
+  periodCloses        PeriodClose[]
+  recurringTemplates  RecurringTemplate[]
+  categorizationRules CategorizationRule[]
+  reportTemplates     ReportTemplate[]
+}
+
+enum BusinessType {
+  sole_proprietor
+  partnership
+  corporation
+  nonprofit
+  other
+}
+
+enum CanadianProvince {
+  AB
+  BC
+  MB
+  NB
+  NL
+  NS
+  NT
+  NU
+  ON
+  PE
+  QC
+  SK
+  YT
 }
 
 model Membership {
@@ -158,9 +191,10 @@ model ChartOfAccount {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  transactions Transaction[]  @relation("TransactionCategory")
-  billLines    BillLineItem[] @relation("BillLineCategory")
-  lineItems    InvoiceLineItem[] @relation("InvoiceLineCategory")
+  transactions        Transaction[]        @relation("TransactionCategory")
+  billLines           BillLineItem[]        @relation("BillLineCategory")
+  lineItems           InvoiceLineItem[]     @relation("InvoiceLineCategory")
+  categorizationRules CategorizationRule[]
 
   @@unique([companyId, code])
   @@index([companyId, type])
@@ -713,4 +747,113 @@ enum NotificationType {
   subscription_expiring
   member_joined
   system
+}
+
+// ─── CANADIAN TAX RATES ──────────────────────────────────────
+
+model TaxRate {
+  id            String           @id @default(cuid())
+  province      CanadianProvince @unique
+  provinceName  String           // "Alberta", "British Columbia", etc.
+  gst           Decimal          @default(5.00) @db.Decimal(5, 3)   // Federal GST (5% everywhere)
+  hst           Decimal          @default(0) @db.Decimal(5, 3)      // Harmonized (replaces GST+PST in some provinces)
+  pst           Decimal          @default(0) @db.Decimal(5, 3)      // Provincial sales tax (separate from GST)
+  totalSalesTax Decimal          @db.Decimal(5, 3)                  // Effective total sales tax rate
+  label         String                                               // "5% GST", "13% HST", "5% GST + 7% PST"
+
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+}
+
+// ─── RECURRING TRANSACTIONS ──────────────────────────────────
+
+model RecurringTemplate {
+  id            String          @id @default(cuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name          String          // "Monthly Rent", "Annual SaaS"
+  description   String?
+  frequency     RecurringFrequency // weekly, monthly, quarterly, annual
+  nextPostDate  DateTime        // next scheduled posting date
+  endDate       DateTime?       // optional end date
+  active        Boolean         @default(true)
+
+  // Template for the journal entry
+  sourceType    JournalSource   @default(manual)
+  lines         RecurringLine[]
+
+  lastPostedAt  DateTime?
+  timesPosted   Int             @default(0)
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model RecurringLine {
+  id            String          @id @default(cuid())
+  templateId    String
+  template      RecurringTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  glAccountCode String
+  description   String?
+  debit         Decimal         @default(0) @db.Decimal(14, 2)
+  credit        Decimal         @default(0) @db.Decimal(14, 2)
+  sortOrder     Int             @default(0)
+}
+
+enum RecurringFrequency {
+  weekly
+  monthly
+  quarterly
+  annual
+}
+
+// ─── AI CATEGORIZATION RULES ─────────────────────────────────
+
+model CategorizationRule {
+  id            String          @id @default(cuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name          String          // "AWS charges", "Google Workspace"
+  pattern       String          // regex or merchant name
+  patternType   RulePatternType // merchant_match, description_contains, amount_range
+  categoryId    String
+  category      ChartOfAccount  @relation(fields: [categoryId], references: [id])
+
+  minAmount     Decimal?        @db.Decimal(14, 2)  // for amount_range
+  maxAmount     Decimal?        @db.Decimal(14, 2)
+  priority      Int             @default(0)          // higher = checked first
+  active        Boolean         @default(true)
+
+  matchCount    Int             @default(0)          // how many times matched
+  lastMatchedAt DateTime?
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+enum RulePatternType {
+  merchant_match
+  description_contains
+  amount_range
+  regex
+}
+
+// ─── CUSTOM REPORT TEMPLATES ──────────────────────────────────
+
+model ReportTemplate {
+  id            String          @id @default(cuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name          String          // "Monthly P&L by Department"
+  reportType    String          // profit_loss, balance_sheet, custom, etc.
+  config        Json            // { accounts: [...], grouping, columns, period }
+  isPublic      Boolean         @default(false)    // visible to all company members
+
+  createdBy     String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 }

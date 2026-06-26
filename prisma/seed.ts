@@ -16,6 +16,27 @@ async function main() {
   ]);
   console.log(`  ✓ ${plans.length} subscription plans`);
 
+  // ─── Canadian Tax Rates ───
+  const taxRates = [
+    { province: 'AB' as const, provinceName: 'Alberta', gst: 5.0, hst: 0, pst: 0, totalSalesTax: 5.0, label: '5% GST' },
+    { province: 'BC' as const, provinceName: 'British Columbia', gst: 5.0, hst: 0, pst: 7.0, totalSalesTax: 12.0, label: '5% GST + 7% PST' },
+    { province: 'MB' as const, provinceName: 'Manitoba', gst: 5.0, hst: 0, pst: 7.0, totalSalesTax: 12.0, label: '5% GST + 7% PST' },
+    { province: 'NB' as const, provinceName: 'New Brunswick', gst: 0, hst: 15, pst: 0, totalSalesTax: 15.0, label: '15% HST' },
+    { province: 'NL' as const, provinceName: 'Newfoundland and Labrador', gst: 0, hst: 15, pst: 0, totalSalesTax: 15.0, label: '15% HST' },
+    { province: 'NS' as const, provinceName: 'Nova Scotia', gst: 0, hst: 15, pst: 0, totalSalesTax: 15.0, label: '15% HST' },
+    { province: 'NT' as const, provinceName: 'Northwest Territories', gst: 5.0, hst: 0, pst: 0, totalSalesTax: 5.0, label: '5% GST' },
+    { province: 'NU' as const, provinceName: 'Nunavut', gst: 5.0, hst: 0, pst: 0, totalSalesTax: 5.0, label: '5% GST' },
+    { province: 'ON' as const, provinceName: 'Ontario', gst: 0, hst: 13, pst: 0, totalSalesTax: 13.0, label: '13% HST' },
+    { province: 'PE' as const, provinceName: 'Prince Edward Island', gst: 0, hst: 15, pst: 0, totalSalesTax: 15.0, label: '15% HST' },
+    { province: 'QC' as const, provinceName: 'Quebec', gst: 5.0, hst: 0, pst: 9.975, totalSalesTax: 14.975, label: '5% GST + 9.975% QST' },
+    { province: 'SK' as const, provinceName: 'Saskatchewan', gst: 5.0, hst: 0, pst: 6.0, totalSalesTax: 11.0, label: '5% GST + 6% PST' },
+    { province: 'YT' as const, provinceName: 'Yukon', gst: 5.0, hst: 0, pst: 0, totalSalesTax: 5.0, label: '5% GST' },
+  ];
+  for (const tr of taxRates) {
+    await db.taxRate.upsert({ where: { province: tr.province }, update: tr, create: tr });
+  }
+  console.log(`  ✓ ${taxRates.length} Canadian tax rates`);
+
   // ─── User & Company ───
 
   const passwordHash = await hash('ledgerpro2026', 12);
@@ -32,8 +53,10 @@ async function main() {
     create: {
       id: 'northwind_main',
       name: 'Northwind Trading', legalName: 'Northwind Trading LLC',
-      fiscalYearStart: new Date('2026-01-01'), currency: 'USD',
-      locale: 'en-US', timezone: 'America/Edmonton',
+      fiscalYearStart: new Date('2026-01-01'), fiscalYearEnd: new Date('2026-12-31'),
+      businessType: 'corporation', businessNumber: '123456789', gstNumber: '123456789RT0001',
+      province: 'AB' as const, currency: 'CAD', locale: 'en-CA', timezone: 'America/Edmonton',
+      onboardingComplete: true,
     },
   });
   // Create membership instead of owner relation
@@ -621,6 +644,51 @@ async function main() {
 
   const jeCount = await db.journalEntry.count({ where: { companyId: cid } });
   const jlCount = await db.journalLine.count({ where: { journalEntry: { companyId: cid } } });
+  // ─── Demo Categorization Rules ───
+  const softwareCat = await db.chartOfAccount.findFirst({ where: { companyId: cid, code: '6100' } });
+  if (softwareCat) {
+    const rules = [
+      { pattern: 'AWS', patternType: 'description_contains' as const, name: 'Amazon Web Services', categoryId: softwareCat.id },
+      { pattern: 'GOOGLE', patternType: 'description_contains' as const, name: 'Google Workspace', categoryId: softwareCat.id },
+      { pattern: 'MICROSOFT', patternType: 'description_contains' as const, name: 'Microsoft 365', categoryId: softwareCat.id },
+      { pattern: 'DIGITALOCEAN', patternType: 'description_contains' as const, name: 'DigitalOcean', categoryId: softwareCat.id },
+    ];
+    for (const rule of rules) {
+      await db.categorizationRule.upsert({
+        where: { id: `rule_${rule.name.toLowerCase().replace(/ /g, '_')}_${cid}` },
+        update: {},
+        create: { ...rule, companyId: cid, priority: 10 },
+      });
+    }
+    console.log(`  ✓ ${rules.length} demo categorization rules`);
+  }
+
+  // ─── Demo Recurring Template ───
+  const rentCat = await db.chartOfAccount.findFirst({ where: { companyId: cid, code: '6300' } });
+  const bankAcct = await db.chartOfAccount.findFirst({ where: { companyId: cid, code: '1010' } });
+  if (rentCat && bankAcct) {
+    await db.recurringTemplate.upsert({
+      where: { id: 'rec_rent_' + cid },
+      update: {},
+      create: {
+        id: 'rec_rent_' + cid,
+        companyId: cid,
+        name: 'Monthly Office Rent',
+        description: 'Office lease payment — Unit 4B',
+        frequency: 'monthly',
+        nextPostDate: new Date('2026-07-01'),
+        active: true,
+        lines: {
+          create: [
+            { glAccountCode: '6300', description: 'Monthly rent', debit: 3200, credit: 0, sortOrder: 0 },
+            { glAccountCode: '1010', description: 'Rent payment from checking', debit: 0, credit: 3200, sortOrder: 1 },
+          ],
+        },
+      },
+    });
+    console.log('  ✓ Demo recurring template (Monthly Rent)');
+  }
+
   console.log(`\n✅ Seed complete — ${jeCount} journal entries, ${jlCount} journal lines, full audit trail.\n`);
 }
 

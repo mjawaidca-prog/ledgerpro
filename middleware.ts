@@ -10,6 +10,8 @@ export default withAuth(
     if (
       pathname === '/login' ||
       pathname === '/register' ||
+      pathname === '/onboarding' ||
+      pathname.startsWith('/register/verify') ||
       pathname.startsWith('/api/auth')
     ) {
       return NextResponse.next();
@@ -18,10 +20,17 @@ export default withAuth(
     // API routes: inject companyId + userId headers for tenant isolation
     if (pathname.startsWith('/api/')) {
       const requestHeaders = new Headers(req.headers);
-      // Support both old and new JWT formats
-      const companyId = (token as any)?.activeCompanyId || (token as any)?.companyId;
-      if (companyId) {
-        requestHeaders.set('x-company-id', companyId as string);
+
+      // Priority 1: cookie (set by company switch)
+      const cookieCompanyId = req.cookies.get('lp-active-company-id')?.value;
+
+      // Priority 2: JWT token
+      const jwtCompanyId = (token as any)?.activeCompanyId || (token as any)?.companyId;
+
+      const effectiveCompanyId = cookieCompanyId || jwtCompanyId;
+
+      if (effectiveCompanyId) {
+        requestHeaders.set('x-company-id', effectiveCompanyId as string);
       }
       if (token?.id || (token as any)?.sub) {
         requestHeaders.set('x-user-id', (token?.id || (token as any)?.sub) as string);
@@ -32,6 +41,8 @@ export default withAuth(
       });
     }
 
+    // For page routes: if there's a cookie with a different company, pass it through
+    // but still let the page render (it will read from cookie/session client-side)
     return NextResponse.next();
   },
   {
@@ -42,6 +53,8 @@ export default withAuth(
         if (
           pathname === '/login' ||
           pathname === '/register' ||
+          pathname === '/onboarding' ||
+          pathname.startsWith('/register/verify') ||
           pathname.startsWith('/api/auth')
         ) {
           return true;

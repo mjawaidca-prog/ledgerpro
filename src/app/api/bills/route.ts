@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany } from '@/lib/api-helpers';
+import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { billSchema } from '@/lib/validators/bill';
 
 function generateBillId(kind: 'bill' | 'expense'): string {
@@ -72,6 +72,12 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const body = await req.json();
+
+    // Guard: prevent changes in closed periods
+    if (body.billDate) {
+      const guardError = await closedPeriodGuard(companyId, new Date(body.billDate));
+      if (guardError) return guardError;
+    }
     const parsed = billSchema.safeParse(body);
 
     if (!parsed.success) {

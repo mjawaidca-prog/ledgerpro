@@ -358,7 +358,7 @@ function GLContent() {
 
 export default function GeneralLedgerPage() {
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <Suspense fallback={<div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-[var(--text-muted)]" size={28} /></div>}>
         <GLContent />
       </Suspense>

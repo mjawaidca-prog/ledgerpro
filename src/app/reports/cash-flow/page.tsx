@@ -47,7 +47,7 @@ export default function CashFlowPage() {
 
   if (loading) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="animate-spin text-[var(--text-muted)]" size={28} />
         </div>
@@ -57,7 +57,7 @@ export default function CashFlowPage() {
 
   if (error || !data) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="text-center py-16 text-[var(--text-muted)]">{error || 'No data'}</div>
       </AppShell>
     );
@@ -69,7 +69,7 @@ export default function CashFlowPage() {
   );
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <button onClick={() => router.push('/reports')} className="p-2 rounded-lg hover:bg-[var(--surface-3)] transition-colors">

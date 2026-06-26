@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/cn';
 import { Segmented } from '@/components/ui/Segmented';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,8 @@ interface TopbarProps {
   onToggleTheme: () => void;
   onDensityChange: (d: 'comfortable' | 'compact') => void;
   userName: string;
+  onNotificationsClick?: () => void;
+  onMenuClick?: () => void;
 }
 
 export function Topbar({
@@ -27,18 +30,44 @@ export function Topbar({
   onToggleTheme,
   onDensityChange,
   userName,
+  onNotificationsClick,
+  onMenuClick,
 }: TopbarProps) {
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Poll for unread notification count
+  useEffect(() => {
+    async function check() {
+      try {
+        const res = await fetch('/api/notifications?unread=true&limit=1');
+        if (res.ok) {
+          const json = await res.json();
+          setUnreadCount(json.unreadCount || 0);
+        }
+      } catch {}
+    }
+    check();
+    const interval = setInterval(check, 30000); // every 30s
+    return () => clearInterval(interval);
+  }, []);
+
   return (<>
     <header className="topbar">
-      {/* Search */}
-      <div className="topbar-search">
+      {/* Hamburger menu (mobile only) */}
+      <button className="hamburger" onClick={onMenuClick} aria-label="Menu">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M3 5h12M3 9h12M3 13h12" />
+        </svg>
+      </button>
+
+      {/* Search — click opens global search */}
+      <div className="topbar-search" onClick={() => {
+        (window as any).__openGlobalSearch?.();
+      }} style={{ cursor: 'pointer' }} role="button" tabIndex={0} aria-label="Open search">
         <span className="lead-icon">
           <Search size={16} />
         </span>
-        <input
-          type="text"
-          placeholder="Search invoices, contacts, transactions..."
-        />
+        <span className="text-[var(--text-faint)] text-sm flex-1">Search invoices, contacts, transactions...</span>
         <span className="kbd">⌘K</span>
       </div>
 
@@ -63,17 +92,25 @@ export function Topbar({
         {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
       </button>
 
-      {/* Notifications */}
-      <button className="iconbtn" aria-label="Notifications">
+      {/* Notifications bell with live count */}
+      <button
+        className="iconbtn"
+        aria-label="Notifications"
+        onClick={onNotificationsClick}
+        style={{ position: 'relative' }}
+      >
         <Bell size={18} />
-        <span className="notif-dot" />
-      </button>
-
-      {/* Date range */}
-      <button className="bar-btn">
-        <Calendar size={16} />
-        <span id="date-range-label">This year</span>
-        <ChevronDown size={16} />
+        {unreadCount > 0 && (
+          <span style={{
+            position: 'absolute', top: -2, right: -4,
+            backgroundColor: 'var(--danger)', color: '#fff',
+            fontSize: 9, fontWeight: 700, minWidth: 16, height: 16,
+            borderRadius: 999, display: 'grid', placeItems: 'center',
+            padding: '0 4px', lineHeight: 1,
+          }}>
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
       </button>
 
       {/* User avatar */}

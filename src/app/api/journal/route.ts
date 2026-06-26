@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany } from '@/lib/api-helpers';
+import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { postJournalEntry } from '@/lib/journal';
 
 export async function POST(req: NextRequest) {
@@ -21,6 +21,12 @@ export async function POST(req: NextRequest) {
 
     if (lines.length < 2) {
       return NextResponse.json({ error: 'Journal entry must have at least 2 lines (debit and credit)' }, { status: 400 });
+    }
+
+    // Guard: prevent changes in closed periods
+    if (entryDate) {
+      const guardError = await closedPeriodGuard(companyId, new Date(entryDate));
+      if (guardError) return guardError;
     }
 
     const entry = await postJournalEntry(

@@ -156,13 +156,13 @@ export default function JournalDetailPage() {
     expense: 'text-[var(--danger)]',
   };
 
-  if (loading) return <AppShell companyName="Northwind Trading" companyPlan="Business"><div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-[var(--text-muted)]" size={24} /></div></AppShell>;
-  if (error || !entry) return <AppShell companyName="Northwind Trading" companyPlan="Business"><div className="text-center py-16 text-[var(--text-muted)]">{error || 'Not found'}</div></AppShell>;
+  if (loading) return <AppShell><div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-[var(--text-muted)]" size={24} /></div></AppShell>;
+  if (error || !entry) return <AppShell><div className="text-center py-16 text-[var(--text-muted)]">{error || 'Not found'}</div></AppShell>;
 
   const isManual = entry.sourceType === 'manual';
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="max-w-3xl">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">

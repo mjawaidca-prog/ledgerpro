@@ -14,8 +14,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'LedgerPro — Northwind Trading',
-  description: 'Small-business accounting application',
+  title: 'Ledger Pro — NexVar Labs',
+  description: 'Professional double-entry accounting for Canadian small businesses. Invoicing, expenses, bank reconciliation, and tax-ready reports.',
 };
 
 export default function RootLayout({

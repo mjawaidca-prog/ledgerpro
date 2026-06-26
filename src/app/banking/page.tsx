@@ -350,7 +350,7 @@ export default function BankingPage() {
 
   if (loading) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="flex items-center justify-center h-64 text-[var(--text-muted)]">
           <Loader2 size={24} className="animate-spin" />
         </div>
@@ -359,7 +359,7 @@ export default function BankingPage() {
   }
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       {/* Header */}
       <div className="content-head">
         <div>

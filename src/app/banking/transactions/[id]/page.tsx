@@ -36,7 +36,7 @@ export default function TransactionDetailPage() {
 
   if (loading) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-[var(--text-muted)]" size={28} /></div>
       </AppShell>
     );
@@ -44,7 +44,7 @@ export default function TransactionDetailPage() {
 
   if (error || !tx) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="text-center py-16">
           <AlertCircle size={48} className="mx-auto text-[var(--text-faint)] mb-4" />
           <p className="text-[var(--text-muted)]">{error || 'Transaction not found'}</p>
@@ -62,7 +62,7 @@ export default function TransactionDetailPage() {
   };
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="max-w-3xl">
         <button onClick={() => router.back()} className="flex items-center gap-2 text-sm text-[var(--text-muted)] hover:text-[var(--text)] mb-6 transition-colors">
           <ArrowLeft size={16} /> Back

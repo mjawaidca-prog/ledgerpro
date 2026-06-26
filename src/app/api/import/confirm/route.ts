@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { notifyImportComplete } from '@/lib/notifications';
 
 /*
   POST /api/import/confirm
@@ -103,6 +104,9 @@ export async function POST(req: NextRequest) {
       where: { importBatchId: batch.id },
       select: { id: true, date: true, description: true, amount: true },
     });
+
+    // Notify company members
+    await notifyImportComplete(companyId, account.name, imported.length, batch.id).catch(() => {});
 
     return NextResponse.json({
       data: {

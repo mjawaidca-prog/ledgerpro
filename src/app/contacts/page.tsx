@@ -12,6 +12,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
+import { exportContacts } from '@/lib/export';
 import {
   Plus,
   Search,
@@ -346,7 +347,7 @@ export default function ContactsPage() {
   // ─── Render ───
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       {/* Header */}
       <div className="content-head">
         <div>
@@ -358,7 +359,7 @@ export default function ContactsPage() {
           <Upload size={16} />
           Import
         </Button>
-        <Button variant="secondary" size="md">
+        <Button variant="secondary" size="md" onClick={() => exportContacts(contacts)}>
           <Download size={16} />
           Export
         </Button>

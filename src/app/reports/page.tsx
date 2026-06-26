@@ -70,13 +70,21 @@ const reports = [
     color: 'bg-[var(--danger-soft)] text-[var(--danger)]',
     comingSoon: false,
   },
+  {
+    title: 'Management Report Package',
+    description: 'Combined P&L, Balance Sheet, Cash Flow, and Trial Balance — ready to print.',
+    href: '/reports/management-package',
+    icon: FileText,
+    color: 'bg-gradient-to-br from-[#1f6feb]/15 to-[#7c3aed]/15 text-[var(--primary)]',
+    comingSoon: false,
+  },
 ];
 
 export default function ReportsPage() {
   const router = useRouter();
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       <div className="content-head">
         <div>
           <h1 className="greet">Reports</h1>

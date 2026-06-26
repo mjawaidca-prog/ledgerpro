@@ -100,7 +100,7 @@ export default function BalanceSheetPage() {
 
   if (loading) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="animate-spin text-[var(--text-muted)]" size={28} />
         </div>
@@ -110,7 +110,7 @@ export default function BalanceSheetPage() {
 
   if (error || !data) {
     return (
-      <AppShell companyName="Northwind Trading" companyPlan="Business">
+      <AppShell>
         <div className="text-center py-16 text-[var(--text-muted)]">
           {error || 'Unable to load balance sheet.'}
         </div>
@@ -119,7 +119,7 @@ export default function BalanceSheetPage() {
   }
 
   return (
-    <AppShell companyName="Northwind Trading" companyPlan="Business">
+    <AppShell>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">

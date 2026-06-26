@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany } from '@/lib/api-helpers';
+import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { invoiceSchema } from '@/lib/validators/invoice';
 import { postInvoiceToLedger } from '@/lib/journal';
+import { notifyBillDue } from '@/lib/notifications';
 
 function generateInvoiceId(): string {
   const seq = Math.floor(Math.random() * 9000) + 1000;
@@ -82,6 +83,12 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const body = await req.json();
+
+    // Guard: prevent changes in closed periods
+    if (body.issueDate) {
+      const guardError = await closedPeriodGuard(companyId, new Date(body.issueDate));
+      if (guardError) return guardError;
+    }
     const parsed = invoiceSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -131,6 +138,11 @@ export async function POST(req: NextRequest) {
         Number(invoice.total),
         companyId,
       );
+    }
+
+    // Notify if sent (overdue check will happen later via scheduled task)
+    if (invoiceData.status === 'sent') {
+      notifyBillDue(companyId, invoice.id, customer?.name || 'Customer').catch(() => {});
     }
 
     return NextResponse.json({ data: invoice }, { status: 201 });
