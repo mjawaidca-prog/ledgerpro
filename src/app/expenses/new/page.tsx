@@ -74,9 +74,9 @@ function NewBillContent() {
   // Load vendors & accounts
   useEffect(() => {
     fetch('/api/contacts?type=supplier&status=active&limit=100')
-      .then(r => r.json()).then(j => setVendors(j.data)).catch(() => {});
+      .then(r => r.json()).then(j => setVendors(Array.isArray(j.data) ? j.data : [])).catch(() => {});
     fetch('/api/accounts')
-      .then(r => r.json()).then(j => setAccounts(j.data)).catch(() => {});
+      .then(r => r.json()).then(j => setAccounts(Array.isArray(j.data) ? j.data : [])).catch(() => {});
   }, []);
 
   const filteredVendors = vendors.filter(v =>
