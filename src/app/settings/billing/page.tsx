@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -13,7 +13,7 @@ import {
   ArrowLeft, CreditCard, Check, Loader2, ExternalLink,
   Building2, Users, Download, FileText, ArrowRight,
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface Plan {
   id: string;
@@ -42,13 +42,28 @@ interface SubscriptionData {
   plan: Plan;
 }
 
-export default function BillingPage() {
+function BillingContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const checkoutStatus = searchParams.get('checkout');
+
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState<string | null>(null);
+  const [managing, setManaging] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (checkoutStatus === 'success') {
+      setMessage({ type: 'success', text: 'Payment successful! Your subscription has been updated.' });
+      // Clean the URL
+      window.history.replaceState({}, '', '/settings/billing');
+    } else if (checkoutStatus === 'canceled') {
+      setMessage({ type: 'danger', text: 'Checkout was canceled. Your plan has not been changed.' });
+      window.history.replaceState({}, '', '/settings/billing');
+    }
+  }, [checkoutStatus]);
 
   useEffect(() => {
     async function load() {
@@ -69,20 +84,66 @@ export default function BillingPage() {
   async function handleSwitchPlan(planId: string) {
     setSwitching(planId);
     setMessage(null);
+
+    // Free plan — switch directly without Stripe
+    if (planId === 'plan_free') {
+      try {
+        const res = await fetch('/api/subscriptions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ planId }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to switch plan');
+        setSubscription(json.data);
+        setMessage({ type: 'success', text: `Switched to ${json.data.plan.name}.` });
+      } catch (err: any) {
+        setMessage({ type: 'danger', text: err.message });
+      } finally {
+        setSwitching(null);
+      }
+      return;
+    }
+
+    // Paid plans — use Stripe Checkout
     try {
-      const res = await fetch('/api/subscriptions', {
-        method: 'PUT',
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ planId }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to switch plan');
-      setSubscription(json.data);
-      setMessage({ type: 'success', text: `Switched to ${json.data.plan.name}.` });
+      if (!res.ok) throw new Error(json.error || 'Failed to start checkout');
+      if (json.data?.url) {
+        window.location.href = json.data.url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
     } catch (err: any) {
       setMessage({ type: 'danger', text: err.message });
     } finally {
       setSwitching(null);
+    }
+  }
+
+  async function handleManageBilling() {
+    setManaging(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to open billing portal');
+      if (json.data?.url) {
+        window.location.href = json.data.url;
+      }
+    } catch (err: any) {
+      setMessage({ type: 'danger', text: err.message });
+    } finally {
+      setManaging(false);
     }
   }
 
@@ -145,10 +206,18 @@ export default function BillingPage() {
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
-                  <span className="flex items-center gap-1"><Users size={13} /> {currentPlan.maxUsers} user{currentPlan.maxUsers !== 1 ? 's' : ''}</span>
-                  <span className="flex items-center gap-1"><Building2 size={13} /> {currentPlan.maxBankAccounts} accounts</span>
-                  <span className="flex items-center gap-1"><FileText size={13} /> {currentPlan.maxTransactions.toLocaleString()} txs</span>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
+                    <span className="flex items-center gap-1"><Users size={13} /> {currentPlan.maxUsers} user{currentPlan.maxUsers !== 1 ? 's' : ''}</span>
+                    <span className="flex items-center gap-1"><Building2 size={13} /> {currentPlan.maxBankAccounts} accounts</span>
+                    <span className="flex items-center gap-1"><FileText size={13} /> {currentPlan.maxTransactions.toLocaleString()} txs</span>
+                  </div>
+                  {(subscription?.status === 'active' || subscription?.status === 'past_due') && (
+                    <Button variant="secondary" size="sm" onClick={handleManageBilling} disabled={managing}>
+                      {managing ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+                      Manage Billing
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardBody>
@@ -231,12 +300,16 @@ export default function BillingPage() {
                     >
                       {switching === plan.id ? (
                         <Loader2 size={14} className="animate-spin" />
-                      ) : plan.monthlyPrice > (currentPlan?.monthlyPrice || 0) ? (
-                        <ArrowRight size={14} />
                       ) : (
                         <ArrowRight size={14} />
                       )}
-                      {plan.monthlyPrice > (currentPlan?.monthlyPrice || 0) ? 'Upgrade' : 'Switch'}
+                      {currentPlan?.monthlyPrice === 0 && plan.monthlyPrice > 0
+                        ? 'Subscribe'
+                        : plan.monthlyPrice > (currentPlan?.monthlyPrice || 0)
+                        ? 'Upgrade'
+                        : plan.id === 'plan_free'
+                        ? 'Cancel Subscription'
+                        : 'Switch'}
                     </Button>
                   )}
                 </CardBody>
@@ -248,9 +321,25 @@ export default function BillingPage() {
         {/* Stripe note */}
         <p className="text-xs text-[var(--text-faint)] mt-6 text-center">
           Payments are processed securely via Stripe. You can cancel anytime.
-          {' '}<a href="#" className="text-[var(--accent)] hover:underline">View billing history</a>.
+          {(subscription?.status === 'active' || subscription?.status === 'past_due') && (
+            <> <button onClick={handleManageBilling} disabled={managing} className="text-[var(--accent)] hover:underline">Manage billing, payment methods, and invoices</button>.</>
+          )}
         </p>
       </div>
     </AppShell>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={
+      <AppShell companyName="Billing" companyPlan="">
+        <div className="flex items-center justify-center h-64">
+          <Loader2 size={24} className="animate-spin text-[var(--text-muted)]" />
+        </div>
+      </AppShell>
+    }>
+      <BillingContent />
+    </Suspense>
   );
 }

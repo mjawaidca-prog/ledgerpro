@@ -1,5 +1,22 @@
-DATABASE_URL=postgresql://postgres:k1W2HHYQijHHZR3S@db.xdniuuetrsflynxvnqzc.supabase.co:5432/postgres
-DIRECT_URL=postgresql://postgres:k1W2HHYQijHHZR3S@db.xdniuuetrsflynxvnqzc.supabase.co:5432/postgres
-NEXTAUTH_SECRET=zQStnLNaj2SQJOO+rQi8rURSoea+PJ4hyzF52z8yewU=
+DATABASE_URL=postgresql://postgres:...@db.xxx.supabase.co:5432/postgres
+DIRECT_URL=postgresql://postgres:...@db.xxx.supabase.co:5432/postgres
+NEXTAUTH_SECRET=<random-32-char-string>
 NEXTAUTH_URL=https://ledger.nexvarlab.com
 RESEND_API_KEY=
+
+# ─── Stripe ───
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+# Stripe Price IDs (create Products & Prices in Stripe Dashboard first):
+#   Basic monthly:   price_...  → set as Plan.stripePriceId for plan_basic
+#   Pro monthly:     price_...  → set as Plan.stripePriceId for plan_pro
+#   Enterprise monthly: price_... → set as Plan.stripePriceId for plan_enterprise
+# For each Stripe Price, add metadata: planId = plan_basic / plan_pro / plan_enterprise
+#
+# After creating Stripe prices, update the Plan records in Supabase:
+#   UPDATE "Plan" SET "stripePriceId" = 'price_XXXX' WHERE id = 'plan_basic';
+#   UPDATE "Plan" SET "stripePriceId" = 'price_YYYY' WHERE id = 'plan_pro';
+#   UPDATE "Plan" SET "stripePriceId" = 'price_ZZZZ' WHERE id = 'plan_enterprise';
+#
+# Customer Portal must be configured in Stripe Dashboard:
+#   https://dashboard.stripe.com/settings/billing/portal

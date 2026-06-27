@@ -32,25 +32,44 @@ export async function POST(req: NextRequest) {
       case 'checkout.session.completed': {
         const session = event.data.object as any;
         const subscriptionId = session.subscription as string;
-        const companyId = session.client_reference_id;
+        const companyId = session.metadata?.companyId || session.client_reference_id;
+        // Plan ID from checkout metadata (we set this explicitly), fallback to price metadata
+        const checkoutPlanId = session.metadata?.planId;
 
         if (companyId && subscriptionId) {
           const sub: any = await stripe.subscriptions.retrieve(subscriptionId);
-          const planId = (sub.items?.data?.[0]?.price?.metadata?.planId) || 'plan_pro';
+          const planId = checkoutPlanId
+            || (sub.items?.data?.[0]?.price?.metadata?.planId)
+            || 'plan_pro';
 
-          await db.subscription.create({
-            data: {
-              companyId,
-              planId,
-              status: 'active',
-              stripeSubscriptionId: subscriptionId,
-              stripeCustomerId: session.customer as string,
-              currentPeriodStart: new Date((sub.current_period_start || 0) * 1000),
-              currentPeriodEnd: new Date((sub.current_period_end || 0) * 1000),
-            },
+          // Upsert: update existing trial subscription, or create if none exists
+          const existing = await db.subscription.findFirst({
+            where: { companyId, status: { in: ['trialing', 'active', 'past_due'] } },
+            orderBy: { createdAt: 'desc' },
           });
 
-          console.log('[stripe] Subscription activated:', companyId, planId);
+          const subData = {
+            planId,
+            status: 'active' as const,
+            stripeSubscriptionId: subscriptionId,
+            stripeCustomerId: (session.customer as string) || existing?.stripeCustomerId || undefined,
+            currentPeriodStart: new Date((sub.current_period_start || 0) * 1000),
+            currentPeriodEnd: new Date((sub.current_period_end || 0) * 1000),
+            trialEndsAt: null,
+          };
+
+          if (existing) {
+            await db.subscription.update({
+              where: { id: existing.id },
+              data: subData,
+            });
+            console.log('[stripe] Subscription upgraded:', companyId, existing.id, '→', planId);
+          } else {
+            await db.subscription.create({
+              data: { ...subData, companyId },
+            });
+            console.log('[stripe] Subscription created:', companyId, planId);
+          }
         }
         break;
       }
