@@ -240,10 +240,10 @@ export default function BankingPage() {
       for (const h of headers) {
         const lower = h.toLowerCase();
         if (lower.includes('date') && !auto.date) auto.date = h;
-        else if ((lower.includes('description') || lower.includes('name') || lower.includes('memo')) && !auto.description) auto.description = h;
-        else if ((lower.includes('amount') || lower.includes('value')) && !auto.amount) auto.amount = h;
-        else if (lower.includes('debit') && !auto.debit) auto.debit = h;
-        else if (lower.includes('credit') && !auto.credit) auto.credit = h;
+        else if ((lower.includes('description') || lower.includes('name') || lower.includes('memo') || lower.includes('particulars') || lower.includes('details')) && !auto.description) auto.description = h;
+        else if ((lower.includes('amount') || lower.includes('value') || lower.includes('sum')) && !auto.amount && !lower.includes('balance')) auto.amount = h;
+        else if ((lower.includes('withdrawal') || lower.includes('debit') || lower.includes('payment') || lower.includes('money out') || lower.includes('outflow')) && !auto.debit) auto.debit = h;
+        else if ((lower.includes('deposit') || lower.includes('credit') || lower.includes('receipt') || lower.includes('money in') || lower.includes('inflow')) && !auto.credit) auto.credit = h;
         else if (lower.includes('balance') && !auto.balance) auto.balance = h;
       }
 
