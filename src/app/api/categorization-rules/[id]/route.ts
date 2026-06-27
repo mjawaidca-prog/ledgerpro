@@ -4,7 +4,7 @@ import { requireCompany, auditLog } from '@/lib/api-helpers';
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const rule = await db.categorizationRule.findUnique({ where: { id: params.id } });

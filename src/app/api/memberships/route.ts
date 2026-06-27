@@ -11,7 +11,7 @@ const inviteSchema = z.object({
 // GET /api/memberships — list all members of the current company
 export async function GET(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin', 'bookkeeper'] });
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
 // POST /api/memberships — invite a new member to the company
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const body = await req.json();

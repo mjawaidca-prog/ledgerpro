@@ -16,6 +16,8 @@
   "dependencies": {
     "@auth/prisma-adapter": "^1.5.0",
     "@prisma/client": "^5.15.0",
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.108.2",
     "autoprefixer": "^10.5.2",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.0",

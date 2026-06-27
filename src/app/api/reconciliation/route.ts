@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
 // POST /api/reconciliation — mark transactions as reconciled
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req);
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();

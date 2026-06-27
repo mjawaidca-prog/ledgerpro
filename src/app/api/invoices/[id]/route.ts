@@ -36,7 +36,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { companyId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -102,7 +102,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { companyId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const existing = await db.invoice.findUnique({ where: { id: params.id, companyId } });

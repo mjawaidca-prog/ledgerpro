@@ -13,7 +13,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const membershipId = params.id;
@@ -95,7 +95,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const membershipId = params.id;

@@ -4,7 +4,7 @@ import { requireCompany } from '@/lib/api-helpers';
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();

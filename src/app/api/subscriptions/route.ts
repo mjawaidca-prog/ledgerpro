@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 // PUT /api/subscriptions — switch plan
 export async function PUT(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const body = await req.json();

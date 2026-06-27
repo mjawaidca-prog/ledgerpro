@@ -56,7 +56,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 // PUT — update a manual journal entry (reverse old, post new)
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, userId, error } = await requireCompany(req);
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -162,7 +162,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 // DELETE — void a journal entry (reverse balances, keep record for audit trail)
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, userId, error } = await requireCompany(req);
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const existing = await db.journalEntry.findUnique({

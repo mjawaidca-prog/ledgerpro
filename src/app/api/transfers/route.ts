@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req);
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const { outflowTxId, inflowTxId } = await req.json();

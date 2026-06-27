@@ -6,7 +6,7 @@ import { postJournalEntry } from '@/lib/journal';
 // POST /api/recurring/run — process all due recurring templates
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin', 'bookkeeper'] });
     if (error) return error;
 
     const now = new Date();

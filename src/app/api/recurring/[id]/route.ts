@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin', 'bookkeeper'] });
     if (error) return error;
 
     const existing = await db.recurringTemplate.findUnique({ where: { id: params.id } });
@@ -56,7 +56,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const existing = await db.recurringTemplate.findUnique({ where: { id: params.id } });

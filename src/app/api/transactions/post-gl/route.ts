@@ -5,7 +5,7 @@ import { requireCompany } from '@/lib/api-helpers';
 // POST — post categorized bank transactions to the General Ledger
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();

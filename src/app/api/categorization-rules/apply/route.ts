@@ -5,7 +5,7 @@ import { requireCompany, auditLog } from '@/lib/api-helpers';
 // POST /api/categorization-rules/apply — run all active rules against unreviewed transactions
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin', 'bookkeeper'] });
     if (error) return error;
 
     const rules = await db.categorizationRule.findMany({

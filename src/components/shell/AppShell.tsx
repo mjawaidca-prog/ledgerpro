@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
+import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
 import { Rail } from './Rail';
 import { Topbar } from './Topbar';
 import { NotificationsPanel } from './NotificationsPanel';
+import { AlertTriangle } from 'lucide-react';
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
@@ -31,10 +33,12 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const { data: session } = useSession();
+  const pathname = usePathname();
   const [theme, setThemeState] = useState<'light' | 'dark'>('light');
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
 
   // SSR-safe company info — start with props (matches server render),
   // then hydrate from cookies/session in useEffect
@@ -95,6 +99,24 @@ export function AppShell({
     localStorage.setItem('lp-density', density);
   }, [density]);
 
+  // Check onboarding status — show banner if company setup incomplete
+  useEffect(() => {
+    async function checkOnboarding() {
+      try {
+        const res = await fetch('/api/companies');
+        const json = await res.json();
+        setOnboardingComplete(json.data?.onboardingComplete ?? true);
+      } catch {
+        // If API fails, assume complete to avoid blocking
+        setOnboardingComplete(true);
+      }
+    }
+    // Only check when session is loaded
+    if (session) {
+      checkOnboarding();
+    }
+  }, [session]);
+
   const toggleTheme = useCallback(() => {
     setThemeState((t) => (t === 'dark' ? 'light' : 'dark'));
   }, []);
@@ -123,6 +145,23 @@ export function AppShell({
           onNotificationsClick={() => setNotificationsOpen(true)}
           onMenuClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
+        {/* Onboarding incomplete banner — hidden on onboarding/settings pages */}
+        {onboardingComplete === false &&
+          pathname !== '/onboarding' &&
+          !pathname.startsWith('/settings') && (
+            <div className="flex items-center gap-3 mx-4 mt-4 px-4 py-3 rounded-xl border border-[var(--warning-soft-border)] bg-[var(--warning-soft)] text-sm">
+              <AlertTriangle size={18} className="text-[var(--warning)] flex-none" />
+              <span className="flex-1 text-[var(--text)]">
+                <strong>Company setup is incomplete.</strong> You can view data but cannot create or edit transactions until you complete onboarding.
+              </span>
+              <a
+                href="/onboarding"
+                className="flex-none px-4 py-1.5 rounded-md bg-[var(--primary)] text-white text-sm font-semibold hover:brightness-[0.95] transition-colors no-underline"
+              >
+                Complete Setup
+              </a>
+            </div>
+          )}
         <div className="content">{children}</div>
       </div>
 

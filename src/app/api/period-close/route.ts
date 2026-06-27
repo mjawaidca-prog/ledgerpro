@@ -12,7 +12,7 @@ const createSchema = z.object({
 // GET /api/period-close — list closed periods
 export async function GET(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin', 'bookkeeper'] });
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 // POST /api/period-close — close a period
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const body = await req.json();

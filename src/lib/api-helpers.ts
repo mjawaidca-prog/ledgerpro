@@ -9,38 +9,27 @@ import { db } from '@/lib/db';
  */
 export async function requireCompany(
   req: NextRequest,
-  opts?: { roles?: string[] }
+  opts?: { roles?: string[]; requireOnboarding?: boolean }
 ) {
+  let companyId: string | null = null;
+  let userId: string | undefined;
+
   // Try header first (injected by middleware from session token)
   const headerCompanyId = req.headers.get('x-company-id');
   const headerUserId = req.headers.get('x-user-id');
 
   if (headerCompanyId && headerCompanyId !== 'undefined' && headerUserId && headerUserId !== 'undefined') {
-    // Verify membership if roles specified
-    if (opts?.roles?.length) {
-      const membership = await db.membership.findUnique({
-        where: { userId_companyId: { userId: headerUserId, companyId: headerCompanyId } },
-      });
-      if (!membership || !opts.roles.includes(membership.role)) {
-        return {
-          companyId: null,
-          userId: null,
-          error: NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 }),
-        };
-      }
-    }
-    return { companyId: headerCompanyId, userId: headerUserId, error: null };
+    companyId = headerCompanyId;
+    userId = headerUserId;
+  } else {
+    // Fallback to session
+    const session = await getServerSession();
+    const user = session?.user as any;
+    companyId = user?.activeCompanyId || user?.companyId || null;
+    userId = user?.id || undefined;
   }
 
-  // Fallback to session
-  const session = await getServerSession();
-  const user = session?.user as any;
-
-  // Support old session format during migration (companyId → activeCompanyId)
-  const resolvedCompanyId = user?.activeCompanyId || user?.companyId || null;
-  const resolvedUserId = user?.id || null;
-
-  if (!resolvedCompanyId) {
+  if (!companyId) {
     return {
       companyId: null,
       userId: null,
@@ -48,14 +37,10 @@ export async function requireCompany(
     };
   }
 
-  if (opts?.roles?.length && resolvedUserId && resolvedCompanyId) {
+  // Verify membership if roles specified
+  if (opts?.roles?.length && userId) {
     const membership = await db.membership.findUnique({
-      where: {
-        userId_companyId: {
-          userId: resolvedUserId,
-          companyId: resolvedCompanyId,
-        },
-      },
+      where: { userId_companyId: { userId, companyId } },
     });
     if (!membership || !opts.roles.includes(membership.role)) {
       return {
@@ -66,11 +51,25 @@ export async function requireCompany(
     }
   }
 
-  return {
-    companyId: resolvedCompanyId,
-    userId: resolvedUserId,
-    error: null,
-  };
+  // Guard: require completed onboarding before mutations
+  if (opts?.requireOnboarding) {
+    const company = await db.company.findUnique({
+      where: { id: companyId },
+      select: { onboardingComplete: true, name: true },
+    });
+    if (company && !company.onboardingComplete) {
+      return {
+        companyId: null,
+        userId: null,
+        error: NextResponse.json(
+          { error: 'Company setup is incomplete. Please complete onboarding first.' },
+          { status: 400 }
+        ),
+      };
+    }
+  }
+
+  return { companyId, userId, error: null };
 }
 
 /**

@@ -27,7 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -84,7 +84,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const existing = await db.bill.findUnique({ where: { id: params.id, companyId } });

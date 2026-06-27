@@ -71,7 +71,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin', 'bookkeeper'] });
     if (error) return error;
 
     const body = await req.json();
