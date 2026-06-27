@@ -236,7 +236,7 @@ export default function BankingPage() {
 
       // Auto-map common column names
       const auto: Record<string, string> = {};
-      const headers: string[] = json.data.headers;
+      const headers: string[] = json.data.headers || [];
       for (const h of headers) {
         const lower = h.toLowerCase();
         if (lower.includes('date') && !auto.date) auto.date = h;
@@ -248,24 +248,30 @@ export default function BankingPage() {
       }
 
       setWizardMappings(auto);
-      setWizardStep('map');
+
+      // PDF: parser already extracts fields — skip mapping, go straight to preview
+      if (json.data?.fileType === 'pdf') {
+        generatePreviewFromMappings(auto, json.data);
+      } else {
+        setWizardStep('map');
+      }
     } catch {
       setToast({ message: 'Failed to parse file', type: 'danger' });
     }
   }
 
-  function generatePreview() {
-    if (!wizardParsed) return;
-    const { rows } = wizardParsed;
-    const { date, description, amount, debit, credit } = wizardMappings;
+  function generatePreviewFromMappings(mappings: Record<string, string>, parsed: any) {
+    if (!parsed) return;
+    const { rows } = parsed;
+    const { date, description, amount, debit, credit } = mappings;
 
     const preview = rows.slice(0, 10).map((row: any) => {
       let amt = 0;
       if (amount && row.raw[amount]) {
-        amt = parseFloat(row.raw[amount].replace(/[$,]/g, '')) || 0;
+        amt = parseFloat(String(row.raw[amount]).replace(/[$,]/g, '')) || 0;
       } else if (debit && credit) {
-        const dr = parseFloat(row.raw[debit]?.replace(/[$,]/g, '') || '0') || 0;
-        const cr = parseFloat(row.raw[credit]?.replace(/[$,]/g, '') || '0') || 0;
+        const dr = parseFloat(String(row.raw[debit] || '0').replace(/[$,]/g, '') || '0') || 0;
+        const cr = parseFloat(String(row.raw[credit] || '0').replace(/[$,]/g, '') || '0') || 0;
         amt = cr - dr;
       }
 
@@ -281,6 +287,10 @@ export default function BankingPage() {
 
     setWizardPreview(preview);
     setWizardStep('review');
+  }
+
+  function generatePreview() {
+    generatePreviewFromMappings(wizardMappings, wizardParsed);
   }
 
   async function confirmImport() {
@@ -710,12 +720,12 @@ export default function BankingPage() {
                     Drop your statement here
                   </div>
                   <div className="text-xs text-[var(--text-muted)]">
-                    CSV, OFX, or QFX — up to 10 MB
+                    CSV, OFX, QFX, or PDF bank statement — up to 10 MB
                   </div>
                   <input
                     id="wizard-file-input"
                     type="file"
-                    accept=".csv,.ofx,.qfx,.txt"
+                    accept=".csv,.ofx,.qfx,.txt,.pdf"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
@@ -799,10 +809,29 @@ export default function BankingPage() {
                     <span className="font-semibold text-[var(--success)]">{wizardParsed?.totalRows}</span>
                     <span className="text-[var(--text-muted)] ml-1">transactions found</span>
                   </div>
-                  <div className="text-[var(--text-muted)]">
-                    Date range: {wizardPreview[0]?.date ?? '—'} — {wizardPreview[wizardPreview.length - 1]?.date ?? '—'}
-                  </div>
+                  {wizardPreview.length > 0 && (
+                    <div className="text-[var(--text-muted)]">
+                      Date range: {wizardPreview[0]?.date ?? '—'} — {wizardPreview[wizardPreview.length - 1]?.date ?? '—'}
+                    </div>
+                  )}
+                  <Badge variant="info">{wizardParsed?.fileType?.toUpperCase()}</Badge>
                 </div>
+
+                {/* Parse warnings */}
+                {wizardParsed?.errors?.length > 0 && (
+                  <Alert variant="warning">
+                    <ul className="list-disc ml-4 text-xs">
+                      {wizardParsed.errors.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                    </ul>
+                  </Alert>
+                )}
+
+                {/* Low confidence flag for PDF */}
+                {wizardParsed?.fileType === 'pdf' && (
+                  <p className="text-xs text-[var(--text-muted)]">
+                    ⚠️ PDF parsing is best-effort. Please review all transactions carefully before importing.
+                  </p>
+                )}
 
                 {/* Preview table */}
                 <div className="border border-[var(--border)] rounded-lg overflow-hidden max-h-[300px] overflow-y-auto">
@@ -832,7 +861,7 @@ export default function BankingPage() {
                 </div>
 
                 <div className="flex gap-3">
-                  <Button variant="secondary" onClick={() => setWizardStep('map')}>
+                  <Button variant="secondary" onClick={() => setWizardStep(wizardParsed?.fileType === 'pdf' ? 'account' : 'map')}>
                     Back
                   </Button>
                   <div className="flex-1" />
