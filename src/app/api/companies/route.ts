@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 // PUT — update the active company profile (used by onboarding + settings)
 export async function PUT(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
+    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin'] });
     if (error) return error;
 
     const body = await req.json();

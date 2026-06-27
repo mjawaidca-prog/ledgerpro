@@ -115,6 +115,7 @@ export function parseOFX(content: string): ParseResult {
 /**
  * Parse PDF statement content.
  * Uses pdf-parse for text extraction, then heuristics to identify transaction rows.
+ * Handles: single-column signed amounts, debit/credit columns, balance columns.
  * This is best-effort — low-confidence rows are flagged for human review.
  */
 export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseResult> {
@@ -138,65 +139,110 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
     const lines = text.split('\n').filter((l: string) => l.trim());
     const rows: ParsedRow[] = [];
 
-    // Common date patterns: MM/DD/YYYY, MM/DD, YYYY-MM-DD, DD MMM YYYY
-    const datePattern =
-      /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{2,4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s+\d{4})/i;
+    // Date patterns: MM/DD/YYYY, MM/DD, YYYY-MM-DD, DD MMM YYYY, DD MMM YY
+    const dateLong = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\s+\\d{1,2},?\\s+\\d{2,4}';
+    const dateNumeric = '\\d{1,2}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{2,4}|\\d{2,4}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{1,2}';
+    const datePattern = new RegExp(`(${dateLong}|${dateNumeric})`, 'i');
 
-    // Amount pattern: $1,234.56, -$500.00, (1,234.56)
-    const amountPattern = /[\$]?\s*\(?(\-?[\d,]+\.\d{2})\)?/;
+    // Find ALL dollar amounts on a line: $1,234.56, -$500.00, (1,234.56), —$12.34, 1,234.56
+    const amountRe = /(?:—|−|\-)?\s*\$?\s*\(?\s*(\-?[\d,]+\.\d{2})\s*\)?/g;
+
+    // Words that indicate a balance column (not the transaction amount)
+    const balanceWords = /balance|ending|closing/i;
 
     for (const line of lines) {
       const dateMatch = line.match(datePattern);
-      const amountMatches = line.match(amountPattern);
+      const dateStr = dateMatch ? dateMatch[0] : '';
 
-      if (dateMatch && amountMatches) {
-        const dateStr = dateMatch[0];
-        let amountStr = amountMatches[1].replace(/,/g, '');
-        let amount = parseFloat(amountStr);
-
-        // Handle parentheses notation: (1,234.56) = -1,234.56
-        if (amountMatches[0].startsWith('(') && amountMatches[0].endsWith(')')) {
-          amount = -amount;
+      // Find ALL amounts on this line
+      const allAmounts: { value: number; index: number; raw: string }[] = [];
+      let am;
+      while ((am = amountRe.exec(line)) !== null) {
+        const raw = am[0];
+        let numStr = am[1].replace(/,/g, '');
+        let num = parseFloat(numStr);
+        // Negative indicators: leading -, —, −, or parentheses
+        if (raw.match(/^[\s]*(—|−|\-)/) || (raw.includes('(') && raw.includes(')'))) {
+          num = -Math.abs(num);
         }
-
-        // Remove date and amount to extract description
-        let description = line
-          .replace(dateMatch[0], '')
-          .replace(amountMatches[0], '')
-          .replace(/[^\w\s\-\&\#\/\.\@]/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-        rows.push({
-          date: dateStr,
-          description: description || 'Unknown',
-          amount,
-          raw: {
-            Date: dateStr,
-            Description: description,
-            Amount: String(amount),
-          },
-        });
-      } else if (dateMatch || amountMatches) {
-        // Partial match — flag as low confidence
-        const dateStr = dateMatch?.[0] ?? '';
-        let amount = 0;
-        if (amountMatches) {
-          const cleaned = amountMatches[1].replace(/,/g, '');
-          amount = parseFloat(cleaned);
-        }
-        rows.push({
-          date: dateStr,
-          description: line.substring(0, 200).trim(),
-          amount,
-          raw: {
-            Date: dateStr,
-            Description: line.substring(0, 200).trim(),
-            Amount: String(amount),
-            lowConfidence: 'true',
-          },
-        });
+        allAmounts.push({ value: num, index: am.index, raw });
       }
+
+      // Reset regex
+      amountRe.lastIndex = 0;
+
+      if (!dateMatch && allAmounts.length === 0) continue;
+
+      // Extract description: remove date, remove amounts, clean up
+      let description = line;
+      if (dateMatch) description = description.replace(dateMatch[0], '');
+      // Remove amount strings from description
+      const amts = Array.from(line.matchAll(amountRe));
+      for (const a of amts.reverse()) {
+        description = description.slice(0, a.index!) + description.slice(a.index! + a[0].length);
+      }
+      description = description.replace(/[^\w\s\-\&\#\/\.\@\#]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!description) description = 'Unknown';
+
+      let amount = 0;
+      let isLowConfidence = false;
+
+      if (allAmounts.length === 1) {
+        // One amount — use it directly
+        amount = allAmounts[0].value;
+      } else if (allAmounts.length >= 2) {
+        // Multiple amounts — try debit/credit pair or amount+balance
+        // Strategy: find two amounts that aren't near "balance" keywords
+        const nonBalance = allAmounts.filter(a => {
+          const context = line.substring(Math.max(0, a.index - 20), a.index);
+          return !balanceWords.test(context);
+        });
+
+        if (nonBalance.length === 2) {
+          // Likely a debit+credit pair: net = credit - debit (positive = inflow)
+          // The larger index (further right) is usually the running balance
+          // Pick the amount that's NOT the balance
+          const sorted = nonBalance.sort((a, b) => b.index - a.index);
+          // The last non-balance amount is usually the balance — take the other one(s)
+          if (sorted.length >= 2) {
+            // If one is positive and one negative, use the first non-balance
+            const positives = nonBalance.filter(a => a.value > 0);
+            const negatives = nonBalance.filter(a => a.value < 0);
+            if (negatives.length === 1 && positives.length >= 1) {
+              amount = negatives[0].value; // withdrawal
+            } else if (negatives.length === 0 && positives.length >= 2) {
+              // Two positives — first is usually transaction, second is balance
+              amount = positives[0].value;
+            } else {
+              amount = nonBalance[0].value;
+            }
+          }
+        } else if (nonBalance.length === 1) {
+          amount = nonBalance[0].value;
+        } else if (allAmounts.length >= 2) {
+          // Fallback: use the first amount, flag as low confidence
+          amount = allAmounts[0].value;
+          isLowConfidence = true;
+        }
+      } else if (dateMatch) {
+        // Has a date but no amounts — flag for review
+        isLowConfidence = true;
+      }
+
+      rows.push({
+        date: dateStr,
+        description,
+        amount,
+        raw: {
+          Date: dateStr,
+          Description: description,
+          Amount: String(amount),
+          ...(isLowConfidence ? { lowConfidence: 'true' } : {}),
+        },
+      });
     }
 
     if (rows.length === 0 && lines.length > 10) {
@@ -207,7 +253,7 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
 
     return {
       rows,
-      headers: ['Date', 'Description', 'Amount', 'lowConfidence'],
+      headers: ['Date', 'Description', 'Amount'],
       errors,
       fileType: 'pdf',
     };
