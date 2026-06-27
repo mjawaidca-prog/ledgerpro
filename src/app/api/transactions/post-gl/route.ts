@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 // POST — post categorized bank transactions to the General Ledger
 export async function POST(req: NextRequest) {

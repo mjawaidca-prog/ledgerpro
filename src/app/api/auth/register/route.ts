@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { z } from 'zod';
 import crypto from 'crypto';
+export const dynamic = 'force-dynamic';
 
 const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),

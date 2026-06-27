@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+export const dynamic = 'force-dynamic';
 
 // POST /api/auth/verify-email — verify a user's email address using token
 export async function POST(req: NextRequest) {

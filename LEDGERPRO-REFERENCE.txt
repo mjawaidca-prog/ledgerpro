@@ -1,0 +1,298 @@
+================================================================================
+  LEDGER PRO — Complete System Reference
+  Cloud Accounting SaaS for Canadian Small Business
+  Last Updated: June 2026
+================================================================================
+
+================================================================================
+  1. WHAT IS LEDGER PRO
+================================================================================
+
+Ledger Pro is a cloud-based double-entry accounting platform built as a
+Software-as-a-Service (SaaS). It runs entirely in the cloud — no installation
+required. Users access it through a web browser at ledger.nexvarlab.com.
+
+TYPE: Cloud Software / SaaS (Software as a Service)
+STACK: Next.js 14 + PostgreSQL + Prisma + NextAuth.js + Recharts
+PRICING: Free Trial → Basic $29/mo → Pro $79/mo → Enterprise $199/mo
+
+================================================================================
+  2. PLATFORM ARCHITECTURE — HOW EVERYTHING CONNECTS
+================================================================================
+
+  ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+  │  Namecheap   │────▶│  Cloudflare  │────▶│     Vercel      │
+  │  (Domain     │     │  (DNS +      │     │  (Hosting +     │
+  │   Registrar) │     │   Security)  │     │   Deployment)   │
+  └─────────────┘     └──────────────┘     └────────┬────────┘
+                                                    │
+                    ┌───────────────────────────────┤
+                    │                               │
+            ┌───────▼────────┐            ┌────────▼────────┐
+            │    GitHub      │            │    Supabase     │
+            │  (Code Repo +  │            │  (PostgreSQL    │
+            │   Version      │            │   Database)     │
+            │   Control)     │            │                 │
+            └────────────────┘            └────────┬────────┘
+                                                   │
+                              ┌────────────────────┤
+                              │                    │
+                    ┌─────────▼──────┐   ┌────────▼─────────┐
+                    │    Stripe      │   │     Resend        │
+                    │  (Payments +   │   │  (Transactional   │
+                    │   Subscriptions│   │   Email)          │
+                    └────────────────┘   └──────────────────┘
+
+
+DATA FLOW:
+  1. Developer writes code → pushes to GitHub
+  2. GitHub triggers Vercel → auto-deploys new version
+  3. User visits ledger.nexvarlab.com → Cloudflare DNS routes to Vercel
+  4. Vercel serves the Next.js app → App connects to Supabase for data
+  5. Payments processed through Stripe → webhooks update Supabase
+  6. Emails sent through Resend (invoices, confirmations)
+
+================================================================================
+  3. PLATFORM DETAILS
+================================================================================
+
+A. GITHUB — Code Repository & Version Control
+   URL: https://github.com/mjawaidca-prog/ledgerpro
+   Purpose: Stores all source code, tracks changes, enables collaboration
+   How it works: Code is pushed from local machine to GitHub. Vercel watches
+   the main branch and auto-deploys on every push.
+
+B. VERCEL — Hosting & Deployment
+   URL: https://vercel.com (ledgerpro project)
+   Purpose: Hosts the Next.js application, serves web pages, runs API routes
+   Domains: ledgerpro-theta.vercel.app (auto) + ledger.nexvarlab.com (custom)
+   Build Command: npx prisma generate && next build
+   Deploys: Automatic on every git push to main branch
+   Environment Variables: DATABASE_URL, DIRECT_URL, NEXTAUTH_SECRET,
+                          NEXTAUTH_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+                          RESEND_API_KEY
+
+C. SUPABASE — Cloud Database
+   URL: https://xdniuuetrsflynxvnqzc.supabase.co
+   Purpose: PostgreSQL database storing all accounting data
+   Contains: Users, companies, invoices, bills, transactions, journal entries,
+             chart of accounts, subscriptions, tax rates, audit logs
+   Connection: Direct PostgreSQL connection (port 5432)
+
+D. CLOUDFLARE — DNS & Security
+   URL: https://dash.cloudflare.com (nexvarlab.com zone)
+   Purpose: DNS management, CDN, SSL/TLS, DDoS protection
+   Records: CNAME ledger → cname.vercel-dns.com (proxied, orange cloud)
+            Same setup as pay.nexvarlab.com
+
+E. NAMECHEAP — Domain Registrar
+   Purpose: Owns the nexvarlab.com domain registration
+   DNS: Delegated to Cloudflare (nameservers point to Cloudflare)
+   No changes needed at Namecheap for new subdomains
+
+F. STRIPE — Payments & Subscriptions
+   URL: https://dashboard.stripe.com
+   Purpose: Handles recurring subscription billing, payment processing
+   Plans: Free Trial ($0), Basic ($29/mo), Pro ($79/mo), Enterprise ($199/mo)
+   Webhook: POST /api/stripe/webhook handles subscription lifecycle events
+
+G. RESEND — Transactional Email
+   URL: https://resend.com
+   Purpose: Sends invoice emails, payment confirmations, notifications
+   Status: Not yet configured (placeholder key in env)
+
+================================================================================
+  4. APPLICATION STRUCTURE (70+ Pages, 35+ API Routes)
+================================================================================
+
+PAGES (src/app/)
+──────────────────────────────────────────────────────────────────────
+  /                               Dashboard (KPIs, charts, bank accounts)
+  /login                          Sign in page
+  /register                       Create new account
+  /onboarding                     Multi-step company setup wizard
+  /invoices                       Invoice list (filter, search, export)
+  /invoices/new                   Create new invoice
+  /invoices/[id]                  Edit invoice (line items, tax, send, print)
+  /expenses                       Bills & expenses list
+  /expenses/new                   Enter bill or expense
+  /expenses/[id]                  Edit bill/expense
+  /banking                        Bank accounts & transaction review
+  /banking/reconcile              Two-column bank reconciliation
+  /banking/transactions/[id]      Transaction detail
+  /journal                        Journal entries list
+  /journal/new                    Manual journal entry
+  /journal/[id]                   Journal entry detail
+  /chart-of-accounts              Full COA with balances by type
+  /contacts                       Customer & supplier directory
+  /budgets                        Budget list & CRUD
+  /budgets/new                    Create budget with GL lines
+  /budgets/[id]                   Edit budget
+  /recurring                      Recurring transaction templates
+  /recurring/new                  Create recurring template
+  /recurring/[id]                 Edit recurring template
+  /reports                        Reports hub (8 report types)
+  /reports/trial-balance          Debits = credits verification
+  /reports/profit-loss            Revenue - Expenses = Net Income
+  /reports/balance-sheet          Assets, Liabilities, Equity
+  /reports/cash-flow              Monthly inflows/outflows
+  /reports/general-ledger         Per-account transaction history
+  /reports/ar-aging               Accounts receivable aging
+  /reports/ap-aging               Accounts payable aging
+  /reports/expense-breakdown      Spending by category
+  /reports/budget-vs-actual       Budget comparison with variance
+  /reports/custom                 Custom report builder
+  /reports/management-package     Combined P&L + BS + CF + TB (print)
+  /settings                       Company profile (name, type, BN, GST, FY)
+  /settings/team                  Team member management
+  /settings/billing               Subscription & plan management
+  /settings/period-close          Fiscal year-end close wizard
+  /settings/audit-log             Full audit trail with filters
+  /settings/categorization        AI categorization rules
+  /accountant                     Multi-company accountant dashboard
+  /notifications                  Notification center
+  /pricing                        Public pricing page
+  /pay/[id]                       Public client invoice portal (no login)
+
+API ROUTES (src/app/api/)
+──────────────────────────────────────────────────────────────────────
+  /api/auth/[...nextauth]         NextAuth.js authentication
+  /api/auth/register              User registration
+  /api/auth/verify-email          Email verification
+  /api/companies                  GET (list) + PUT (update profile)
+  /api/companies/switch           POST switch active company
+  /api/invoices                   GET list + POST create
+  /api/invoices/[id]              GET/PUT/DELETE single invoice
+  /api/bills                      GET list + POST create
+  /api/bills/[id]                 GET/PUT/DELETE single bill
+  /api/contacts                   GET list + POST create
+  /api/contacts/[id]              GET/PUT/DELETE single contact
+  /api/accounts                   GET bank accounts
+  /api/transactions               GET list + PUT update
+  /api/transactions/post-gl       POST manual GL entry
+  /api/transfers                  GET/POST transfer matching
+  /api/coa                        GET chart of accounts
+  /api/journal                    GET list + POST create
+  /api/journal/[id]               GET single journal entry
+  /api/dashboard                  GET dashboard KPIs & charts
+  /api/reconciliation             GET/POST reconcile transactions
+  /api/reconciliation/[id]        GET/PUT single reconciliation
+  /api/budgets                    GET/POST budgets
+  /api/budgets/[id]               GET/PUT/DELETE single budget
+  /api/recurring                  GET/POST recurring templates
+  /api/recurring/[id]             GET/PUT/DELETE single template
+  /api/recurring/run              POST process due recurring items
+  /api/categorization-rules       GET/POST categorization rules
+  /api/categorization-rules/[id]  DELETE rule
+  /api/categorization-rules/apply POST run rules against transactions
+  /api/accountant/batch/reclassify POST batch reclassify
+  /api/accountant/batch/reconcile  POST batch reconcile
+  /api/reports/trial-balance      Trial balance report
+  /api/reports/profit-loss        P&L report
+  /api/reports/balance-sheet      Balance sheet report
+  /api/reports/cash-flow          Cash flow report
+  /api/reports/general-ledger     GL detail report
+  /api/reports/ar-aging           AR aging report
+  /api/reports/ap-aging           AP aging report
+  /api/reports/expense-breakdown  Expense breakdown report
+  /api/reports/budget-vs-actual   Budget comparison report
+  /api/reports/custom             Custom report builder + templates
+  /api/reports/management-package Combined report package
+  /api/period-close               GET list + POST close period
+  /api/audit-log                  GET audit trail entries
+  /api/notifications              GET list + PUT mark read
+  /api/notifications/[id]         PUT mark single notification read
+  /api/memberships                GET/POST team members
+  /api/memberships/[id]           PUT/DELETE membership
+  /api/subscriptions              GET current subscription
+  /api/subscriptions/plans        GET available plans
+  /api/search                     GET global search (Cmd+K)
+  /api/send                       POST send invoice email
+  /api/stripe/webhook             POST Stripe webhook handler
+  /api/import/parse               POST parse CSV/OFX
+  /api/import/confirm             POST confirm import
+
+================================================================================
+  5. KEY FEATURES
+================================================================================
+
+ACCOUNTING ENGINE
+  • Double-entry journal (every transaction has debit + credit)
+  • Chart of Accounts with 5 GL types (Asset, Liability, Equity, Income, Expense)
+  • Trial Balance verification (debits must equal credits)
+  • Period Close with 409 Conflict guard on closed periods
+
+CANADIAN TAX SYSTEM
+  • GST/HST/PST for all 13 provinces/territories
+  • Auto tax calculation based on company province
+  • Business Number (BN) and GST/HST Number on company profile
+  • Tax rates: AB 5% | BC/MB 12% | SK 11% | ON 13% | NB/NL/NS/PE 15% | QC 14.975%
+
+MULTI-TENANT SAAS
+  • Users can belong to multiple companies (accountant use case)
+  • Company switcher with session isolation
+  • Role-based access: Owner, Admin, Bookkeeper, Viewer
+  • Audit log tracks every mutation with user + timestamp
+
+BANKING
+  • Financial accounts (checking, savings, credit card)
+  • CSV/OFX import with column mapping profiles
+  • Bank reconciliation (two-column view, batch reconcile)
+  • Transfer matching between accounts
+
+AI CATEGORIZATION
+  • Pattern-based rules (merchant match, description, amount range, regex)
+  • Auto-apply rules against unreviewed transactions
+  • Priority ordering, match count tracking
+
+RECURRING TRANSACTIONS
+  • Weekly/monthly/quarterly/annual templates
+  • Auto-post with next date calculation
+  • Journal line builder with GL account picker
+
+================================================================================
+  6. SIGN IN
+================================================================================
+
+  Development (localhost:3003):
+    Email: rosa@northwindtrading.com
+    Password: ledgerpro2026
+
+  Production (ledger.nexvarlab.com):
+    Register a new account → complete onboarding → start using
+
+================================================================================
+  7. DEPLOYMENT FLOW
+================================================================================
+
+  1. Local changes → git commit → git push origin main
+  2. GitHub notifies Vercel → Vercel runs build:
+     npm install → npx prisma generate → next build
+  3. Vercel deploys new version → available at both:
+     ledgerpro-theta.vercel.app (auto)
+     ledger.nexvarlab.com (custom domain)
+  4. Cloudflare DNS resolves ledger.nexvarlab.com → Vercel
+  5. Users access the app → data flows through Supabase
+
+================================================================================
+  8. COMMANDS REFERENCE
+================================================================================
+
+  Local dev server:    npx next dev -p 3003
+  Build production:    npx next build
+  TypeScript check:    npx tsc --noEmit
+  Push schema to DB:   npx prisma db push
+  Seed development:    npx tsx prisma/seed.ts
+  Seed production:     npx tsx prisma/seed-prod.ts
+  Run tests:           npx jest __tests__/api.test.ts
+
+================================================================================
+  FILE LOCATIONS (on your machine)
+================================================================================
+
+  Project code:        C:\Users\mjawa\ledgerpro\
+  Plans & memory:      C:\Users\mjawa\.claude\
+  Original handoff:    C:\Users\mjawa\OneDrive - Athabasca University\
+                       Dev Projects\Ledger Pro\
+
+================================================================================

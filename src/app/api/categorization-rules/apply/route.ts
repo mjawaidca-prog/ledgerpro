@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 // POST /api/categorization-rules/apply — run all active rules against unreviewed transactions
 export async function POST(req: NextRequest) {

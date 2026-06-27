@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {

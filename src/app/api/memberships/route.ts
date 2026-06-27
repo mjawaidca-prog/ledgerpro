@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { z } from 'zod';
+export const dynamic = 'force-dynamic';
 
 const inviteSchema = z.object({
   email: z.string().email('Invalid email address'),

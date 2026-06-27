@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
 import { invoiceUpdateSchema } from '@/lib/validators/invoice';
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   req: NextRequest,

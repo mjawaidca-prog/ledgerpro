@@ -4,6 +4,7 @@ import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { invoiceSchema } from '@/lib/validators/invoice';
 import { postInvoiceToLedger } from '@/lib/journal';
 import { notifyBillDue } from '@/lib/notifications';
+export const dynamic = 'force-dynamic';
 
 function generateInvoiceId(): string {
   const seq = Math.floor(Math.random() * 9000) + 1000;

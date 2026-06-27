@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { postJournalEntry } from '@/lib/journal';
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {

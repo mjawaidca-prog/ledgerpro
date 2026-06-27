@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseStatementFile } from '@/lib/import-parser';
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {

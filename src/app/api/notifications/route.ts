@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 // GET /api/notifications — list notifications for the current user
 export async function GET(req: NextRequest) {

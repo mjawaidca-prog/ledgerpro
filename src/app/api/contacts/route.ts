@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
 import { contactSchema } from '@/lib/validators/contact';
+export const dynamic = 'force-dynamic';
 
 // GET /api/contacts — list all contacts
 export async function GET(req: NextRequest) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 function getStripe(): Stripe | null {
   const key = process.env.STRIPE_SECRET_KEY;

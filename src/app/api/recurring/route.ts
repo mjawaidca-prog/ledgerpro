@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { postJournalEntry } from '@/lib/journal';
 import { z } from 'zod';
+export const dynamic = 'force-dynamic';
 
 const createSchema = z.object({
   name: z.string().min(1),

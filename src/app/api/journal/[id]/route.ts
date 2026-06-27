@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 // GET — single journal entry with full line details
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {

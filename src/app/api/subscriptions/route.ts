@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 // GET /api/subscriptions — get current subscription for the company
 export async function GET(req: NextRequest) {

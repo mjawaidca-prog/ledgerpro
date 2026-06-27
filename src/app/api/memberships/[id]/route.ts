@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { z } from 'zod';
+export const dynamic = 'force-dynamic';
 
 const updateSchema = z.object({
   role: z.enum(['owner', 'admin', 'bookkeeper', 'viewer']),

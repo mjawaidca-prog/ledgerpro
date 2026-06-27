@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+export const dynamic = 'force-dynamic';
 
 // PUT /api/notifications/[id] — mark a notification as read
 export async function PUT(

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { sendInvoice } from '@/lib/email';
+export const dynamic = 'force-dynamic';
 
 // POST /api/send — send an invoice via email
 export async function POST(req: NextRequest) {

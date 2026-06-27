@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { billSchema } from '@/lib/validators/bill';
+export const dynamic = 'force-dynamic';
 
 function generateBillId(kind: 'bill' | 'expense'): string {
   const seq = Math.floor(Math.random() * 9000) + 1000;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getServerSession } from '@/lib/auth';
+export const dynamic = 'force-dynamic';
 
 // POST — switch active company
 export async function POST(req: NextRequest) {
