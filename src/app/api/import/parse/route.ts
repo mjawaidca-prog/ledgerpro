@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseStatementFile } from '@/lib/import-parser';
-import { parsePdfBankStatement, detectPdfImportDuplicates } from '@/lib/pdf-bank-statement-parser';
-import { db } from '@/lib/db';
-import { requireCompany } from '@/lib/api-helpers';
+import { parsePdfBankStatement } from '@/lib/pdf-bank-statement-parser';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // needed for pdfjs-dist
 
@@ -25,11 +23,11 @@ export async function POST(req: NextRequest) {
 
     // ── PDF: use pdfjs-dist position-aware parser ──
     if (fileName.endsWith('.pdf')) {
-      const { companyId } = await requireCompany(req);
-      const accountKind = (formData.get('accountKind') as string) || 'bank';
-      const statementYear = parseInt((formData.get('statementYear') as string) || String(new Date().getFullYear()));
+      try {
+        const accountKind = (formData.get('accountKind') as string) || 'bank';
+        const statementYear = parseInt((formData.get('statementYear') as string) || String(new Date().getFullYear()));
 
-      const parsed = await parsePdfBankStatement(buffer, {
+        const parsed = await parsePdfBankStatement(buffer, {
         accountKind: accountKind as any,
         statementYear: isNaN(statementYear) ? new Date().getFullYear() : statementYear,
         signMode: accountKind === 'credit_card' ? 'credit-card' : 'normal',
@@ -58,40 +56,26 @@ export async function POST(req: NextRequest) {
         },
       }));
 
-      // Duplicate detection if a company/account context is available
-      let duplicateMatches: any[] = [];
-      if (companyId) {
-        const accountId = (formData.get('accountId') as string) || '';
-        if (accountId) {
-          const existingForAccount = await db.transaction.findMany({
-            where: { companyId, financialAccountId: accountId },
-            select: { id: true, financialAccountId: true, date: true, amount: true, description: true },
-          });
-          duplicateMatches = detectPdfImportDuplicates(
-            parsed.transactions,
-            existingForAccount.map(tx => ({ ...tx, amount: tx.amount.toString() })),
-            accountId,
-          );
-        }
-      }
-
-      const duplicateFingerprints = new Set(duplicateMatches.map(m => m.transaction.fingerprint));
-      const cleanRows = rows.filter((_, i) => !duplicateFingerprints.has(parsed.transactions[i]?.fingerprint));
-
       return NextResponse.json({
         data: {
           fileName: file.name,
           fileType: 'pdf',
           headers: ['Date', 'Description', 'Amount', 'Balance', 'Merchant'],
-          rows: cleanRows.slice(0, 100),
-          totalRows: cleanRows.length,
+          rows: rows.slice(0, 100),
+          totalRows: rows.length,
           metadata: parsed.metadata,
           warnings: parsed.warnings,
           rejectedRows: parsed.rejectedRows,
-          duplicates: duplicateMatches,
           errors: [...parsed.warnings, ...parsed.rejectedRows.map(r => r.reason)],
         },
       });
+      } catch (pdfError: any) {
+        console.error('PDF parse error:', pdfError);
+        return NextResponse.json(
+          { error: 'PDF parse failed: ' + (pdfError.message || 'Unknown error') },
+          { status: 422 }
+        );
+      }
     }
 
     // ── OFX / QFX: binary, use existing parser ──
