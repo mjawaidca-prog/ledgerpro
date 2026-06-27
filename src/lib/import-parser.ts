@@ -122,9 +122,16 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
   const errors: string[] = [];
 
   try {
-    const pdfParse = (await import('pdf-parse')).default;
+    let pdfParse: any;
+    try {
+      pdfParse = (await import('pdf-parse')).default;
+    } catch {
+      // Fallback for bundlers that don't handle dynamic import
+      const mod = await import('pdf-parse');
+      pdfParse = (mod as any).default || mod;
+    }
     const data = await pdfParse(buffer);
-    const text = data.text;
+    const text: string = data.text || '';
 
     if (!text || text.trim().length === 0) {
       return {
