@@ -4,20 +4,24 @@
  * Run: npx tsx prisma/seed-prod.ts
  */
 import { PrismaClient } from '@prisma/client';
+import { setupStripeProducts } from './stripe-setup';
 
 const db = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Production seed — plans, tax rates, default COA\n');
+  console.log('🌱 Production seed — plans, tax rates, Stripe setup\n');
 
   // ─── Plans ───
   const plans = await Promise.all([
     db.plan.upsert({ where: { id: 'plan_free' }, update: {}, create: { id: 'plan_free', name: 'Free Trial', monthlyPrice: 0, annualPrice: 0, maxUsers: 1, maxCompanies: 1, maxTransactions: 100, maxBankAccounts: 1, csvExport: true, pdfReports: false, bankFeeds: false, customReports: false, prioritySupport: false, whiteLabel: false } }),
-    db.plan.upsert({ where: { id: 'plan_basic' }, update: {}, create: { id: 'plan_basic', name: 'Basic', stripePriceId: 'price_basic_monthly', monthlyPrice: 29, annualPrice: 290, maxUsers: 2, maxCompanies: 1, maxTransactions: 1000, maxBankAccounts: 3, csvExport: true, pdfReports: true, bankFeeds: false, customReports: false, prioritySupport: false, whiteLabel: false } }),
-    db.plan.upsert({ where: { id: 'plan_pro' }, update: {}, create: { id: 'plan_pro', name: 'Pro', stripePriceId: 'price_pro_monthly', monthlyPrice: 79, annualPrice: 790, maxUsers: 10, maxCompanies: 5, maxTransactions: 10000, maxBankAccounts: 10, csvExport: true, pdfReports: true, bankFeeds: true, customReports: true, prioritySupport: true, whiteLabel: false } }),
-    db.plan.upsert({ where: { id: 'plan_enterprise' }, update: {}, create: { id: 'plan_enterprise', name: 'Enterprise', stripePriceId: 'price_enterprise_monthly', monthlyPrice: 199, annualPrice: 1990, maxUsers: 50, maxCompanies: 25, maxTransactions: 100000, maxBankAccounts: 50, csvExport: true, pdfReports: true, bankFeeds: true, customReports: true, prioritySupport: true, whiteLabel: true } }),
+    db.plan.upsert({ where: { id: 'plan_basic' }, update: {}, create: { id: 'plan_basic', name: 'Basic', monthlyPrice: 29, annualPrice: 290, maxUsers: 2, maxCompanies: 1, maxTransactions: 1000, maxBankAccounts: 3, csvExport: true, pdfReports: true, bankFeeds: false, customReports: false, prioritySupport: false, whiteLabel: false } }),
+    db.plan.upsert({ where: { id: 'plan_pro' }, update: {}, create: { id: 'plan_pro', name: 'Pro', monthlyPrice: 79, annualPrice: 790, maxUsers: 10, maxCompanies: 5, maxTransactions: 10000, maxBankAccounts: 10, csvExport: true, pdfReports: true, bankFeeds: true, customReports: true, prioritySupport: true, whiteLabel: false } }),
+    db.plan.upsert({ where: { id: 'plan_enterprise' }, update: {}, create: { id: 'plan_enterprise', name: 'Enterprise', monthlyPrice: 199, annualPrice: 1990, maxUsers: 50, maxCompanies: 25, maxTransactions: 100000, maxBankAccounts: 50, csvExport: true, pdfReports: true, bankFeeds: true, customReports: true, prioritySupport: true, whiteLabel: true } }),
   ]);
   console.log(`  ✓ ${plans.length} subscription plans`);
+
+  // ─── Stripe Products & Prices (programmatic, no dashboard needed) ───
+  await setupStripeProducts();
 
   // ─── Canadian Tax Rates ───
   const taxRates = [

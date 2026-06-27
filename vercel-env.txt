@@ -7,16 +7,9 @@ RESEND_API_KEY=
 # ─── Stripe ───
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-# Stripe Price IDs (create Products & Prices in Stripe Dashboard first):
-#   Basic monthly:   price_...  → set as Plan.stripePriceId for plan_basic
-#   Pro monthly:     price_...  → set as Plan.stripePriceId for plan_pro
-#   Enterprise monthly: price_... → set as Plan.stripePriceId for plan_enterprise
-# For each Stripe Price, add metadata: planId = plan_basic / plan_pro / plan_enterprise
 #
-# After creating Stripe prices, update the Plan records in Supabase:
-#   UPDATE "Plan" SET "stripePriceId" = 'price_XXXX' WHERE id = 'plan_basic';
-#   UPDATE "Plan" SET "stripePriceId" = 'price_YYYY' WHERE id = 'plan_pro';
-#   UPDATE "Plan" SET "stripePriceId" = 'price_ZZZZ' WHERE id = 'plan_enterprise';
+# Products & Prices are created AUTOMATICALLY during seed (prisma/stripe-setup.ts)
+# Just set STRIPE_SECRET_KEY and run: npx tsx prisma/seed-prod.ts
 #
-# Customer Portal must be configured in Stripe Dashboard:
-#   https://dashboard.stripe.com/settings/billing/portal
+# Customer Portal: configure at https://dashboard.stripe.com/settings/billing/portal
+# (This is the only manual Stripe Dashboard step — everything else is in code)
