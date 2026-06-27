@@ -1,5 +1,7 @@
-DATABASE_URL=postgresql://postgres:...@db.xxx.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres:...@db.xxx.supabase.co:6543/postgres?pgbouncer=true
 DIRECT_URL=postgresql://postgres:...@db.xxx.supabase.co:5432/postgres
+# DATABASE_URL = pooled (PgBouncer, port 6543) — used by Prisma Client at runtime
+# DIRECT_URL   = direct connection (port 5432) — used by Prisma Migrate/Introspect
 NEXTAUTH_SECRET=<random-32-char-string>
 NEXTAUTH_URL=https://ledger.nexvarlab.com
 RESEND_API_KEY=

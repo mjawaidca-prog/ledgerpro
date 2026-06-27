@@ -7,8 +7,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // pooled (PgBouncer, port 6543) for Prisma Client
+  directUrl = env("DIRECT_URL")     // direct (port 5432) for migrations
 }
 
 // ─── AUTH & ORGANIZATION ────────────────────────────────────
