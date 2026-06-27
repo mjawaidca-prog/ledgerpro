@@ -136,7 +136,7 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
       };
     }
 
-    const lines = text.split('\n').filter((l: string) => l.trim());
+    const rawLines = text.split('\n');
     const rows: ParsedRow[] = [];
 
     // Date patterns: MM/DD/YYYY, MM/DD, YYYY-MM-DD, DD MMM YYYY, DD MMM YY
@@ -147,105 +147,110 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
     // Find ALL dollar amounts on a line: $1,234.56, -$500.00, (1,234.56), —$12.34, 1,234.56
     const amountRe = /(?:—|−|\-)?\s*\$?\s*\(?\s*(\-?[\d,]+\.\d{2})\s*\)?/g;
 
-    // Words that indicate a balance column (not the transaction amount)
-    const balanceWords = /balance|ending|closing/i;
+    // Words that indicate non-transaction lines to skip
+    const skipWords = /page|statement|opening balance|balance brought|total carried|continued|subtotal|from date|to date|period ending|account summary/i;
+    // Words that suggest a number is a balance, not transaction amount
+    const balanceWords = /balance|ending|closing|available/i;
 
-    for (const line of lines) {
-      const dateMatch = line.match(datePattern);
-      const dateStr = dateMatch ? dateMatch[0] : '';
+    // ── Multi-pass: PDF tables split columns across lines ──
+    // Pass 1: collect candidates with amounts, inheriting dates from prior lines
+    interface Candidate {
+      dateStr: string;
+      description: string;
+      amounts: { value: number; index: number; raw: string }[];
+    }
+    const candidates: Candidate[] = [];
+    let lastDate = '';
 
-      // Find ALL amounts on this line
+    for (const line of rawLines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (skipWords.test(trimmed)) continue;
+
+      // Track any date found on this line
+      const dateMatch = trimmed.match(datePattern);
+      const thisDate = dateMatch ? dateMatch[0] : '';
+      if (thisDate) lastDate = thisDate;
+
+      // Find all amounts
       const allAmounts: { value: number; index: number; raw: string }[] = [];
       let am;
-      while ((am = amountRe.exec(line)) !== null) {
+      while ((am = amountRe.exec(trimmed)) !== null) {
         const raw = am[0];
         let numStr = am[1].replace(/,/g, '');
         let num = parseFloat(numStr);
-        // Negative indicators: leading -, —, −, or parentheses
         if (raw.match(/^[\s]*(—|−|\-)/) || (raw.includes('(') && raw.includes(')'))) {
           num = -Math.abs(num);
         }
         allAmounts.push({ value: num, index: am.index, raw });
       }
-
-      // Reset regex
       amountRe.lastIndex = 0;
 
-      if (!dateMatch && allAmounts.length === 0) continue;
+      if (allAmounts.length === 0) continue;
 
-      // Extract description: remove date, remove amounts, clean up
-      let description = line;
-      if (dateMatch) description = description.replace(dateMatch[0], '');
-      // Remove amount strings from description
-      const amts = Array.from(line.matchAll(amountRe));
-      for (const a of amts.reverse()) {
-        description = description.slice(0, a.index!) + description.slice(a.index! + a[0].length);
+      // Build description
+      let desc = trimmed;
+      if (thisDate) desc = desc.replace(dateMatch![0], '');
+      for (const a of allAmounts.slice().reverse()) {
+        desc = desc.slice(0, a.index) + desc.slice(a.index + a.raw.length);
       }
-      description = description.replace(/[^\w\s\-\&\#\/\.\@\#]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      desc = desc.replace(/[^\w\s\-\&\#\/\.\@\#\%\*\(\)]/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+      if (!desc) desc = 'Transaction';
 
-      if (!description) description = 'Unknown';
+      candidates.push({
+        dateStr: thisDate || lastDate,
+        description: desc,
+        amounts: allAmounts,
+      });
+    }
 
+    // ── Pass 2: resolve amount from candidates, filter noise ──
+    for (const c of candidates) {
       let amount = 0;
       let isLowConfidence = false;
 
-      if (allAmounts.length === 1) {
-        // One amount — use it directly
-        amount = allAmounts[0].value;
-      } else if (allAmounts.length >= 2) {
-        // Multiple amounts — try debit/credit pair or amount+balance
-        // Strategy: find two amounts that aren't near "balance" keywords
-        const nonBalance = allAmounts.filter(a => {
-          const context = line.substring(Math.max(0, a.index - 20), a.index);
-          return !balanceWords.test(context);
-        });
-
-        if (nonBalance.length === 2) {
-          // Likely a debit+credit pair: net = credit - debit (positive = inflow)
-          // The larger index (further right) is usually the running balance
-          // Pick the amount that's NOT the balance
-          const sorted = nonBalance.sort((a, b) => b.index - a.index);
-          // The last non-balance amount is usually the balance — take the other one(s)
-          if (sorted.length >= 2) {
-            // If one is positive and one negative, use the first non-balance
-            const positives = nonBalance.filter(a => a.value > 0);
-            const negatives = nonBalance.filter(a => a.value < 0);
-            if (negatives.length === 1 && positives.length >= 1) {
-              amount = negatives[0].value; // withdrawal
-            } else if (negatives.length === 0 && positives.length >= 2) {
-              // Two positives — first is usually transaction, second is balance
-              amount = positives[0].value;
-            } else {
-              amount = nonBalance[0].value;
-            }
+      if (c.amounts.length === 1) {
+        amount = c.amounts[0].value;
+      } else {
+        // Use position: rightmost amount is usually the running balance
+        const byIndex = c.amounts.slice().sort((a, b) => b.index - a.index);
+        if (byIndex.length >= 2) {
+          // The rightmost amount is often the running balance
+          const rightmost = byIndex[0];
+          const others = byIndex.slice(1).filter(a => Math.abs(a.value - rightmost.value) > 0.05);
+          if (others.length === 1) {
+            amount = others[0].value;
+          } else if (others.length >= 2) {
+            // Pick the one that's negative (withdrawal) or first positive
+            const neg = others.find(a => a.value < 0);
+            amount = neg ? neg.value : others[0].value;
+          } else {
+            amount = byIndex[0].value;
+            isLowConfidence = true;
           }
-        } else if (nonBalance.length === 1) {
-          amount = nonBalance[0].value;
-        } else if (allAmounts.length >= 2) {
-          // Fallback: use the first amount, flag as low confidence
-          amount = allAmounts[0].value;
-          isLowConfidence = true;
         }
-      } else if (dateMatch) {
-        // Has a date but no amounts — flag for review
-        isLowConfidence = true;
       }
 
+      // Skip $0.00 lines that look like headers
+      if (Math.abs(amount) < 0.005 && /from|to|period|statement|date/i.test(c.description)) continue;
+
+      if (!c.dateStr) isLowConfidence = true;
+
       rows.push({
-        date: dateStr,
-        description,
+        date: c.dateStr || '',
+        description: c.description,
         amount,
         raw: {
-          Date: dateStr,
-          Description: description,
+          Date: c.dateStr || '',
+          Description: c.description,
           Amount: String(amount),
           ...(isLowConfidence ? { lowConfidence: 'true' } : {}),
         },
       });
     }
 
-    if (rows.length === 0 && lines.length > 10) {
+    if (rows.length === 0 && rawLines.length > 10) {
       errors.push(
         'No transaction rows could be identified from the PDF. The format may not be supported. Try converting to CSV.'
       );
