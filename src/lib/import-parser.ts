@@ -126,7 +126,6 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
     try {
       pdfParse = (await import('pdf-parse')).default;
     } catch {
-      // Fallback for bundlers that don't handle dynamic import
       const mod = await import('pdf-parse');
       pdfParse = (mod as any).default || mod;
     }
@@ -145,91 +144,147 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
     const allLines = text.split('\n');
     const rows: ParsedRow[] = [];
 
-    // Date patterns
-    const dateLong = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\s+\\d{1,2},?\\s+\\d{2,4}';
+    // Date patterns: "Thu, Dec. 31, 2024", "Dec 31, 2024", "2024-12-31", "12/31/2024"
+    const dateLong = '(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{2,4}';
     const dateNumeric = '\\d{1,2}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{2,4}|\\d{2,4}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{1,2}';
     const dateRe = new RegExp(`(${dateLong}|${dateNumeric})`, 'i');
 
-    // Dollar amounts with optional sign indicators
-    const moneyRe = /(?:—|−|\-)?\s*\$?\s*\(?\s*(\-?[\d,]+\.\d{2})\s*\)?/g;
+    // Money amounts: signed numbers like +$1,234.56, -$500.00, $3,370.82, (1,234.56)
+    const moneyRe = /[+\-]?\s*\$?\s*\(?\s*([\d,]+\.\d{2})\s*\)?/g;
 
-    const skipRe = /^(page\s+\d+|statement period|opening balance|closing balance|total deposits|total withdrawals|continued|account number|customer service)/i;
+    const skipRe = /^(page\s+\d+|statement period|opening|closing|total\s+(deposits|withdrawals)|continued|account number|customer service|document delivery|current balance|available balance|select account|filters|transactions|print|balance details|no holds)/i;
 
-    // Track the last date seen to inherit for lines without a date
-    let lastDate = '';
+    // ── Multi-line row builder ──
+    // Scotia/RBC/TD format: date line → description line(s) → amounts line
+    interface PendingRow {
+      date: string;
+      descLines: string[];
+    }
+    let pending: PendingRow | null = null;
 
-    for (const line of allLines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.length < 4) continue;
-      if (skipRe.test(trimmed)) continue;
+    function flushRow(amountLine: string, amounts: { raw: string; value: number }[]) {
+      if (!pending) return null;
 
-      // Detect date on this line
-      const dateMatch = trimmed.match(dateRe);
-      const foundDate = dateMatch ? dateMatch[0] : '';
-      if (foundDate) lastDate = foundDate;
-
-      // Find all amounts
-      const amounts: { raw: string; value: number; pos: number }[] = [];
-      let m;
-      while ((m = moneyRe.exec(trimmed)) !== null) {
-        let numStr = m[1].replace(/,/g, '');
-        let val = parseFloat(numStr);
-        // Detect negatives: leading -, —, −, or parentheses
-        if (/^[\s]*(—|−|\-)/.test(m[0]) || (m[0].includes('(') && m[0].includes(')'))) {
-          val = -Math.abs(val);
-        }
-        amounts.push({ raw: m[0], value: val, pos: m.index });
-      }
-      moneyRe.lastIndex = 0;
-
-      // Skip lines without any amounts
-      if (amounts.length === 0) continue;
-
-      // Build description: remove date and all amounts
-      let desc = trimmed;
-      if (foundDate) desc = desc.replace(dateMatch![0], '');
-      for (const a of [...amounts].reverse()) {
-        desc = desc.slice(0, a.pos) + desc.slice(a.pos + a.raw.length);
-      }
-      desc = desc.replace(/[^\w\s\-\&\#\/\.\@]/g, ' ').replace(/\s+/g, ' ').trim();
-      if (!desc) desc = 'Transaction';
-
-      // Select transaction amount from multiple amounts
+      // Pick transaction amount: negative = withdrawal, positive = deposit
+      // If exactly one negative and one positive, negative is the transaction, positive is balance
       let finalAmount = 0;
       if (amounts.length === 1) {
         finalAmount = amounts[0].value;
       } else if (amounts.length >= 2) {
-        // If one is clearly negative and the rest positive, use the negative (withdrawal)
         const negs = amounts.filter(a => a.value < -0.005);
         const poss = amounts.filter(a => a.value > 0.005);
         if (negs.length === 1) {
-          finalAmount = negs[0].value;
+          finalAmount = negs[0].value; // withdrawal
         } else if (poss.length >= 2) {
-          // Multiple positives — first is usually transaction, last is balance
+          // Multiple positives: first non-zero is transaction, last is balance
           finalAmount = poss[0].value;
         } else {
-          // Fallback: first amount
           finalAmount = amounts[0].value;
         }
       }
 
-      // Use inherited date if line doesn't have its own
-      const effectiveDate = foundDate || lastDate;
-
-      rows.push({
-        date: effectiveDate,
+      const desc = pending.descLines.join(' ').replace(/\s+/g, ' ').trim() || 'Transaction';
+      const row = {
+        date: pending.date,
         description: desc,
         amount: finalAmount,
         raw: {
-          Date: effectiveDate,
+          Date: pending.date,
           Description: desc,
           Amount: String(finalAmount),
+        },
+      };
+
+      pending = null;
+      return row;
+    }
+
+    for (const line of allLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.length < 3) continue;
+      if (skipRe.test(trimmed)) continue;
+
+      // Check for date
+      const dateMatch = trimmed.match(dateRe);
+      const foundDate = dateMatch ? dateMatch[0] : '';
+
+      // Find amounts on this line
+      const amounts: { raw: string; value: number }[] = [];
+      let m;
+      while ((m = moneyRe.exec(trimmed)) !== null) {
+        let val = parseFloat(m[1].replace(/,/g, ''));
+        // Detect sign from the full match (e.g., "-$20.00", "+$220.50")
+        const fullMatch = m[0];
+        if (/^[\s]*(—|−|\-)/.test(fullMatch) || fullMatch.includes('(')) {
+          val = -Math.abs(val);
+        } else if (fullMatch.includes('+')) {
+          val = Math.abs(val); // explicit positive
+        }
+        amounts.push({ raw: m[0], value: val });
+      }
+      moneyRe.lastIndex = 0;
+
+      // If this line has a date, flush previous pending row (if any amounts were pending)
+      if (foundDate && pending && amounts.length > 0) {
+        const row = flushRow(trimmed, amounts);
+        if (row) rows.push(row);
+        pending = null;
+      }
+
+      // Start new pending row when we see a date
+      if (foundDate) {
+        // Flush any existing pending (without amounts — might be orphan)
+        pending = { date: foundDate, descLines: [] };
+
+        // If this date line also has amounts, resolve immediately
+        // Extract remaining text after the date as description
+        if (amounts.length > 0) {
+          let descText = trimmed.replace(dateMatch![0], '');
+          for (const a of amounts) {
+            descText = descText.replace(a.raw, '');
+          }
+          descText = descText.replace(/[^\w\s\-\&\#\/\.\@]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (descText) pending.descLines.push(descText);
+          const row = flushRow(trimmed, amounts);
+          if (row) rows.push(row);
+          pending = null;
+        }
+        continue;
+      }
+
+      // Line without date: if it has amounts, it completes the pending row
+      if (amounts.length > 0 && pending) {
+        const row = flushRow(trimmed, amounts);
+        if (row) rows.push(row);
+        continue;
+      }
+
+      // Line without date and without amounts: collect as description
+      if (amounts.length === 0 && pending && !/date|description|withdrawal|deposit|balance/i.test(trimmed)) {
+        const cleaned = trimmed.replace(/[^\w\s\-\&\#\/\.\@\#]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (cleaned && cleaned.length > 2) {
+          pending.descLines.push(cleaned);
+        }
+      }
+    }
+
+    // Flush any remaining pending row
+    if (pending && pending.descLines.length > 0) {
+      rows.push({
+        date: pending.date,
+        description: pending.descLines.join(' ').trim(),
+        amount: 0,
+        raw: {
+          Date: pending.date,
+          Description: pending.descLines.join(' ').trim(),
+          Amount: '0',
+          lowConfidence: 'true',
         },
       });
     }
 
     if (rows.length === 0 && allLines.length > 10) {
-      errors.push('No transaction rows could be identified. The PDF format may not be supported. Try converting to CSV first.');
+      errors.push('No transactions found. The PDF format may not be supported. Try converting to CSV first.');
     }
 
     return {
