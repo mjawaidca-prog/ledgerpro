@@ -32,10 +32,12 @@ export async function POST(req: NextRequest) {
 
         switch (rule.patternType) {
           case 'merchant_match':
-            isMatch = tx.merchant?.toLowerCase() === rule.pattern.toLowerCase();
+            isMatch = (tx.merchant?.toLowerCase().trim() || '') === rule.pattern.toLowerCase().trim();
             break;
           case 'description_contains':
-            isMatch = tx.description.toLowerCase().includes(rule.pattern.toLowerCase());
+            const searchText = (tx.description + ' ' + (tx.merchant || '')).toLowerCase().trim();
+            const searchPattern = rule.pattern.toLowerCase().trim();
+            isMatch = searchText.includes(searchPattern);
             break;
           case 'amount_range':
             const txAmt = Math.abs(Number(tx.amount));
@@ -67,8 +69,12 @@ export async function POST(req: NextRequest) {
 
     await auditLog(companyId, userId, 'rules.apply', 'categorization_rule', undefined, { matched, total: unreviewed.length });
 
+    const message = matched > 0
+      ? `${matched} of ${unreviewed.length} transactions auto-categorized`
+      : `0 of ${unreviewed.length} matched. Check that: 1) transactions are "To Review" status, 2) pattern text exists in the description, 3) rules are active.`;
+
     return NextResponse.json({
-      data: { matched, total: unreviewed.length, message: `${matched} of ${unreviewed.length} transactions auto-categorized` },
+      data: { matched, total: unreviewed.length, message },
     });
   } catch (error) {
     console.error('POST /api/categorization-rules/apply error:', error);
