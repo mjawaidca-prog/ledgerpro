@@ -20,11 +20,17 @@ export async function POST(req: NextRequest) {
 
     const unreviewed = await db.transaction.findMany({
       where: { companyId, status: 'toreview', categoryId: null },
-      select: { id: true, description: true, merchant: true, amount: true },
-      take: 500,
+      select: { id: true, description: true, merchant: true, rawStatementText: true, amount: true },
+      take: 2000, // process up to 2000 at once
+    });
+
+    // Debug: count total unreviewed
+    const totalUnreviewed = await db.transaction.count({
+      where: { companyId, status: 'toreview', categoryId: null },
     });
 
     let matched = 0;
+    const sampleDescriptions: string[] = [];
 
     for (const tx of unreviewed) {
       for (const rule of rules) {
@@ -34,17 +40,24 @@ export async function POST(req: NextRequest) {
           case 'merchant_match':
             isMatch = (tx.merchant?.toLowerCase().trim() || '') === rule.pattern.toLowerCase().trim();
             break;
-          case 'description_contains':
-            const searchText = (tx.description + ' ' + (tx.merchant || '')).toLowerCase().trim();
+          case 'description_contains': {
+            // Search description + merchant + rawStatementText
+            const searchText = [
+              tx.description || '',
+              tx.merchant || '',
+              tx.rawStatementText || '',
+            ].join(' ').toLowerCase().trim();
             const searchPattern = rule.pattern.toLowerCase().trim();
             isMatch = searchText.includes(searchPattern);
             break;
-          case 'amount_range':
+          }
+          case 'amount_range': {
             const txAmt = Math.abs(Number(tx.amount));
             const min = rule.minAmount ? Number(rule.minAmount) : 0;
             const max = rule.maxAmount ? Number(rule.maxAmount) : Infinity;
             isMatch = txAmt >= min && txAmt <= max;
             break;
+          }
           case 'regex':
             try {
               isMatch = new RegExp(rule.pattern, 'i').test(tx.description);
@@ -62,19 +75,29 @@ export async function POST(req: NextRequest) {
             data: { matchCount: { increment: 1 }, lastMatchedAt: new Date() },
           });
           matched++;
-          break; // stop at first matching rule
+          break;
         }
+      }
+
+      // Collect up to 5 sample descriptions for debugging
+      if (matched === 0 && sampleDescriptions.length < 5 && tx.description) {
+        sampleDescriptions.push(tx.description.substring(0, 60));
       }
     }
 
-    await auditLog(companyId, userId, 'rules.apply', 'categorization_rule', undefined, { matched, total: unreviewed.length });
+    await auditLog(companyId, userId, 'rules.apply', 'categorization_rule', undefined, { matched, total: totalUnreviewed });
 
-    const message = matched > 0
-      ? `${matched} of ${unreviewed.length} transactions auto-categorized`
-      : `0 of ${unreviewed.length} matched. Check that: 1) transactions are "To Review" status, 2) pattern text exists in the description, 3) rules are active.`;
+    let message: string;
+    if (matched > 0) {
+      message = `${matched} of ${totalUnreviewed} transactions auto-categorized`;
+    } else if (totalUnreviewed === 0) {
+      message = 'No unreviewed transactions found. Import a statement or go to Banking to see pending transactions.';
+    } else {
+      message = `0 of ${totalUnreviewed} matched. Sample descriptions: [${sampleDescriptions.join(' | ')}]. Check that your pattern appears in these texts.`;
+    }
 
     return NextResponse.json({
-      data: { matched, total: unreviewed.length, message },
+      data: { matched, total: totalUnreviewed, sampleDescriptions: matched === 0 ? sampleDescriptions : [], message },
     });
   } catch (error) {
     console.error('POST /api/categorization-rules/apply error:', error);
