@@ -1,7 +1,7 @@
 1================================================================================
   LEDGER PRO — Complete System Reference
   Cloud Accounting SaaS for Canadian Small Business
-  Last Updated: June 2026
+  Last Updated: July 2026
 ================================================================================
 
 ================================================================================
@@ -29,7 +29,7 @@ PRICING: Free Trial → Basic $29/mo → Pro $79/mo → Enterprise $199/mo
                     ┌───────────────────────────────┤
                     │                               │
             ┌───────▼────────┐            ┌────────▼────────┐
-            │    GitHub      │            │    Supabase     │
+            │    GitHub      │            │    Neon     │
             │  (Code Repo +  │            │  (PostgreSQL    │
             │   Version      │            │   Database)     │
             │   Control)     │            │                 │
@@ -48,8 +48,8 @@ DATA FLOW:
   1. Developer writes code → pushes to GitHub
   2. GitHub triggers Vercel → auto-deploys new version
   3. User visits ledger.nexvarlab.com → Cloudflare DNS routes to Vercel
-  4. Vercel serves the Next.js app → App connects to Supabase for data
-  5. Payments processed through Stripe → webhooks update Supabase
+  4. Vercel serves the Next.js app → App connects to Neon for data
+  5. Payments processed through Stripe → webhooks update Neon
   6. Emails sent through Resend (invoices, confirmations)
 
 ================================================================================
@@ -72,8 +72,8 @@ B. VERCEL — Hosting & Deployment
                           NEXTAUTH_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
                           RESEND_API_KEY
 
-C. SUPABASE — Cloud Database
-   URL: https://xdniuuetrsflynxvnqzc.supabase.co
+C. Neon — Cloud Database
+   URL: https://xdniuuetrsflynxvnqzc.Neon.co
    Purpose: PostgreSQL database storing all accounting data
    Contains: Users, companies, invoices, bills, transactions, journal entries,
              chart of accounts, subscriptions, tax rates, audit logs
@@ -254,7 +254,7 @@ RECURRING TRANSACTIONS
   6. SIGN IN
 ================================================================================
 
-  Development (localhost:3003):
+  Development (localhost:3000):
     Email: rosa@northwindtrading.com
     Password: ledgerpro2026
 
@@ -272,17 +272,17 @@ RECURRING TRANSACTIONS
      ledgerpro-theta.vercel.app (auto)
      ledger.nexvarlab.com (custom domain)
   4. Cloudflare DNS resolves ledger.nexvarlab.com → Vercel
-  5. Users access the app → data flows through Supabase
+  5. Users access the app → data flows through Neon
 
 ================================================================================
   8. COMMANDS REFERENCE
 ================================================================================
 
-  Local dev server:    npx next dev -p 3003
+  Local dev server:    npm run dev
   Build production:    npx next build
   TypeScript check:    npx tsc --noEmit
   Push schema to DB:   npx prisma db push
-  Seed development:    npx tsx prisma/seed.ts
+  Seed development:    npm run db:seed
   Seed production:     npx tsx prisma/seed-prod.ts
   Run tests:           npx jest __tests__/api.test.ts
 
