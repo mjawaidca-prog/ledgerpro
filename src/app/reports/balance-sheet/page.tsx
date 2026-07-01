@@ -143,10 +143,10 @@ export default function BalanceSheetPage() {
         </div>
         <div className="flex items-center gap-3">
           <input
-            type="date"
+            type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD"
             value={asOf}
             onChange={(e) => setAsOf(e.target.value)}
-            className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)]"
+            className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)] font-mono"
           />
           <div className={cn(
             'flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full font-medium',

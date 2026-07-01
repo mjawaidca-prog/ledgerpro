@@ -39,6 +39,12 @@ export default function ProfitLossPage() {
 
   useEffect(() => { if (fy.loaded) setYear(fy.defaultYear); }, [fy.loaded, fy.defaultYear]);
 
+  // Generate year options: 4 years centered on current FY
+  const yearOptions = Array.from({ length: 4 }, (_, i) => {
+    const y = String(Number(fy.defaultYear || new Date().getFullYear()) - 1 + i);
+    return { value: y, label: y };
+  });
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -74,7 +80,7 @@ export default function ProfitLossPage() {
           </p>
         </div>
         <Segmented
-          options={[{ value: '2025', label: '2025' }, { value: '2026', label: '2026' }]}
+          options={yearOptions}
           value={year}
           onChange={setYear}
         />

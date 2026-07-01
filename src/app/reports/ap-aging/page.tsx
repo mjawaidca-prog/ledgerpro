@@ -103,7 +103,7 @@ export default function APAgingPage() {
             <p className="text-sm text-[var(--text-muted)] mt-0.5">As of {format(new Date(data.asOf), 'MMM d, yyyy')} · {data.totalBills} open bills · {money(data.totalPayable)} payable</p>
           </div>
         </div>
-        <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)]" />
+        <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)] font-mono" />
       </div>
 
       {/* Summary cards */}

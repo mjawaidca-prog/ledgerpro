@@ -175,9 +175,9 @@ function GLContent() {
         ))}
         {activePreset === 'Custom' && (
           <div className="flex items-center gap-2">
-            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+            <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)] font-mono" />
             <span className="text-xs text-[var(--text-faint)]">to</span>
-            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+            <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)] font-mono" />
           </div>
         )}
       </div>
