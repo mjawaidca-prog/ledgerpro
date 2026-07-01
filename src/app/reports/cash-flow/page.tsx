@@ -7,6 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { ArrowLeft, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 interface CashFlowData {
   period: { year: string };
@@ -26,7 +27,9 @@ export default function CashFlowPage() {
   const [data, setData] = useState<CashFlowData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [year, setYear] = useState('2026');
+  const fy = useFiscalYear();
+  const [year, setYear] = useState(fy.defaultYear);
+  useEffect(() => { if (fy.loaded) setYear(fy.defaultYear); }, [fy.loaded, fy.defaultYear]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);

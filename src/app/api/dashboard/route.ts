@@ -135,7 +135,12 @@ export async function GET(req: NextRequest) {
       .filter(i => i.status === 'sent' || i.status === 'overdue')
       .reduce((s, i) => s + Number(i.total) - Number(i.paidAmount), 0);
 
-    const totalCash = bankAccounts.reduce((s, a) => s + Number(a.currentBalance), 0);
+    const totalCash = bankAccounts
+      .filter(a => a.kind !== 'creditcard')
+      .reduce((s, a) => s + Number(a.currentBalance), 0);
+    const totalCreditCardDebt = bankAccounts
+      .filter(a => a.kind === 'creditcard')
+      .reduce((s, a) => s + Number(a.currentBalance), 0);
 
     // ─── Monthly Cash Flow ───
     const monthlyMap: Record<string, { income: number; expenses: number }> = {};
@@ -205,6 +210,7 @@ export async function GET(req: NextRequest) {
           netIncome: Math.round(netIncome),
           outstanding: Math.round(outstandingInvoices),
           totalCash: Math.round(totalCash),
+          totalCreditCardDebt: Math.round(totalCreditCardDebt),
           revenueChange: revenueDelta,
           expenseChange: expenseDelta,
           incomeChange: incomeDelta,

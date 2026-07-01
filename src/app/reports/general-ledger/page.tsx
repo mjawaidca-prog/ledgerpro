@@ -9,6 +9,7 @@ import { money } from '@/lib/money';
 import { format, startOfMonth, endOfMonth, subMonths, startOfYear, startOfQuarter, endOfQuarter } from 'date-fns';
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar, Download, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { exportGL } from '@/lib/export';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 interface GLRow {
   id: string;
@@ -70,10 +71,14 @@ function GLContent() {
   const urlStart = searchParams.get('start');
   const urlEnd = searchParams.get('end');
 
-  const today = new Date().toISOString().slice(0, 10);
-  const [startDate, setStartDate] = useState(urlStart || '2026-01-01');
-  const [endDate, setEndDate] = useState(urlEnd || today);
-  const [activePreset, setActivePreset] = useState(urlStart ? 'Custom' : 'FY 2026');
+  const fy = useFiscalYear();
+  const fyStart = fy.fiscalYearStart || new Date().getFullYear() + '-01-01';
+  const fyEnd = fy.fiscalYearEnd || new Date().toISOString().slice(0, 10);
+  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY 2026';
+  const [startDate, setStartDate] = useState(urlStart || fyStart);
+  const [endDate, setEndDate] = useState(urlEnd || fyEnd);
+  const [activePreset, setActivePreset] = useState(urlStart ? 'Custom' : fyLabel);
+  useEffect(() => { if (fy.loaded && !urlStart) { setStartDate(fyStart); setEndDate(fyEnd); setActivePreset(fyLabel); } }, [fy.loaded]);
   const [data, setData] = useState<GLData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

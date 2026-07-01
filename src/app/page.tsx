@@ -24,7 +24,7 @@ type DateRange = 'month' | 'quarter' | 'year';
 interface DashboardData {
   kpis: {
     totalRevenue: number; totalExpenses: number; netIncome: number;
-    outstanding: number; totalCash: number;
+    outstanding: number; totalCash: number; totalCreditCardDebt: number;
     revenueChange: number | null; expenseChange: number | null;
     incomeChange: number | null; outstandingCount: number; invoiceCount: number;
   };
@@ -301,6 +301,22 @@ export default function DashboardPage() {
                 )}
               </div>
             </button>
+
+            {/* Credit Card Debt — only shown if CC accounts exist */}
+            {d.kpis.totalCreditCardDebt !== 0 && (
+              <button onClick={() => router.push('/banking')}
+                className="group text-left bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5 shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] hover:border-[#ef4444]/30 transition-all relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#ef4444] to-[#f87171]" />
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#ef4444]/15 to-[#ef4444]/5 grid place-items-center">
+                    <CreditCard size={15} className="text-[#ef4444]" />
+                  </div>
+                  <span className="text-[11px] font-mono uppercase tracking-[0.06em] text-[var(--text-muted)]">CC Debt</span>
+                </div>
+                <div className="font-mono tabular-nums text-2xl font-bold text-[var(--text-strong)] tracking-tight">{money(Math.abs(d.kpis.totalCreditCardDebt))}</div>
+                <div className="text-xs text-[var(--text-muted)] mt-2">Credit card balance{Math.abs(d.kpis.totalCreditCardDebt) > 0 ? ' — money you owe' : ''}</div>
+              </button>
+            )}
 
             {/* Outstanding */}
             <button onClick={() => router.push('/invoices?status=overdue')}

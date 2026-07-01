@@ -175,8 +175,12 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 });
     }
 
-    if (existing.sourceType !== 'manual') {
-      return NextResponse.json({ error: 'Only manual journal entries can be deleted' }, { status: 403 });
+    // If this entry was auto-generated from a transaction import, unlink the transaction
+    if (existing.sourceType === 'payment' && existing.sourceId) {
+      await db.transaction.updateMany({
+        where: { id: existing.sourceId, companyId },
+        data: { status: 'categorized', matchRef: null },
+      });
     }
 
     // Reverse balance effects

@@ -9,6 +9,7 @@ import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar, Download } from 'lucide-react';
 import { exportTrialBalance } from '@/lib/export';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { format as formatDate, startOfMonth, subMonths, endOfMonth, startOfYear, startOfQuarter } from 'date-fns';
 
 interface TBRow {
@@ -47,12 +48,14 @@ export default function TrialBalancePage() {
   const [data, setData] = useState<TBData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const today = new Date().toISOString().slice(0, 10);
-  const [asOf, setAsOf] = useState(today);
-  const [activePreset, setActivePreset] = useState('Today');
+  const fy = useFiscalYear();
+  const defaultAsOf = fy.fiscalYearEnd || new Date().toISOString().slice(0, 10);
+  const [asOf, setAsOf] = useState(defaultAsOf);
+  const [activePreset, setActivePreset] = useState('FY End');
+  useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) { setAsOf(fy.fiscalYearEnd); setActivePreset('FY End'); } }, [fy.loaded, fy.fiscalYearEnd]);
 
   const presets = [
-    { label: 'Today', value: today },
+    { label: 'Today', value: new Date().toISOString().slice(0, 10) },
     { label: 'End of last month', value: formatDate(endOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd') },
     { label: 'End of Q1', value: '2026-03-31' },
     { label: 'End of Q2', value: '2026-06-30' },

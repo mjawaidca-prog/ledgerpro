@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { z } from 'zod';
 import crypto from 'crypto';
+import { DEFAULT_CHART_OF_ACCOUNTS } from '@/lib/default-coa';
 export const dynamic = 'force-dynamic';
 
 const registerSchema = z.object({
@@ -11,27 +12,6 @@ const registerSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
   companyName: z.string().min(2, 'Company name must be at least 2 characters'),
 });
-
-// Default Chart of Accounts for new companies
-const DEFAULT_COA = [
-  { code: '1000', name: 'Bank Accounts', type: 'asset' as const, detailType: 'Bank' },
-  { code: '1010', name: 'Business Checking', type: 'asset' as const, detailType: 'Bank', parentCode: '1000' },
-  { code: '1100', name: 'Accounts Receivable', type: 'asset' as const, detailType: 'Accounts receivable' },
-  { code: '2000', name: 'Credit Cards', type: 'liability' as const, detailType: 'Credit card' },
-  { code: '2200', name: 'Accounts Payable', type: 'liability' as const, detailType: 'Accounts payable' },
-  { code: '2300', name: 'Sales Tax Payable', type: 'liability' as const, detailType: 'Sales tax payable' },
-  { code: '3000', name: "Owner's Capital", type: 'equity' as const, detailType: "Owner's equity" },
-  { code: '3100', name: 'Retained Earnings', type: 'equity' as const, detailType: 'Retained earnings' },
-  { code: '4000', name: 'Product Sales', type: 'income' as const, detailType: 'Product sales' },
-  { code: '4100', name: 'Service Revenue', type: 'income' as const, detailType: 'Service revenue' },
-  { code: '5000', name: 'Cost of Goods Sold', type: 'expense' as const, detailType: 'COGS' },
-  { code: '6100', name: 'Software & Subscriptions', type: 'expense' as const, detailType: 'Dues & subscriptions' },
-  { code: '6200', name: 'Professional Fees', type: 'expense' as const, detailType: 'Professional fees' },
-  { code: '6300', name: 'Rent & Lease', type: 'expense' as const, detailType: 'Rent & lease' },
-  { code: '6400', name: 'Marketing', type: 'expense' as const, detailType: 'Marketing' },
-  { code: '6500', name: 'Travel', type: 'expense' as const, detailType: 'Travel' },
-  { code: '6600', name: 'Utilities', type: 'expense' as const, detailType: 'Utilities' },
-];
 
 export async function POST(req: NextRequest) {
   try {
@@ -114,7 +94,7 @@ export async function POST(req: NextRequest) {
       });
 
       // Create default Chart of Accounts
-      for (const acct of DEFAULT_COA) {
+      for (const acct of DEFAULT_CHART_OF_ACCOUNTS) {
         await tx.chartOfAccount.create({
           data: {
             companyId: company.id,
@@ -123,6 +103,8 @@ export async function POST(req: NextRequest) {
             type: acct.type,
             detailType: acct.detailType,
             parentCode: acct.parentCode || null,
+            description: acct.description || null,
+            active: acct.active ?? true,
             balance: 0,
           },
         });

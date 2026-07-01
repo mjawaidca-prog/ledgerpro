@@ -53,6 +53,31 @@ export default function JournalListPage() {
     transfer: 'Transfer', manual: 'Manual',
   };
 
+  async function deleteEntry(id: string) {
+    if (!window.confirm('Delete this journal entry? Balances will be reversed. This cannot be undone.')) return;
+    try {
+      const res = await fetch(`/api/journal/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      setEntries(prev => prev.filter(e => e.id !== id));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Delete failed');
+    }
+  }
+
+  async function deleteAllEntries() {
+    if (!window.confirm('Delete ALL journal entries? ALL balances will be reversed. This cannot be undone.')) return;
+    try {
+      const res = await fetch('/api/journal?all=true', { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      setEntries([]);
+      alert(`Deleted ${json.data.deleted} journal entries.`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Delete failed');
+    }
+  }
+
   return (
     <AppShell>
       <div className="flex items-center justify-between mb-6">
@@ -62,9 +87,16 @@ export default function JournalListPage() {
             Complete audit trail of all financial activity.
           </p>
         </div>
-        <Button onClick={() => router.push('/journal/new')}>
-          <Plus size={16} /> New Entry
-        </Button>
+        <div className="flex items-center gap-2">
+          {entries.length > 0 && (
+            <Button variant="ghost" onClick={deleteAllEntries} className="text-[var(--danger)]">
+              Delete All
+            </Button>
+          )}
+          <Button onClick={() => router.push('/journal/new')}>
+            <Plus size={16} /> New Entry
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -108,8 +140,15 @@ export default function JournalListPage() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0">
                         <span className="font-mono text-sm font-medium text-[var(--text)]">{money(totalDebit)}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteEntry(entry.id); }}
+                          className="w-[28px] h-[28px] grid place-items-center rounded-md border border-[var(--border)] text-[var(--text-faint)] hover:text-[var(--danger)] hover:border-[var(--danger)] transition-colors"
+                          title="Delete"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                        </button>
                         <ChevronRight size={16} className="text-[var(--text-faint)] group-hover:text-[var(--text)] transition-colors" />
                       </div>
                     </div>

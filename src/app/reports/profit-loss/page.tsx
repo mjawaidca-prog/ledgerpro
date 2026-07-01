@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, Download, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 interface PnLData {
   period: { year: string; startDate: string; endDate: string };
@@ -32,8 +33,11 @@ export default function ProfitLossPage() {
   const [data, setData] = useState<PnLData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [year, setYear] = useState('2026');
+  const fy = useFiscalYear();
+  const [year, setYear] = useState(fy.defaultYear);
   const [period, setPeriod] = useState('year');
+
+  useEffect(() => { if (fy.loaded) setYear(fy.defaultYear); }, [fy.loaded, fy.defaultYear]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);

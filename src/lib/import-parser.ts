@@ -1,3 +1,6 @@
+import { format, isValid, parse } from 'date-fns';
+import { inflateSync } from 'node:zlib';
+
 /**
  * CSV/OFX/PDF statement parser.
  * Produces normalized rows for the import wizard's Map step.
@@ -16,6 +19,410 @@ export interface ParseResult {
   headers: string[];
   errors: string[];
   fileType: 'csv' | 'ofx' | 'pdf' | 'unknown';
+}
+
+function toIsoDate(year: number, month: number, day: number): string | null {
+  const candidate = new Date(year, month - 1, day);
+  if (
+    candidate.getFullYear() !== year ||
+    candidate.getMonth() !== month - 1 ||
+    candidate.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return format(candidate, 'yyyy-MM-dd');
+}
+
+function expandYear(yearText: string): number {
+  if (yearText.length === 2) {
+    const value = Number(yearText);
+    return value >= 70 ? 1900 + value : 2000 + value;
+  }
+
+  return Number(yearText);
+}
+
+function stripDateNoise(value: string): string {
+  return value
+    .replace(/\u00a0/g, ' ')
+    .replace(/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+/i, '')
+    .replace(/(\d{1,2})(st|nd|rd|th)\b/gi, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripMonthPeriods(value: string): string {
+  return value.replace(
+    /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\./gi,
+    (match) => match.slice(0, -1)
+  );
+}
+
+function parseNumericDate(value: string): string | null {
+  let match = value.match(/^(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})(?:[ T].*)?$/);
+  if (match) {
+    return toIsoDate(Number(match[1]), Number(match[2]), Number(match[3]));
+  }
+
+  match = value.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})(?:[ T].*)?$/);
+  if (!match) return null;
+
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+  const year = expandYear(match[3]);
+
+  let month = first;
+  let day = second;
+  if (first > 12 && second <= 12) {
+    month = second;
+    day = first;
+  } else if (second > 12 && first <= 12) {
+    month = first;
+    day = second;
+  }
+
+  return toIsoDate(year, month, day);
+}
+
+function parseNamedDate(value: string): string | null {
+  const formats = [
+    'MMM d yyyy',
+    'MMM d, yyyy',
+    'MMM d yy',
+    'MMM d, yy',
+    'MMMM d yyyy',
+    'MMMM d, yyyy',
+    'MMMM d yy',
+    'MMMM d, yy',
+    'd MMM yyyy',
+    'd MMM, yyyy',
+    'd MMM yy',
+    'd MMM, yy',
+    'd MMMM yyyy',
+    'd MMMM, yyyy',
+    'd MMMM yy',
+    'd MMMM, yy',
+  ];
+
+  for (const fmt of formats) {
+    const parsed = parse(value, fmt, new Date());
+    if (isValid(parsed)) {
+      return format(parsed, 'yyyy-MM-dd');
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Convert common bank statement date strings into an ISO date.
+ * Returns null when the input cannot be interpreted safely.
+ */
+export function normalizeStatementDate(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const candidates = new Set<string>([
+    trimmed,
+    stripDateNoise(trimmed),
+    stripMonthPeriods(trimmed),
+    stripMonthPeriods(stripDateNoise(trimmed)),
+  ]);
+
+  for (const candidate of candidates) {
+    const compact = candidate.match(/^(\d{4})(\d{2})(\d{2})(?:\d{2,6})?$/);
+    if (compact) {
+      const iso = toIsoDate(Number(compact[1]), Number(compact[2]), Number(compact[3]));
+      if (iso) return iso;
+    }
+
+    const numeric = parseNumericDate(candidate);
+    if (numeric) return numeric;
+
+    const named = parseNamedDate(candidate);
+    if (named) return named;
+  }
+
+  return null;
+}
+
+/**
+ * Parse a money amount string that may be in US format (1,234.56) or
+ * European format (1.234,56). Detects the format and returns a number.
+ */
+function parseMoneyAmount(raw: string): number {
+  if (!raw || !raw.trim()) return NaN;
+
+  const trimmed = raw.trim();
+  const hasComma = trimmed.includes(',');
+  const hasDot = trimmed.includes('.');
+
+  if (hasComma && hasDot) {
+    // Both separators present — determine which is decimal by position
+    const lastComma = trimmed.lastIndexOf(',');
+    const lastDot = trimmed.lastIndexOf('.');
+    if (lastDot > lastComma) {
+      // US format: 1,234.56 → decimal is dot, comma is thousands
+      return parseFloat(trimmed.replace(/,/g, ''));
+    } else {
+      // European format: 1.234,56 → comma is decimal, dot is thousands
+      return parseFloat(trimmed.replace(/\./g, '').replace(',', '.'));
+    }
+  } else if (hasComma) {
+    // Only comma: could be "1,234" (thousands) or "1234,56" (decimal)
+    const afterComma = trimmed.split(',').pop() || '';
+    if (afterComma.length === 3 && !trimmed.match(/,\d{3}$/)) {
+      // "1,234" → thousands separator
+      return parseFloat(trimmed.replace(/,/g, ''));
+    } else if (afterComma.length === 2) {
+      // "1234,56" → European decimal
+      return parseFloat(trimmed.replace(',', '.'));
+    }
+    // Ambiguous: treat as US (thousands)
+    return parseFloat(trimmed.replace(/,/g, ''));
+  } else if (hasDot) {
+    // Only dot: could be "1.234" (thousands) or "1234.56" (decimal)
+    const afterDot = trimmed.split('.').pop() || '';
+    if (afterDot.length === 2 && trimmed.split('.').length === 2) {
+      // "1234.56" → decimal
+      return parseFloat(trimmed);
+    }
+    // "1.234" → European thousands, remove dots
+    return parseFloat(trimmed.replace(/\./g, ''));
+  }
+
+  // Plain number
+  return parseFloat(trimmed);
+}
+
+function decodePdfStringLiteral(input: string): string {
+  let output = '';
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (ch !== '\\') {
+      output += ch;
+      continue;
+    }
+
+    if (i + 1 >= input.length) break;
+
+    const next = input[++i];
+    if (next === '\n' || next === '\r') {
+      if (next === '\r' && input[i + 1] === '\n') i++;
+      continue;
+    }
+
+    if (next === 'n') output += '\n';
+    else if (next === 'r') output += '\r';
+    else if (next === 't') output += '\t';
+    else if (next === 'b') output += '\b';
+    else if (next === 'f') output += '\f';
+    else if (next === '(' || next === ')' || next === '\\') output += next;
+    else if (/[0-7]/.test(next)) {
+      let octal = next;
+      for (let j = 0; j < 2 && i + 1 < input.length && /[0-7]/.test(input[i + 1]); j++) {
+        octal += input[++i];
+      }
+      output += String.fromCharCode(Number.parseInt(octal, 8));
+    } else {
+      output += next;
+    }
+  }
+
+  return output;
+}
+
+function decodePdfHexString(input: string): string {
+  const hex = input.replace(/\s+/g, '');
+  if (!hex) return '';
+
+  const normalizedHex = hex.length % 2 === 0 ? hex : `${hex}0`;
+  const bytes: number[] = [];
+  for (let i = 0; i < normalizedHex.length; i += 2) {
+    const byte = Number.parseInt(normalizedHex.slice(i, i + 2), 16);
+    if (Number.isFinite(byte)) bytes.push(byte);
+  }
+
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    let text = '';
+    for (let i = 2; i < bytes.length; i += 2) {
+      const high = bytes[i] ?? 0;
+      const low = bytes[i + 1] ?? 0;
+      text += String.fromCharCode((high << 8) | low);
+    }
+    return text;
+  }
+
+  return Buffer.from(bytes).toString('latin1');
+}
+
+function extractPdfTextFromLine(line: string): string {
+  const fragments: string[] = [];
+  const tokenRe = /(\((?:\\.|[^\\)])*\)|<[^>]*>|\[(?:\\.|[^\]])*\])\s*(?:Tj|TJ|'|")/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = tokenRe.exec(line)) !== null) {
+    const token = match[1];
+    if (token.startsWith('(')) {
+      fragments.push(decodePdfStringLiteral(token.slice(1, -1)));
+      continue;
+    }
+
+    if (token.startsWith('<')) {
+      fragments.push(decodePdfHexString(token.slice(1, -1)));
+      continue;
+    }
+
+    const inner = token.slice(1, -1);
+    const innerFragments: string[] = [];
+    const innerRe = /(\((?:\\.|[^\\)])*\)|<[^>]*>)/g;
+
+    let innerMatch: RegExpExecArray | null;
+    while ((innerMatch = innerRe.exec(inner)) !== null) {
+      const innerToken = innerMatch[1];
+      if (innerToken.startsWith('(')) {
+        innerFragments.push(decodePdfStringLiteral(innerToken.slice(1, -1)));
+      } else {
+        innerFragments.push(decodePdfHexString(innerToken.slice(1, -1)));
+      }
+    }
+
+    if (innerFragments.length > 0) {
+      fragments.push(innerFragments.join(''));
+    }
+  }
+
+  return fragments.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractPdfTextFromStream(streamContent: string): string {
+  const normalized = streamContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalized.split('\n');
+  const output: string[] = [];
+
+  for (const line of lines) {
+    const extracted = extractPdfTextFromLine(line);
+    if (extracted) output.push(extracted);
+  }
+
+  return output.join('\n').trim();
+}
+
+function extractPdfTextFallback(buffer: Buffer): string {
+  const source = buffer.toString('latin1');
+
+  // Find streams: look for "stream\n...content...\nendstream" or "stream\r\n...content...\r\nendstream"
+  const streamRe = /(?:^|\r?\n)stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  const output: string[] = [];
+
+  let match: RegExpExecArray | null;
+  while ((match = streamRe.exec(source)) !== null) {
+    let streamContent = match[1];
+
+    // Check for ASCII85Decode before trying inflate
+    // ASCII85 starts with "<~" and ends with "~>"
+    if (streamContent.startsWith('<~') && streamContent.endsWith('~>')) {
+      try {
+        streamContent = decodeAscii85(streamContent.slice(2, -2));
+      } catch {
+        // Use raw content if ASCII85 decode fails
+      }
+    }
+
+    // Try decompressing with inflate (handles both raw deflate and zlib-wrapped)
+    try {
+      const rawBytes = Buffer.from(streamContent, 'latin1');
+      const decompressed = inflateSync(rawBytes).toString('latin1');
+      if (decompressed) streamContent = decompressed;
+    } catch {
+      // Try skipping a possible header byte (PDFs sometimes have a leading whitespace/newline)
+      try {
+        const trimmed = streamContent.replace(/^[\s\r\n]+/, '');
+        const rawBytes = Buffer.from(trimmed, 'latin1');
+        const decompressed = inflateSync(rawBytes).toString('latin1');
+        if (decompressed) streamContent = decompressed;
+      } catch {
+        // Not compressed or unsupported compression — use raw content
+      }
+    }
+
+    const extracted = extractPdfTextFromStream(streamContent);
+    if (extracted) output.push(extracted);
+  }
+
+  if (output.length > 0) {
+    return output.join('\n').trim();
+  }
+
+  // Last resort: extract text from BT...ET text blocks anywhere in the PDF
+  const textBlocks = source.match(/BT\s*([\s\S]*?)\s*ET/g);
+  if (textBlocks) {
+    const textFragments: string[] = [];
+    for (const block of textBlocks) {
+      const tj = block.match(/\(([^)]*)\)\s*Tj/g);
+      if (tj) {
+        for (const t of tj) {
+          const inner = t.match(/\(([^)]*)\)/)?.[1];
+          if (inner) textFragments.push(decodePdfStringLiteral(inner));
+        }
+      }
+      const tj2 = block.match(/\[([\s\S]*?)\]\s*TJ/g);
+      if (tj2) {
+        for (const t of tj2) {
+          const inner = t.match(/\[([\s\S]*?)\]/)?.[1];
+          if (inner) {
+            const innerFrags: string[] = [];
+            const innerRe = /\(([^)]*)\)/g;
+            let im;
+            while ((im = innerRe.exec(inner)) !== null) {
+              innerFrags.push(decodePdfStringLiteral(im[1]));
+            }
+            textFragments.push(innerFrags.join(''));
+          }
+        }
+      }
+    }
+    if (textFragments.length > 0) {
+      return textFragments.join('\n').trim();
+    }
+  }
+
+  // Ultra-fallback: grab any text-like sequences
+  const looseText = source.match(/[A-Za-z0-9][A-Za-z0-9 ,./\-()$%:+#@&']{7,}/g) ?? [];
+  return looseText.join('\n').trim();
+}
+
+/** Decode ASCII85-encoded data commonly used in PDF streams. */
+function decodeAscii85(input: string): string {
+  // Strip whitespace and the required '~>' end marker
+  const data = input.replace(/\s/g, '').replace(/~>$/, '');
+  const bytes: number[] = [];
+  let group = 0;
+  let count = 0;
+
+  for (let i = 0; i < data.length; i++) {
+    const ch = data.charCodeAt(i);
+    if (ch < 33 || ch > 117) continue; // skip invalid
+    group = group * 85 + (ch - 33);
+    count++;
+    if (count === 5) {
+      bytes.push((group >> 24) & 0xff, (group >> 16) & 0xff, (group >> 8) & 0xff, group & 0xff);
+      group = 0;
+      count = 0;
+    }
+  }
+
+  // Flush remaining bytes
+  if (count > 0) {
+    for (let j = count; j < 5; j++) group = group * 85 + 84; // pad with maximum ASCII85 value
+    const remaining = count - 1;
+    const b = [(group >> 24) & 0xff, (group >> 16) & 0xff, (group >> 8) & 0xff, group & 0xff];
+    for (let j = 0; j < remaining; j++) bytes.push(b[j]);
+  }
+
+  return Buffer.from(bytes).toString('latin1');
 }
 
 /**
@@ -82,13 +489,16 @@ export function parseOFX(content: string): ParseResult {
 
       const dateStr = getTag('DTPOSTED') || getTag('DTUSER');
       let amount = parseFloat(getTag('TRNAMT'));
+      const normalizedDate =
+        normalizeStatementDate(dateStr) ??
+        (dateStr.match(/^(\d{4})(\d{2})(\d{2})/) ? `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}` : dateStr);
 
       // OFX uses TRNTYPE: DEBIT vs CREDIT
       const type = getTag('TRNTYPE');
       if (type === 'DEBIT' && amount > 0) amount = -amount;
 
       rows.push({
-        date: dateStr.slice(0, 8), // YYYYMMDD
+        date: normalizedDate,
         description: getTag('NAME') || getTag('MEMO'),
         amount,
         raw: {
@@ -120,105 +530,204 @@ export function parseOFX(content: string): ParseResult {
  */
 export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseResult> {
   const errors: string[] = [];
+  let pdfParseError: string | null = null;
+  let usedFallback = false;
+  let text = '';
 
   try {
-    let pdfParse: any;
+    // Robust import: pdf-parse is CJS; ESM import wraps it in { default }
+    let pdfParse: any = null;
     try {
-      pdfParse = (await import('pdf-parse')).default;
-    } catch {
       const mod = await import('pdf-parse');
       pdfParse = (mod as any).default || mod;
+      // Verify the import actually gives us a callable function
+      if (typeof pdfParse !== 'function') {
+        throw new Error('pdf-parse did not resolve to a function');
+      }
+    } catch (importErr) {
+      // Can't load pdf-parse at all — try raw extraction
+      pdfParseError = importErr instanceof Error ? importErr.message : String(importErr);
+      text = extractPdfTextFallback(buffer);
+      usedFallback = true;
+      if (!text) {
+        errors.push(`Could not load PDF parser: ${pdfParseError}`);
+        return {
+          rows: [],
+          headers: [],
+          errors: [
+            'Could not read this PDF. The file may be encrypted, password-protected, ' +
+            'or uses an unsupported format. Try converting your bank statement to CSV first, ' +
+            'or download it as a text-based PDF instead of a scanned image.',
+          ],
+          fileType: 'pdf',
+        };
+      }
     }
-    const data = await pdfParse(buffer);
-    const text: string = data.text || '';
+
+    if (!usedFallback && pdfParse) {
+      try {
+        const data = await pdfParse(buffer);
+        text = data.text || '';
+        if (!text || text.trim().length === 0) {
+          // pdf-parse succeeded but returned no text — try fallback
+          pdfParseError = 'pdf-parse returned no text content';
+          text = extractPdfTextFallback(buffer);
+          usedFallback = true;
+        }
+      } catch (parseErr) {
+        pdfParseError = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        // Detect password-protected PDFs
+        if (/password|encrypt|cannot decrypt|bad decrypt/i.test(pdfParseError)) {
+          return {
+            rows: [],
+            headers: [],
+            errors: [
+              'This PDF is password-protected or encrypted. ' +
+              'Please remove the password and try again, or download an unprotected copy of your statement.',
+            ],
+            fileType: 'pdf',
+          };
+        }
+        text = extractPdfTextFallback(buffer);
+        usedFallback = true;
+      }
+    }
 
     if (!text || text.trim().length === 0) {
+      const detail = pdfParseError ? ` (reason: ${pdfParseError})` : '';
+      errors.push(
+        'This PDF contains no extractable text. It may be a scanned image or use ' +
+        'an unsupported encoding.' + detail
+      );
       return {
         rows: [],
         headers: [],
-        errors: ['PDF appears to be empty or is a scanned image — OCR not supported'],
+        errors: [
+          'PDF appears to be empty or is a scanned image — OCR not supported. ' +
+          'Please download your bank statement as a CSV or text-based PDF instead.',
+        ],
         fileType: 'pdf',
       };
     }
 
+    // Log how much text was extracted for debugging
+    console.log(`[parsePDF] Extracted ${text.length} chars from PDF${usedFallback ? ' (via fallback)' : ''}`);
+
     const allLines = text.split('\n');
     const rows: ParsedRow[] = [];
 
-    // Date patterns: "Thu, Dec. 31, 2024", "Dec 31, 2024", "2024-12-31", "12/31/2024"
-    const dateLong = '(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{2,4}';
-    const dateNumeric = '\\d{1,2}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{2,4}|\\d{2,4}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{1,2}';
-    const dateRe = new RegExp(`(${dateLong}|${dateNumeric})`, 'i');
+    // Date patterns: "Thu, Dec. 31, 2024", "Dec 31, 2024", "2024-12-31", "12/31/2024",
+    // "31/12/2024" (DD/MM/YYYY), "2024年12月31日", "31-Dec-2024", "Dec.31.2024"
+    const monthAbbr = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)';
+    const monthFull = '(?:January|February|March|April|May|June|July|August|September|October|November|December)';
+    const dateLong = `(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\\s+)?(?:${monthAbbr}|${monthFull})[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{2,4}`;
+    const dateNumeric = [
+      '\\d{1,2}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{2,4}',
+      '\\d{2,4}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{1,2}',
+      '\\d{2,4}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{1,2}',
+    ].join('|');
+    // Also: "31-Dec-2024" or "31 Dec 2024"
+    const dateAbbreviated = `\\d{1,2}[\\s\\-]${monthAbbr}[a-z]*[\\s\\-]\\d{2,4}`;
+    const dateRe = new RegExp(`(${dateLong}|${dateAbbreviated}|${dateNumeric})`, 'i');
 
-    // Money amounts: signed numbers like +$1,234.56, -$500.00, $3,370.82, (1,234.56)
-    const moneyRe = /[+\-]?\s*\$?\s*\(?\s*([\d,]+\.\d{2})\s*\)?/g;
+    // Money amounts: handles $1,234.56, -$500.00, +$220.50, (1,234.56), 1,234.56, 1.234,56
+    // Also: $1,234 (no cents), -500.00, 1,234.56CR, 500.00DR, €1.234,56 (European)
+    const moneyRe = /[+\-−–—]?\s*[\$£€¥]?\s*\(?\s*([\d,.]+)\s*\)?\s*(?:CR|DR)?\b/gi;
 
-    const skipRe = /^(page\s+\d+|statement period|opening|closing|total\s+(deposits|withdrawals)|continued|account number|customer service|document delivery|current balance|available balance|select account|filters|transactions|print|balance details|no holds)/i;
+    // Lines that are definitely NOT transactions — skip them unconditionally
+    const skipRe = /(?:page\s+\d+|page\s+created\s+on|statement\s+period|opening\s+balance|closing\s+balance|total\s+(deposits|withdrawals|credits|debits)|continued\s+on\s+next\s+page|account\s+(number|summary)|customer\s+service|document\s+delivery|current\s+balance|available\s+balance|select\s+account|filters|print|balance\s+details|no\s+holds|beginning\s+balance|ending\s+balance|posted\s+date|transaction\s+history|activity\s+summary|deposits\s+and\s+credits|withdrawals\s+and\s+debits|this\s+page\s+intentionally|please\s+detach|questions?\?\s+call|from\s+date\s*=|to\s+date\s*=|account\s+for\s+business\s+plan)/i;
+
+    // Also skip lines that match any of these anywhere in the text
+    const skipAnywhereRe = /(?:balance\s+\$[\d,.]+.*available\s+balance|document\s+delivery|print\s+balance\s+details|page\s+created\s+on|from\s+date\s*=|to\s+date\s*=|filter|transactions?\s*$|deposits?\s*$|withdrawals?\s*$|\*\*\*\*|business\s+plan|account\s+for\s+business)/i;
+
+    // Boilerplate description patterns — pending rows with these descriptions are discarded
+    const boilerplateDescRe = /^(?:select\s+account|page\s+created|current\s+balance|available\s+balance|document\s+delivery|print|filter|transactions?|deposits?\s+and|withdrawals?\s+and|account\s+for\s+business|statement\s+period|opening\s+balance|closing\s+balance)/i;
 
     // ── Multi-line row builder ──
     // Scotia/RBC/TD format: date line → description line(s) → amounts line
     interface PendingRow {
       date: string;
+      rawDate: string;
       descLines: string[];
     }
     let pending: PendingRow | null = null;
 
-    function flushRow(amountLine: string, amounts: { raw: string; value: number }[]) {
+    function flushRow(amounts: { raw: string; value: number }[]) {
       if (!pending) return null;
 
-      // Pick transaction amount: negative = withdrawal, positive = deposit
-      // If exactly one negative and one positive, negative is the transaction, positive is balance
-      let finalAmount = 0;
-      if (amounts.length === 1) {
-        finalAmount = amounts[0].value;
-      } else if (amounts.length >= 2) {
-        const negs = amounts.filter(a => a.value < -0.005);
-        const poss = amounts.filter(a => a.value > 0.005);
-        if (negs.length === 1) {
-          finalAmount = negs[0].value; // withdrawal
-        } else if (poss.length >= 2) {
-          // Multiple positives: first non-zero is transaction, last is balance
-          finalAmount = poss[0].value;
-        } else {
-          finalAmount = amounts[0].value;
-        }
+      const desc = pending.descLines.join(' ').replace(/\s+/g, ' ').trim() || 'Transaction';
+
+      // Discard rows with boilerplate descriptions (headers/footers misidentified as transactions)
+      if (boilerplateDescRe.test(desc) || boilerplateDescRe.test(pending.rawDate)) {
+        pending = null;
+        return null;
       }
 
-      const desc = pending.descLines.join(' ').replace(/\s+/g, ' ').trim() || 'Transaction';
-      const row = {
+      // Store ALL detected amounts as separate columns so the user can map them
+      // in the wizard: Amount_1, Amount_2, Amount_3, Amount_4 — up to 6 columns
+      const raw: Record<string, string> = {
+        Date: pending.rawDate,
+        Description: desc,
+      };
+
+      for (let i = 0; i < Math.min(amounts.length, 6); i++) {
+        const colNum = i + 1;
+        raw[`Amount_${colNum}`] = String(amounts[i].value);
+        // Also store the raw display text for preview
+        raw[`Amount_${colNum}_display`] = amounts[i].raw.trim();
+      }
+
+      const row: ParsedRow = {
         date: pending.date,
         description: desc,
-        amount: finalAmount,
-        raw: {
-          Date: pending.date,
-          Description: desc,
-          Amount: String(finalAmount),
-        },
+        amount: 0, // Set to 0 — user maps columns in wizard
+        raw,
       };
 
       pending = null;
       return row;
     }
 
+    // Track max amount columns across all rows for header generation
+    let maxAmountCols = 0;
+
     for (const line of allLines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.length < 3) continue;
       if (skipRe.test(trimmed)) continue;
+      if (skipAnywhereRe.test(trimmed)) continue;
 
       // Check for date
       const dateMatch = trimmed.match(dateRe);
       const foundDate = dateMatch ? dateMatch[0] : '';
 
-      // Find amounts on this line
+      // Strip the date from the line before finding amounts, so date components
+      // like "01", "03", "2025" aren't misidentified as transaction amounts
+      const lineWithoutDate = foundDate ? trimmed.replace(foundDate, ' ') : trimmed;
+
+      // Find amounts on this line (in the date-stripped version)
       const amounts: { raw: string; value: number }[] = [];
       let m;
-      while ((m = moneyRe.exec(trimmed)) !== null) {
-        let val = parseFloat(m[1].replace(/,/g, ''));
-        // Detect sign from the full match (e.g., "-$20.00", "+$220.50")
+      while ((m = moneyRe.exec(lineWithoutDate)) !== null) {
+        const rawAmount = m[1] || '';
+        let val = parseMoneyAmount(rawAmount);
+        if (!Number.isFinite(val)) continue;
+        // Skip very small numbers that are likely date artifacts (1-31)
+        if (val > 0 && val <= 31 && /^\d{1,2}$/.test(rawAmount.trim())) continue;
         const fullMatch = m[0];
-        if (/^[\s]*(—|−|\-)/.test(fullMatch) || fullMatch.includes('(')) {
+        // Detect sign:
+        // 1. Leading minus/dash: "-$20.00", "−$20.00" (unicode minus), "—$20.00" (em dash)
+        // 2. Parentheses: "(1,234.56)" = negative
+        // 3. CR suffix = positive, DR suffix = negative
+        // 4. Explicit "+" = positive
+        if (/^[\s]*(—|−|\-|–)/.test(fullMatch) || fullMatch.includes('(')) {
           val = -Math.abs(val);
+        } else if (/\bDR\b/i.test(fullMatch)) {
+          val = -Math.abs(val);  // Debit = outflow
+        } else if (/\bCR\b/i.test(fullMatch)) {
+          val = Math.abs(val);   // Credit = inflow
         } else if (fullMatch.includes('+')) {
-          val = Math.abs(val); // explicit positive
+          val = Math.abs(val);   // Explicit positive
         }
         amounts.push({ raw: m[0], value: val });
       }
@@ -226,7 +735,7 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
 
       // If this line has a date, flush previous pending row (if any amounts were pending)
       if (foundDate && pending && amounts.length > 0) {
-        const row = flushRow(trimmed, amounts);
+        const row = flushRow(amounts);
         if (row) rows.push(row);
         pending = null;
       }
@@ -234,7 +743,11 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
       // Start new pending row when we see a date
       if (foundDate) {
         // Flush any existing pending (without amounts — might be orphan)
-        pending = { date: foundDate, descLines: [] };
+        pending = {
+          date: normalizeStatementDate(foundDate) ?? foundDate,
+          rawDate: foundDate,
+          descLines: [],
+        };
 
         // If this date line also has amounts, resolve immediately
         // Extract remaining text after the date as description
@@ -245,7 +758,7 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
           }
           descText = descText.replace(/[^\w\s\-\&\#\/\.\@]/g, ' ').replace(/\s+/g, ' ').trim();
           if (descText) pending.descLines.push(descText);
-          const row = flushRow(trimmed, amounts);
+          const row = flushRow(amounts);
           if (row) rows.push(row);
           pending = null;
         }
@@ -254,7 +767,7 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
 
       // Line without date: if it has amounts, it completes the pending row
       if (amounts.length > 0 && pending) {
-        const row = flushRow(trimmed, amounts);
+        const row = flushRow(amounts);
         if (row) rows.push(row);
         continue;
       }
@@ -270,26 +783,48 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
 
     // Flush any remaining pending row
     if (pending && pending.descLines.length > 0) {
+      const raw: Record<string, string> = {
+        Date: pending.rawDate,
+        Description: pending.descLines.join(' ').trim(),
+      };
       rows.push({
         date: pending.date,
         description: pending.descLines.join(' ').trim(),
         amount: 0,
-        raw: {
-          Date: pending.date,
-          Description: pending.descLines.join(' ').trim(),
-          Amount: '0',
-          lowConfidence: 'true',
-        },
+        raw,
       });
     }
 
     if (rows.length === 0 && allLines.length > 10) {
-      errors.push('No transactions found. The PDF format may not be supported. Try converting to CSV first.');
+      // Provide diagnostics: show a sample of what text was found
+      const sampleLines = allLines.filter(l => l.trim().length > 3).slice(0, 5).map(l => l.trim().substring(0, 80));
+      const sampleInfo = sampleLines.length > 0
+        ? ` First 5 text lines found: [${sampleLines.join(' | ')}]`
+        : '';
+      errors.push(
+        'No transactions could be identified in the extracted text. ' +
+        'The statement format may not be supported.' + sampleInfo +
+        ' Try downloading your statement as CSV or OFX instead.'
+      );
+    }
+
+    if (pdfParseError) {
+      errors.unshift(`Note: The primary PDF parser had an issue (${pdfParseError}). Results below are from a best-effort fallback parser.`);
+    }
+
+    // Build dynamic headers based on detected amount columns
+    const headers = ['Date', 'Description'];
+    for (const row of rows) {
+      const colCount = Object.keys(row.raw).filter(k => k.startsWith('Amount_') && !k.endsWith('_display')).length;
+      if (colCount > maxAmountCols) maxAmountCols = colCount;
+    }
+    for (let i = 1; i <= Math.max(maxAmountCols, 1); i++) {
+      headers.push(`Amount_${i}`);
     }
 
     return {
       rows,
-      headers: ['Date', 'Description', 'Amount'],
+      headers,
       errors,
       fileType: 'pdf',
     };
@@ -297,7 +832,10 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
     return {
       rows: [],
       headers: [],
-      errors: ['Failed to parse PDF: ' + (err instanceof Error ? err.message : 'Unknown error')],
+      errors: [
+        'Unexpected error while reading PDF: ' + (err instanceof Error ? err.message : 'Unknown error') +
+        '. The file may be corrupted, encrypted, or in an unsupported format.'
+      ],
       fileType: 'pdf',
     };
   }

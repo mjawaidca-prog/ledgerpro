@@ -10,7 +10,7 @@ import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink, Plus, X } from 'lucide-react';
 import { exportChartOfAccounts } from '@/lib/export';
 import type { Column } from '@/components/ui/DataTable';
 
@@ -53,6 +53,46 @@ export default function ChartOfAccountsPage() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['asset', 'liability', 'equity', 'income', 'expense']));
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [newCode, setNewCode] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newType, setNewType] = useState('expense');
+  const [newDetailType, setNewDetailType] = useState('');
+  const [newParentCode, setNewParentCode] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function createAccount() {
+    setSaving(true); setSaveError(null);
+    try {
+      const res = await fetch('/api/coa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: newCode.trim(),
+          name: newName.trim(),
+          type: newType,
+          detailType: newDetailType.trim() || null,
+          parentCode: newParentCode.trim() || null,
+          description: newDescription.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      setShowNewModal(false);
+      resetForm();
+      fetchCOA();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Failed to create');
+    } finally { setSaving(false); }
+  }
+
+  function resetForm() {
+    setNewCode(''); setNewName(''); setNewType('expense');
+    setNewDetailType(''); setNewParentCode(''); setNewDescription('');
+    setSaveError(null);
+  }
 
   const fetchCOA = useCallback(async () => {
     setLoading(true); setError(null);
@@ -167,7 +207,7 @@ export default function ChartOfAccountsPage() {
         </div>
         <div className="spacer" />
         <Button variant="secondary" onClick={() => exportChartOfAccounts(accounts)}><Download size={16} /> Export</Button>
-        <Button><PlusIcon /> New Account</Button>
+        <Button onClick={() => setShowNewModal(true)}><PlusIcon /> New Account</Button>
       </div>
 
       {/* Summary cards */}
@@ -292,6 +332,67 @@ export default function ChartOfAccountsPage() {
           );
         })}
       </div>
+      {/* New Account Modal */}
+      {showNewModal && (
+        <>
+          <div className="fixed inset-0 z-90 bg-black/40 backdrop-blur-sm" onClick={() => { setShowNewModal(false); resetForm(); }} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-100 w-full max-w-[480px] bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)] p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-[var(--text-strong)]">New Account</h2>
+              <button onClick={() => { setShowNewModal(false); resetForm(); }} className="w-8 h-8 grid place-items-center rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-strong)]">
+                <X size={16} />
+              </button>
+            </div>
+
+            {saveError && <Alert variant="danger" className="mb-4">{saveError}</Alert>}
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="field">
+                  <label>Account Code *</label>
+                  <input className="input" value={newCode} onChange={e => setNewCode(e.target.value)} placeholder="e.g. 6150" />
+                </div>
+                <div className="field">
+                  <label>Account Type *</label>
+                  <select className="select" value={newType} onChange={e => setNewType(e.target.value)}>
+                    <option value="asset">Asset</option>
+                    <option value="liability">Liability</option>
+                    <option value="equity">Equity</option>
+                    <option value="income">Income</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                </div>
+              </div>
+              <div className="field">
+                <label>Account Name *</label>
+                <input className="input" value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Software Subscriptions" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="field">
+                  <label>Detail Type</label>
+                  <input className="input" value={newDetailType} onChange={e => setNewDetailType(e.target.value)} placeholder="e.g. Operating Expense" />
+                </div>
+                <div className="field">
+                  <label>Parent Code</label>
+                  <input className="input" value={newParentCode} onChange={e => setNewParentCode(e.target.value)} placeholder="e.g. 6000" />
+                </div>
+              </div>
+              <div className="field">
+                <label>Description</label>
+                <input className="input" value={newDescription} onChange={e => setNewDescription(e.target.value)} placeholder="Optional description" />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6 justify-end">
+              <Button variant="secondary" onClick={() => { setShowNewModal(false); resetForm(); }}>Cancel</Button>
+              <Button onClick={createAccount} disabled={saving || !newCode.trim() || !newName.trim()}>
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                Create Account
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
     </AppShell>
   );
 }

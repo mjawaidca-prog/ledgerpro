@@ -14,14 +14,25 @@ export async function requireCompany(
   let companyId: string | null = null;
   let userId: string | undefined;
 
-  // Try header first (injected by middleware from session token)
+  // Try header first (injected by middleware from cookie/session)
   const headerCompanyId = req.headers.get('x-company-id');
   const headerUserId = req.headers.get('x-user-id');
+  const cookieCompanyId = req.cookies.get('lp-active-company-id')?.value;
 
-  if (headerCompanyId && headerCompanyId !== 'undefined' && headerUserId && headerUserId !== 'undefined') {
+  if (headerCompanyId && headerCompanyId !== 'undefined') {
     companyId = headerCompanyId;
+  }
+  if (headerUserId && headerUserId !== 'undefined') {
     userId = headerUserId;
-  } else {
+  }
+
+  if (!companyId && cookieCompanyId && cookieCompanyId !== 'undefined') {
+    // Fall back to the active-company cookie directly. This covers requests where
+    // middleware headers are not present yet but the browser already has the tenant selected.
+    companyId = cookieCompanyId;
+  }
+
+  if (!companyId) {
     // Fallback to session
     const session = await getServerSession();
     const user = session?.user as any;

@@ -8,6 +8,7 @@ import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 interface AccountLine {
   code: string;
@@ -77,7 +78,9 @@ export default function BalanceSheetPage() {
   const [data, setData] = useState<BalanceSheetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const fy = useFiscalYear();
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) setAsOf(fy.fiscalYearEnd); }, [fy.loaded, fy.fiscalYearEnd]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);

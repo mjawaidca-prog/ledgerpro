@@ -11,7 +11,9 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "jest --verbose",
+    "test:critical": "jest __tests__/critical-flows.test.ts --verbose"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^1.5.0",
@@ -36,11 +38,14 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.12.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "jest": "^30.4.2",
     "prisma": "^5.15.0",
     "tailwindcss": "^3.4.0",
+    "ts-jest": "^29.4.11",
     "tsx": "^4.10.0",
     "typescript": "^5.4.0"
   }

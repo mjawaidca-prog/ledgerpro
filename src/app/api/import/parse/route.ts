@@ -16,7 +16,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File must be ≤ 10 MB' }, { status: 400 });
     }
 
-    const fileName = file.name.toLowerCase();
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
@@ -27,7 +26,7 @@ export async function POST(req: NextRequest) {
         fileName: file.name,
         fileType: result.fileType,
         headers: result.headers,
-        rows: result.rows.slice(0, 100),
+        rows: result.rows,
         totalRows: result.rows.length,
         errors: result.errors,
       },
