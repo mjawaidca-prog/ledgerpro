@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { z } from 'zod';
 import crypto from 'crypto';
-import { DEFAULT_CHART_OF_ACCOUNTS } from '@/lib/default-coa';
+import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
 export const dynamic = 'force-dynamic';
 
 const registerSchema = z.object({
@@ -93,22 +93,9 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Create default Chart of Accounts
-      for (const acct of DEFAULT_CHART_OF_ACCOUNTS) {
-        await tx.chartOfAccount.create({
-          data: {
-            companyId: company.id,
-            code: acct.code,
-            name: acct.name,
-            type: acct.type,
-            detailType: acct.detailType,
-            parentCode: acct.parentCode || null,
-            description: acct.description || null,
-            active: acct.active ?? true,
-            balance: 0,
-          },
-        });
-      }
+      // Create default Chart of Accounts (shared with the lazy-seed path so
+      // both stay in sync, including subType/GIFI classification)
+      await ensureDefaultChartOfAccounts(company.id, tx);
 
       return { user, company };
     });
