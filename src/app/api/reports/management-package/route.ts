@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+import { getGLActivity, normalBalance, toDebitCredit, endOfDay } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -10,19 +11,19 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') || new Date().toISOString().slice(0, 10);
-    const asOfDate = new Date(asOf);
-    const yearStart = new Date(asOfDate.getFullYear(), 0, 1);
+    const asOfDate = endOfDay(new Date(asOf));
+    const yearStart = new Date(new Date(asOf).getFullYear(), 0, 1);
 
-    // Fetch all data in parallel
     const [
       incomeAccounts, expenseAccounts, assetAccounts, liabilityAccounts, equityAccounts,
       transactions, bankAccounts, invoices, bills,
+      periodActivity, cumulativeActivity,
     ] = await Promise.all([
-      db.chartOfAccount.findMany({ where: { companyId, type: 'income', active: true }, select: { code: true, name: true, balance: true } }),
-      db.chartOfAccount.findMany({ where: { companyId, type: 'expense', active: true }, select: { code: true, name: true, balance: true } }),
-      db.chartOfAccount.findMany({ where: { companyId, type: 'asset', active: true }, select: { code: true, name: true, balance: true } }),
-      db.chartOfAccount.findMany({ where: { companyId, type: 'liability', active: true }, select: { code: true, name: true, balance: true } }),
-      db.chartOfAccount.findMany({ where: { companyId, type: 'equity', active: true }, select: { code: true, name: true, balance: true } }),
+      db.chartOfAccount.findMany({ where: { companyId, type: 'income', active: true }, select: { code: true, name: true, type: true } }),
+      db.chartOfAccount.findMany({ where: { companyId, type: 'expense', active: true }, select: { code: true, name: true, type: true } }),
+      db.chartOfAccount.findMany({ where: { companyId, type: 'asset', active: true }, select: { code: true, name: true, type: true } }),
+      db.chartOfAccount.findMany({ where: { companyId, type: 'liability', active: true }, select: { code: true, name: true, type: true } }),
+      db.chartOfAccount.findMany({ where: { companyId, type: 'equity', active: true }, select: { code: true, name: true, type: true } }),
       db.transaction.findMany({
         where: { companyId, date: { gte: yearStart, lte: asOfDate }, status: { not: 'excluded' } },
         select: { amount: true, date: true },
@@ -31,34 +32,46 @@ export async function GET(req: NextRequest) {
       db.financialAccount.findMany({ where: { companyId, isActive: true }, select: { name: true, currentBalance: true, kind: true } }),
       db.invoice.findMany({ where: { companyId, status: { not: 'void' }, issueDate: { gte: yearStart, lte: asOfDate } }, select: { total: true, paidAmount: true, status: true } }),
       db.bill.findMany({ where: { companyId, status: { not: 'void' }, billDate: { gte: yearStart, lte: asOfDate } }, select: { total: true, paidAmount: true, status: true } }),
+      // Income/expense are period flows (this fiscal year to date)
+      getGLActivity(companyId, { from: yearStart, to: asOfDate }),
+      // Assets/liabilities/equity are cumulative balances (since inception, as of the date)
+      getGLActivity(companyId, { to: asOfDate }),
     ]);
 
-    // ─── P&L ───
-    const totalRevenue = incomeAccounts.reduce((s, a) => s + Number(a.balance), 0);
-    const totalExpenses = expenseAccounts.reduce((s, a) => s + Number(a.balance), 0);
+    // ─── P&L (period-scoped) ───
+    const revenueRows = incomeAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(normalBalance(a.type, periodActivity[a.code])) }));
+    const expenseRows = expenseAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(normalBalance(a.type, periodActivity[a.code])) }));
+    const totalRevenue = revenueRows.reduce((s, a) => s + a.amount, 0);
+    const totalExpenses = expenseRows.reduce((s, a) => s + a.amount, 0);
     const netIncome = totalRevenue - totalExpenses;
 
     const pnl = {
-      revenue: incomeAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(Number(a.balance)) })),
-      expenses: expenseAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(Number(a.balance)) })),
+      revenue: revenueRows,
+      expenses: expenseRows,
       totalRevenue: Math.round(totalRevenue),
       totalExpenses: Math.round(totalExpenses),
       netIncome: Math.round(netIncome),
     };
 
-    // ─── Balance Sheet ───
-    const totalAssets = assetAccounts.reduce((s, a) => s + Number(a.balance), 0);
-    const totalLiabilities = liabilityAccounts.reduce((s, a) => s + Number(a.balance), 0);
-    const totalEquity = equityAccounts.reduce((s, a) => s + Number(a.balance), 0) + netIncome;
+    // ─── Balance Sheet (cumulative as of asOfDate) ───
+    const assetRows = assetAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(normalBalance(a.type, cumulativeActivity[a.code])) }));
+    const liabilityRows = liabilityAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(normalBalance(a.type, cumulativeActivity[a.code])) }));
+    const equityRows = equityAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(normalBalance(a.type, cumulativeActivity[a.code])) }));
+    const totalAssets = assetRows.reduce((s, a) => s + a.amount, 0);
+    const totalLiabilities = liabilityRows.reduce((s, a) => s + a.amount, 0);
+    const totalEquityAccounts = equityRows.reduce((s, a) => s + a.amount, 0);
 
     const bs = {
-      assets: assetAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(Number(a.balance)) })),
-      liabilities: liabilityAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(Number(a.balance)) })),
-      equity: equityAccounts.map(a => ({ code: a.code, name: a.name, amount: Math.round(Number(a.balance)) })),
+      assets: assetRows,
+      liabilities: liabilityRows,
+      equity: equityRows,
       retainedEarnings: Math.round(netIncome),
       totalAssets: Math.round(totalAssets),
       totalLiabilities: Math.round(totalLiabilities),
-      totalEquity: Math.round(totalEquity + netIncome),
+      // This is the page's "Total Liabilities + Equity" line — the full right-hand
+      // side of the accounting equation, including current-year earnings not yet
+      // closed to retained earnings. It should equal totalAssets above.
+      totalEquity: Math.round(totalLiabilities + totalEquityAccounts + netIncome),
     };
 
     // ─── Cash Flow ───
@@ -87,18 +100,15 @@ export async function GET(req: NextRequest) {
     const totalOutflow = cashFlow.reduce((s, m) => s + m.outflow, 0);
     const netCashFlow = totalInflow - totalOutflow;
 
-    // ─── Trial Balance ───
+    // ─── Trial Balance (cumulative as of asOfDate, correct per-type debit/credit side) ───
     const allAccounts = [
       ...incomeAccounts, ...expenseAccounts, ...assetAccounts, ...liabilityAccounts, ...equityAccounts,
     ];
     const tbRows = allAccounts.map(a => {
-      const bal = Number(a.balance);
-      return {
-        code: a.code,
-        name: a.name,
-        debit: bal > 0 ? bal : 0,
-        credit: bal < 0 ? Math.abs(bal) : 0,
-      };
+      // Income/expense TB balances reflect the same fiscal-year-to-date activity as the P&L above.
+      const isFlowAccount = a.type === 'income' || a.type === 'expense';
+      const { debit, credit } = toDebitCredit(a.type, (isFlowAccount ? periodActivity : cumulativeActivity)[a.code]);
+      return { code: a.code, name: a.name, debit: Math.round(debit), credit: Math.round(credit) };
     });
     const totalDebits = tbRows.reduce((s, r) => s + r.debit, 0);
     const totalCredits = tbRows.reduce((s, r) => s + r.credit, 0);

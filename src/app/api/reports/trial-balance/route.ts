@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, endOfDay } from '@/lib/reporting';
+import { getGLActivity, endOfDay, toDebitCredit } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 async function buildTrialBalance(companyId: string, asOfDate: Date) {
@@ -12,19 +12,8 @@ async function buildTrialBalance(companyId: string, asOfDate: Date) {
   ]);
 
   const rows = accounts.map((acct) => {
-    const act = activity[acct.code] || { debits: 0, credits: 0 };
-    let debitBalance = 0;
-    let creditBalance = 0;
-
-    if (acct.type === 'asset' || acct.type === 'expense') {
-      const net = act.debits - act.credits;
-      if (net >= 0) debitBalance = net;
-      else creditBalance = Math.abs(net);
-    } else {
-      const net = act.credits - act.debits;
-      if (net >= 0) creditBalance = net;
-      else debitBalance = Math.abs(net);
-    }
+    const act = activity[acct.code];
+    const { debit, credit } = toDebitCredit(acct.type, act);
 
     return {
       code: acct.code,
@@ -32,9 +21,9 @@ async function buildTrialBalance(companyId: string, asOfDate: Date) {
       type: acct.type,
       detailType: acct.detailType,
       gifiCode: acct.gifiCode,
-      debit: Math.round(debitBalance * 100) / 100,
-      credit: Math.round(creditBalance * 100) / 100,
-      hasActivity: act.debits > 0 || act.credits > 0,
+      debit: Math.round(debit * 100) / 100,
+      credit: Math.round(credit * 100) / 100,
+      hasActivity: !!act && (act.debits > 0 || act.credits > 0),
       link: `/reports/general-ledger?code=${acct.code}&name=${encodeURIComponent(acct.name)}`,
     };
   });

@@ -52,3 +52,12 @@ export function endOfDay(date: Date): Date {
   d.setHours(23, 59, 59, 999);
   return d;
 }
+
+/** Splits an account's balance into a trial-balance-style debit/credit pair — exactly one side is non-zero. */
+export function toDebitCredit(type: GLType, activity: AccountActivity | undefined): { debit: number; credit: number } {
+  const net = normalBalance(type, activity);
+  if (type === 'asset' || type === 'expense') {
+    return net >= 0 ? { debit: net, credit: 0 } : { debit: 0, credit: -net };
+  }
+  return net >= 0 ? { debit: 0, credit: net } : { debit: -net, credit: 0 };
+}
