@@ -44,7 +44,7 @@ export async function requireCompany(
     if (!userId) userId = user?.id || undefined;
   }
 
-  if (!companyId) {
+  if (!companyId || !userId) {
     return {
       companyId: null,
       userId: null,
@@ -52,18 +52,39 @@ export async function requireCompany(
     };
   }
 
-  // Verify membership if roles specified
-  if (opts?.roles?.length && userId) {
-    const membership = await db.membership.findUnique({
-      where: { userId_companyId: { userId, companyId } },
+  // companyId above may have come from a client-supplied cookie/header that's
+  // stale (e.g. left over from a different account on a shared browser) — it
+  // is never trustworthy on its own. Always verify the current user actually
+  // belongs to it before scoping any query to it; this is the tenant-isolation
+  // boundary, not an optional check for role-restricted routes.
+  let membership = await db.membership.findUnique({
+    where: { userId_companyId: { userId, companyId } },
+  });
+
+  if (!membership) {
+    // The hinted company isn't one this user belongs to — fall back to their
+    // actual membership instead of serving another tenant's data or a bare
+    // 401 when the user does have a valid company, just not this one.
+    membership = await db.membership.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
     });
-    if (!membership || !opts.roles.includes(membership.role)) {
+    if (!membership) {
       return {
         companyId: null,
         userId: null,
-        error: NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 }),
+        error: NextResponse.json({ error: 'Unauthorized — no company selected. Please log out and back in.' }, { status: 401 }),
       };
     }
+    companyId = membership.companyId;
+  }
+
+  if (opts?.roles?.length && !opts.roles.includes(membership.role)) {
+    return {
+      companyId: null,
+      userId: null,
+      error: NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 }),
+    };
   }
 
   // Guard: require completed onboarding before mutations

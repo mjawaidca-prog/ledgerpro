@@ -50,35 +50,44 @@ export function AppShell({
   // Hydrate from session + cookies after mount (client-only, avoids hydration mismatch)
   useEffect(() => {
     const sessionUser = session?.user as any;
+    if (!sessionUser) return;
 
     const cookieCompanyName = getCookie('lp-active-company-name');
     const cookieCompanyId = getCookie('lp-active-company-id');
 
-    // Best company name: cookie > session > prop (keep current)
-    const resolvedName =
-      cookieCompanyName ||
-      sessionUser?.activeCompanyName || sessionUser?.companyName ||
-      undefined;
-    if (resolvedName) setCompanyName(resolvedName);
+    // The active-company cookie is the only way the "switch company" feature
+    // persists across page loads (the JWT's activeCompanyId is fixed to the
+    // user's first company at login and never updates). But that also means
+    // a cookie left over from a *different* account on a shared browser would
+    // otherwise silently point this session at a company it has nothing to
+    // do with. availableCompanies is fresh per login and scoped to whoever
+    // just authenticated, so use it to check the cookie is actually one of
+    // this user's own companies before trusting it.
+    const available: { id: string; name: string }[] = sessionUser.availableCompanies || [];
+    const cookieBelongsToUser = !!cookieCompanyId && available.some((c) => c.id === cookieCompanyId);
 
-    // Best company ID
-    const resolvedId =
-      cookieCompanyId ||
-      sessionUser?.activeCompanyId || sessionUser?.companyId ||
-      null;
+    const resolvedId = cookieBelongsToUser
+      ? cookieCompanyId
+      : sessionUser?.activeCompanyId || sessionUser?.companyId || null;
     if (resolvedId) setCompanyId(resolvedId);
+
+    const resolvedName = cookieBelongsToUser
+      ? cookieCompanyName || available.find((c) => c.id === cookieCompanyId)?.name
+      : sessionUser?.activeCompanyName || sessionUser?.companyName;
+    if (resolvedName) setCompanyName(resolvedName);
 
     // User info from session
     if (sessionUser?.name) setUserName(sessionUser.name);
     if (sessionUser?.email) setUserEmail(sessionUser.email);
 
-    // Seed client cookies from session if not already set
-    if (!cookieCompanyId && sessionUser?.activeCompanyId) {
-      document.cookie = `lp-active-company-id=${sessionUser.activeCompanyId};path=/;max-age=2592000;SameSite=Lax`;
+    // (Re)write the cookies whenever they don't match the resolved company —
+    // either because they were empty, or because they belonged to someone
+    // else and just got overridden above.
+    if (resolvedId && cookieCompanyId !== resolvedId) {
+      document.cookie = `lp-active-company-id=${resolvedId};path=/;max-age=2592000;SameSite=Lax`;
     }
-    if (!cookieCompanyName && (sessionUser?.activeCompanyName || sessionUser?.companyName)) {
-      const name = sessionUser?.activeCompanyName || sessionUser?.companyName;
-      document.cookie = `lp-active-company-name=${name};path=/;max-age=2592000;SameSite=Lax`;
+    if (resolvedName && cookieCompanyName !== resolvedName) {
+      document.cookie = `lp-active-company-name=${resolvedName};path=/;max-age=2592000;SameSite=Lax`;
     }
   }, [session]);
 

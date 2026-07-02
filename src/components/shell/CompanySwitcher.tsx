@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { Check, Plus, Building2, Settings, LogOut } from 'lucide-react';
+import { clearActiveCompanyCookies } from '@/lib/active-company-cookies';
 
 interface CompanyInfo {
   id: string;
@@ -149,7 +150,7 @@ export function CompanySwitcher({
             </button>
             <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
             <button
-              onClick={() => signOut({ callbackUrl: '/login' })}
+              onClick={() => { clearActiveCompanyCookies(); signOut({ callbackUrl: '/login' }); }}
               style={{
                 width: '100%', textAlign: 'left', padding: '8px 10px',
                 display: 'flex', alignItems: 'center', gap: 10,

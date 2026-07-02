@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react';
 import { cn } from '@/lib/cn';
 import { CompanySwitcher } from './CompanySwitcher';
 import { signOut } from 'next-auth/react';
+import { clearActiveCompanyCookies } from '@/lib/active-company-cookies';
 import {
   LayoutDashboard,
   FileText,
@@ -90,7 +91,7 @@ export function Rail({ companyName, companyPlan, companyId, userName, userEmail,
           </div>
         </div>
         <button
-          onClick={() => signOut({ callbackUrl: '/login' })}
+          onClick={() => { clearActiveCompanyCookies(); signOut({ callbackUrl: '/login' }); }}
           className="nav-item"
           style={{ width: '100%', marginTop: 4 }}
         >
