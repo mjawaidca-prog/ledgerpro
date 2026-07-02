@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany } from '@/lib/api-helpers';
+import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { invoiceUpdateSchema } from '@/lib/validators/invoice';
+import { voidJournalEntry, postInvoiceToLedger } from '@/lib/journal';
 export const dynamic = 'force-dynamic';
 
 export async function GET(
@@ -37,7 +38,7 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -56,6 +57,50 @@ export async function PUT(
     }
 
     const { lineItems, ...invoiceData } = parsed.data;
+    const isVoidTransition = invoiceData.status === 'void' && existing.status !== 'void';
+    const isOnlyStatusChange = Object.keys(invoiceData).every((k) => k === 'status') && !lineItems;
+    const newTotal = invoiceData.total !== undefined ? Number(invoiceData.total) : Number(existing.total);
+    const totalChanged = Math.abs(newTotal - Number(existing.total)) > 0.005;
+
+    // Paid or voided invoices are locked to status-only transitions (e.g. void)
+    // — unwinding a payment or a void takes more than a field edit.
+    if ((existing.status === 'paid' || existing.status === 'void') && !isOnlyStatusChange) {
+      return NextResponse.json(
+        { error: 'This invoice is paid or voided. Void it to make corrections instead of editing it directly.' },
+        { status: 409 }
+      );
+    }
+
+    const guardError = await closedPeriodGuard(companyId, existing.issueDate);
+    if (guardError) return guardError;
+    if (invoiceData.issueDate) {
+      const newDateGuard = await closedPeriodGuard(companyId, new Date(invoiceData.issueDate));
+      if (newDateGuard) return newDateGuard;
+    }
+
+    const existingInvoiceEntry = await db.journalEntry.findFirst({
+      where: { companyId, sourceId: params.id, sourceType: 'invoice', voidedAt: null },
+    });
+    const becomingPosted = existing.status === 'draft' && invoiceData.status && invoiceData.status !== 'draft';
+
+    if (isVoidTransition) {
+      const reversalGuard = await closedPeriodGuard(companyId, new Date());
+      if (reversalGuard) return reversalGuard;
+
+      const entries = await db.journalEntry.findMany({
+        where: { companyId, sourceId: params.id, sourceType: { in: ['invoice', 'payment'] }, voidedAt: null },
+      });
+      for (const entry of entries) {
+        await voidJournalEntry(entry.id, companyId, userId);
+      }
+    } else if (existingInvoiceEntry && totalChanged) {
+      // Already posted and the total changed (e.g. a line item was edited on
+      // a sent-but-unpaid invoice) — void the stale posting and repost so the
+      // GL reflects the updated total instead of silently drifting from it.
+      const reversalGuard = await closedPeriodGuard(companyId, new Date());
+      if (reversalGuard) return reversalGuard;
+      await voidJournalEntry(existingInvoiceEntry.id, companyId, userId);
+    }
 
     // Update invoice header
     await db.invoice.update({
@@ -91,6 +136,12 @@ export async function PUT(
       },
     });
 
+    if (!isVoidTransition && updated && (becomingPosted || (existingInvoiceEntry && totalChanged))) {
+      await postInvoiceToLedger(params.id, updated.customer?.name ?? 'Unknown', newTotal, companyId);
+    }
+
+    await auditLog(companyId, userId, isVoidTransition ? 'invoice.void' : 'invoice.update', 'invoice', params.id, { before: existing, after: updated });
+
     return NextResponse.json({ data: updated });
   } catch (error) {
     console.error('PUT /api/invoices/[id] error:', error);
@@ -103,7 +154,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const existing = await db.invoice.findUnique({ where: { id: params.id, companyId } });
@@ -111,15 +162,17 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
-    if (existing.status === 'paid') {
+    if (existing.status !== 'draft') {
       return NextResponse.json(
-        { error: 'Cannot delete a paid invoice. Void it instead.' },
+        { error: 'Cannot delete a posted invoice. Void it instead.' },
         { status: 400 }
       );
     }
 
     await db.invoiceLineItem.deleteMany({ where: { invoiceId: params.id } });
     await db.invoice.delete({ where: { id: params.id } });
+
+    await auditLog(companyId, userId, 'invoice.delete', 'invoice', params.id, { before: existing });
 
     return NextResponse.json({ data: { id: params.id, deleted: true } });
   } catch (error) {

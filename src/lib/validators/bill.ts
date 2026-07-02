@@ -19,7 +19,7 @@ export const billSchema = z.object({
   taxRate: z.coerce.number().min(0).max(100).nullable().optional(),
   taxAmount: z.coerce.number().min(0).default(0),
   total: z.coerce.number().min(0),
-  currency: z.string().default('USD'),
+  currency: z.string().default('CAD'),
   status: z.enum(['draft', 'open', 'paid', 'overdue', 'void']).default('draft'),
   notes: z.string().max(2000).nullable().optional(),
   paymentAccountId: z.string().nullable().optional(),

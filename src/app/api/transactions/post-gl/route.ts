@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany } from '@/lib/api-helpers';
+import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
+import { postTransactionToLedger } from '@/lib/journal';
 export const dynamic = 'force-dynamic';
 
 // POST — post categorized bank transactions to the General Ledger
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -27,6 +28,7 @@ export async function POST(req: NextRequest) {
 
     const posted: string[] = [];
     const skipped: string[] = [];
+    const closedPeriod: string[] = [];
 
     for (const tx of transactions) {
       if (tx.status !== 'categorized' || !tx.category) {
@@ -34,65 +36,20 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // A transaction dated in a closed period can't be posted — the user needs
+      // to either reopen the period or leave it uncategorized for a correcting entry.
+      if (await closedPeriodGuard(companyId, tx.date)) {
+        closedPeriod.push(tx.id);
+        continue;
+      }
+
       const glCode = tx.account?.glAccountCode;
-      const catCode = tx.category.code;
-      const amount = Math.abs(Number(tx.amount));
-      const isInflow = Number(tx.amount) > 0;
-
-      // Determine GL accounts based on transaction type
-      let entryLines: { code: string; description: string; debit: number; credit: number }[];
-
-      if (isInflow) {
-        // Money coming in: Debit Bank, Credit Income category
-        entryLines = [
-          { code: glCode || '1010', description: tx.description, debit: amount, credit: 0 },
-          { code: catCode, description: `Revenue — ${tx.description}`, debit: 0, credit: amount },
-        ];
-      } else {
-        // Money going out: Debit Expense category, Credit Bank
-        entryLines = [
-          { code: catCode, description: tx.description, debit: amount, credit: 0 },
-          { code: glCode || '1010', description: `Payment — ${tx.description}`, debit: 0, credit: amount },
-        ];
-      }
-
-      // Create journal entry
-      const entry = await db.journalEntry.create({
-        data: {
-          companyId: tx.companyId,
-          entryDate: new Date(tx.date),
-          description: tx.description,
-          sourceType: 'payment',
-          sourceId: tx.id,
-          lines: {
-            create: entryLines.map((l) => ({
-              glAccountCode: l.code,
-              description: l.description,
-              debit: l.debit,
-              credit: l.credit,
-            })),
-          },
-        },
-      });
-
-      // Update GL balances
-      for (const l of entryLines) {
-        const acct = await db.chartOfAccount.findFirst({ where: { code: l.code, companyId: tx.companyId } });
-        if (!acct) continue;
-        const net = l.debit - l.credit;
-        const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? net : -net;
-        await db.chartOfAccount.update({
-          where: { id: acct.id },
-          data: { balance: { increment: balanceChange } },
-        });
-        // Update parent
-        if (acct.parentCode) {
-          await db.chartOfAccount.updateMany({
-            where: { code: acct.parentCode, companyId: tx.companyId },
-            data: { balance: { increment: balanceChange } },
-          });
-        }
-      }
+      const entry = await postTransactionToLedger(
+        { id: tx.id, date: tx.date, description: tx.description, amount: Number(tx.amount) },
+        glCode ?? undefined,
+        tx.category.code,
+        companyId
+      );
 
       // Mark transaction as reconciled
       await db.transaction.update({
@@ -114,11 +71,13 @@ export async function POST(req: NextRequest) {
       posted.push(tx.id);
     }
 
+    await auditLog(companyId, userId, 'transaction.post_gl', 'transaction', undefined, { postedIds: posted, skippedIds: skipped, closedPeriodIds: closedPeriod });
+
     return NextResponse.json({
-      data: { posted: posted.length, skipped: skipped.length, postedIds: posted, skippedIds: skipped },
+      data: { posted: posted.length, skipped: skipped.length, closedPeriod: closedPeriod.length, postedIds: posted, skippedIds: skipped, closedPeriodIds: closedPeriod },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('POST /api/transactions/post-gl error:', error);
-    return NextResponse.json({ error: 'Failed to post to GL' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to post to GL' }, { status: 500 });
   }
 }

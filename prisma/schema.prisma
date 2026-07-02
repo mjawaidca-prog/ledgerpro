@@ -303,7 +303,7 @@ model Transaction {
   merchant           String?
   rawStatementText   String?
   amount             Decimal       @db.Decimal(14, 2)
-  currency           String        @default("USD")
+  currency           String        @default("CAD")
 
   categoryId         String?
   category           ChartOfAccount? @relation("TransactionCategory", fields: [categoryId], references: [id])
@@ -314,6 +314,8 @@ model Transaction {
   matchRef           String?
   reconciledAt       DateTime?
   reconciledBy       String?
+  voidedAt           DateTime?
+  voidedBy           String?
 
   importBatchId      String?
   importBatch        ImportBatch?   @relation(fields: [importBatchId], references: [id])
@@ -338,6 +340,7 @@ enum TxStatus {
   excluded
   transfer
   reconciled
+  voided
 }
 
 enum TxSource {
@@ -426,7 +429,7 @@ model Invoice {
   issueDate       DateTime
   dueDate         DateTime
   terms           String?
-  currency        String      @default("USD")
+  currency        String      @default("CAD")
 
   subtotal        Decimal     @db.Decimal(14, 2)
   taxRate         Decimal?    @default(0) @db.Decimal(5, 3)
@@ -495,7 +498,7 @@ model Bill {
   taxRate         Decimal?    @default(0) @db.Decimal(5, 3)
   taxAmount       Decimal     @default(0) @db.Decimal(14, 2)
   total           Decimal     @db.Decimal(14, 2)
-  currency        String      @default("USD")
+  currency        String      @default("CAD")
 
   status          BillStatus  @default(draft)
 
@@ -559,6 +562,13 @@ model JournalEntry {
 
   transferMatchId String?       @unique
   transferMatch   TransferMatch? @relation(fields: [transferMatchId], references: [id])
+
+  // Void/reversal trail: voiding never deletes a posted entry — it links a reversing entry instead.
+  voidedAt        DateTime?
+  voidedBy        String?
+  reversalOfId    String?       @unique
+  reversalOf      JournalEntry? @relation("EntryReversal", fields: [reversalOfId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reversedBy      JournalEntry? @relation("EntryReversal")
 
   createdBy       String?
   createdAt       DateTime      @default(now())

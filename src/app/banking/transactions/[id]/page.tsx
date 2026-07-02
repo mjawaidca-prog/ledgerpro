@@ -17,6 +17,23 @@ export default function TransactionDetailPage() {
   const [tx, setTx] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [voiding, setVoiding] = useState(false);
+  const [voidError, setVoidError] = useState<string | null>(null);
+
+  async function handleVoid() {
+    if (!confirm('Void this transaction? A reversing entry will be posted to the ledger — this cannot be undone.')) return;
+    setVoiding(true);
+    setVoidError(null);
+    try {
+      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to void transaction');
+      router.push('/banking');
+    } catch (err: any) {
+      setVoidError(err.message);
+      setVoiding(false);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -59,6 +76,7 @@ export default function TransactionDetailPage() {
     excluded: 'neutral',
     transfer: 'info',
     reconciled: 'paid',
+    voided: 'draft',
   };
 
   return (
@@ -75,8 +93,22 @@ export default function TransactionDetailPage() {
               {format(new Date(tx.date), 'MMMM d, yyyy')} · Transaction ID: {tx.id}
             </p>
           </div>
-          <Badge variant={statusColors[tx.status] || 'neutral'} className="text-sm">{tx.status}</Badge>
+          <div className="flex items-center gap-3">
+            <Badge variant={statusColors[tx.status] || 'neutral'} className="text-sm">{tx.status}</Badge>
+            {tx.status !== 'voided' && (
+              <button
+                onClick={handleVoid}
+                disabled={voiding}
+                className="text-sm font-medium text-[var(--danger)] hover:underline disabled:opacity-50"
+              >
+                {voiding ? 'Voiding…' : 'Void'}
+              </button>
+            )}
+          </div>
         </div>
+        {voidError && (
+          <p className="text-sm text-[var(--danger)] mb-4">{voidError}</p>
+        )}
 
         <div className="grid grid-cols-2 gap-6">
           <Card>

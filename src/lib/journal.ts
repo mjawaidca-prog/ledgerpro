@@ -216,16 +216,58 @@ export async function postInvoicePayment(
 
 /**
  * Post a bill to the ledger.
- * Bill: Debit Expense (expense), Credit AP (liability).
+ * Bill: Debit Expense account(s) per line item (grouped by GL category),
+ * plus tax paid to the Sales Tax Payable control account, Credit AP (liability)
+ * for the total. Every line item must carry a categoryId — there is no
+ * generic "uncategorized expense" fallback, since posting to the wrong
+ * account silently corrupts the P&L.
  */
 export async function postBillToLedger(
   billId: string,
   vendorName: string,
+  lineItems: { categoryId: string | null; amount: number }[],
+  taxAmount: number,
   total: number,
-  expenseAccountCode: string,
   companyId: string,
   tx?: Prisma.TransactionClient
 ) {
+  const client = tx ?? db;
+
+  if (lineItems.some((li) => !li.categoryId)) {
+    throw new Error('Every bill line item must have a GL category selected before it can be posted.');
+  }
+  const categoryIds = [...new Set(lineItems.map((li) => li.categoryId!))];
+
+  const accounts = await client.chartOfAccount.findMany({
+    where: { id: { in: categoryIds }, companyId },
+  });
+  const acctByIdCode = new Map(accounts.map((a) => [a.id, a.code]));
+
+  const amountByCode = new Map<string, number>();
+  for (const li of lineItems) {
+    const code = acctByIdCode.get(li.categoryId!);
+    if (!code) {
+      throw new Error(`Bill line item references an unknown GL category (${li.categoryId})`);
+    }
+    amountByCode.set(code, (amountByCode.get(code) ?? 0) + li.amount);
+  }
+
+  const debitLines = [...amountByCode.entries()].map(([code, amount]) => ({
+    glAccountCode: code,
+    description: `Expense for ${billId}`,
+    debit: amount,
+    credit: 0,
+  }));
+
+  if (taxAmount > 0) {
+    debitLines.push({
+      glAccountCode: '2300', // Sales Tax Payable — net GST/HST/PST position (input tax credit reduces what's owed)
+      description: `Tax paid for ${billId}`,
+      debit: taxAmount,
+      credit: 0,
+    });
+  }
+
   return postJournalEntry(
     {
       entryDate: new Date(),
@@ -233,12 +275,7 @@ export async function postBillToLedger(
       sourceType: 'bill',
       sourceId: billId,
       lines: [
-        {
-          glAccountCode: expenseAccountCode,
-          description: `Expense for ${billId}`,
-          debit: total,
-          credit: 0,
-        },
+        ...debitLines,
         {
           glAccountCode: '2200', // Accounts Payable
           description: `AP for ${billId}`,
@@ -328,4 +365,110 @@ export async function postTransfer(
     companyId,
     tx
   );
+}
+
+/**
+ * Post a categorized bank transaction to the ledger.
+ * Inflow: Debit bank account, Credit the income/category account.
+ * Outflow: Debit the expense/category account, Credit the bank account.
+ * Shared by both the initial post-gl action and reclassification (void + repost).
+ */
+export async function postTransactionToLedger(
+  transaction: { id: string; date: Date; description: string; amount: number },
+  bankAccountCode: string | undefined,
+  categoryCode: string,
+  companyId: string,
+  entryDate: Date = transaction.date,
+  tx?: Prisma.TransactionClient
+) {
+  const amount = Math.abs(transaction.amount);
+  const isInflow = transaction.amount > 0;
+  const bankCode = bankAccountCode || '1010';
+
+  const lines = isInflow
+    ? [
+        { glAccountCode: bankCode, description: transaction.description, debit: amount, credit: 0 },
+        { glAccountCode: categoryCode, description: `Revenue — ${transaction.description}`, debit: 0, credit: amount },
+      ]
+    : [
+        { glAccountCode: categoryCode, description: transaction.description, debit: amount, credit: 0 },
+        { glAccountCode: bankCode, description: `Payment — ${transaction.description}`, debit: 0, credit: amount },
+      ];
+
+  return postJournalEntry(
+    {
+      entryDate,
+      description: transaction.description,
+      sourceType: 'payment',
+      sourceId: transaction.id,
+      lines,
+    },
+    companyId,
+    tx
+  );
+}
+
+// ─── Void / reversal ───
+
+/**
+ * Void a posted journal entry without deleting it.
+ *
+ * A voided entry is never removed: it stays in the ledger for audit purposes,
+ * and an equal-and-opposite reversing entry is posted (dated `reversalDate`,
+ * default now) to net its balance effect back out. This is what lets the
+ * trial balance and general ledger stay correct with no special-case
+ * filtering — the pair of entries simply sums to zero.
+ *
+ * Throws if the entry doesn't exist or has already been voided; callers are
+ * responsible for closedPeriodGuard on the reversal date and for company-scoping.
+ */
+export async function voidJournalEntry(
+  entryId: string,
+  companyId: string,
+  userId: string | undefined,
+  reversalDate: Date = new Date()
+) {
+  return db.$transaction(async (tx) => {
+    const entry = await tx.journalEntry.findUnique({
+      where: { id: entryId, companyId },
+      include: { lines: true },
+    });
+
+    if (!entry) {
+      throw new Error('Journal entry not found');
+    }
+    if (entry.voidedAt) {
+      throw new Error('This journal entry has already been voided');
+    }
+
+    const reversal = await postJournalEntry(
+      {
+        entryDate: reversalDate,
+        description: `Reversal of: ${entry.description}`,
+        sourceType: entry.sourceType,
+        sourceId: entry.sourceId ?? undefined,
+        createdBy: userId,
+        lines: entry.lines.map((l) => ({
+          glAccountCode: l.glAccountCode,
+          description: l.description ?? undefined,
+          debit: Number(l.credit),
+          credit: Number(l.debit),
+        })),
+      },
+      companyId,
+      tx
+    );
+
+    await tx.journalEntry.update({
+      where: { id: reversal.id },
+      data: { reversalOfId: entry.id },
+    });
+
+    await tx.journalEntry.update({
+      where: { id: entry.id },
+      data: { voidedAt: new Date(), voidedBy: userId },
+    });
+
+    return { original: entry, reversal };
+  });
 }

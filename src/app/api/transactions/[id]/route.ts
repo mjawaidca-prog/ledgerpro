@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany } from '@/lib/api-helpers';
+import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
+import { voidJournalEntry } from '@/lib/journal';
 export const dynamic = 'force-dynamic';
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -13,6 +14,23 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const existing = await db.transaction.findUnique({ where: { id: params.id, companyId } });
     if (!existing) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
+
+    if (existing.status === 'voided') {
+      return NextResponse.json({ error: 'This transaction has been voided and cannot be edited' }, { status: 409 });
+    }
+
+    // Once posted to the GL, the category can only change via the reclassify
+    // action (/api/reconciliation/[id]) which voids and reposts the journal
+    // entry — editing categoryId here would leave the ledger out of sync.
+    if (existing.status === 'reconciled' && categoryId !== undefined) {
+      return NextResponse.json(
+        { error: 'This transaction is already posted. Use reclassify to change its category.' },
+        { status: 409 }
+      );
+    }
+
+    const guardError = await closedPeriodGuard(companyId, existing.date);
+    if (guardError) return guardError;
 
     const updateData: any = {};
     if (categoryId !== undefined) {
@@ -45,6 +63,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       },
     });
 
+    await auditLog(companyId, userId, 'transaction.update', 'transaction', params.id, { before: existing, after: tx });
+
     return NextResponse.json({ data: tx });
   } catch (error) {
     console.error('PUT /api/transactions/[id] error:', error);
@@ -54,7 +74,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const existing = await db.transaction.findUnique({
@@ -63,59 +83,43 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     });
     if (!existing) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
 
-    // If posted to GL, reverse the journal entry and balance changes
+    if (existing.status === 'voided') {
+      return NextResponse.json({ error: 'This transaction has already been voided' }, { status: 409 });
+    }
+
+    // Posted (reconciled) transactions are never hard-deleted — void them
+    // instead so the reversing entry stays in the audit trail.
     if (existing.status === 'reconciled' && existing.matchRef) {
-      await reverseJournalEntry(existing.matchRef, companyId);
-    }
+      const guardError = await closedPeriodGuard(companyId, new Date());
+      if (guardError) return guardError;
 
-    // Reverse financial account balance ONLY for posted (reconciled) transactions.
-    // Non-posted transactions never affected the balance — reversing them corrupts it.
-    if (existing.status === 'reconciled' && existing.account?.glAccountCode) {
-      await db.financialAccount.updateMany({
-        where: { glAccountCode: existing.account.glAccountCode, companyId },
-        data: { currentBalance: { increment: -Number(existing.amount) } },
+      await voidJournalEntry(existing.matchRef, companyId, userId);
+
+      if (existing.account?.glAccountCode) {
+        await db.financialAccount.updateMany({
+          where: { glAccountCode: existing.account.glAccountCode, companyId },
+          data: { currentBalance: { increment: -Number(existing.amount) } },
+        });
+      }
+
+      const voided = await db.transaction.update({
+        where: { id: params.id },
+        data: { status: 'voided', voidedAt: new Date(), voidedBy: userId },
       });
+
+      await auditLog(companyId, userId, 'transaction.void', 'transaction', params.id, { before: existing, after: voided });
+
+      return NextResponse.json({ data: { voided: params.id } });
     }
 
+    // Never posted to the GL — safe to hard delete, no ledger impact.
     await db.transaction.delete({ where: { id: params.id } });
+
+    await auditLog(companyId, userId, 'transaction.delete', 'transaction', params.id, { before: existing });
 
     return NextResponse.json({ data: { deleted: params.id } });
   } catch (error) {
     console.error('DELETE /api/transactions/[id] error:', error);
     return NextResponse.json({ error: 'Failed to delete transaction' }, { status: 500 });
   }
-}
-
-/** Reverse a journal entry: delete lines, reverse COA balances, delete entry */
-async function reverseJournalEntry(matchRef: string, companyId: string) {
-  const entry = await db.journalEntry.findUnique({
-    where: { id: matchRef },
-    include: { lines: true },
-  });
-  if (!entry) return;
-
-  // Reverse COA balances
-  for (const line of entry.lines) {
-    const acct = await db.chartOfAccount.findFirst({
-      where: { code: line.glAccountCode, companyId },
-    });
-    if (!acct) continue;
-    const net = Number(line.debit) - Number(line.credit);
-    const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? -net : net;
-    await db.chartOfAccount.update({
-      where: { id: acct.id },
-      data: { balance: { increment: balanceChange } },
-    });
-    // Reverse parent balance too
-    if (acct.parentCode) {
-      await db.chartOfAccount.updateMany({
-        where: { code: acct.parentCode, companyId },
-        data: { balance: { increment: balanceChange } },
-      });
-    }
-  }
-
-  // Delete lines and entry
-  await db.journalLine.deleteMany({ where: { journalEntryId: entry.id } });
-  await db.journalEntry.delete({ where: { id: entry.id } });
 }

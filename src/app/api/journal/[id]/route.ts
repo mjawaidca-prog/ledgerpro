@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
-import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
+import { voidJournalEntry } from '@/lib/journal';
 export const dynamic = 'force-dynamic';
 
 // GET — single journal entry with full line details
@@ -80,6 +81,18 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ error: 'Only manual journal entries can be edited' }, { status: 403 });
     }
 
+    if (existing.voidedAt) {
+      return NextResponse.json({ error: 'This journal entry has been voided and cannot be edited' }, { status: 409 });
+    }
+
+    const oldDateGuard = await closedPeriodGuard(companyId, existing.entryDate);
+    if (oldDateGuard) return oldDateGuard;
+
+    if (entryDate) {
+      const newDateGuard = await closedPeriodGuard(companyId, new Date(entryDate));
+      if (newDateGuard) return newDateGuard;
+    }
+
     const newLines = lines || existing.lines.map((l) => ({
       glAccountCode: l.glAccountCode,
       description: l.description || undefined,
@@ -153,6 +166,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       include: { lines: true },
     });
 
+    await auditLog(companyId, userId, 'journal.update', 'journal_entry', params.id, { before: existing, after: updated });
+
     return NextResponse.json({ data: updated });
   } catch (error: any) {
     console.error('PUT /api/journal/[id] error:', error);
@@ -160,7 +175,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-// DELETE — void a journal entry (reverse balances, keep record for audit trail)
+// DELETE — void a journal entry via an equal-and-opposite reversing entry.
+// The original row is never deleted — it stays in the ledger with voidedAt set,
+// linked to the reversal that nets its balance effect back to zero.
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
@@ -175,39 +192,31 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 });
     }
 
-    // If this entry was auto-generated from a transaction import, unlink the transaction
-    if (existing.sourceType === 'payment' && existing.sourceId) {
-      await db.transaction.updateMany({
-        where: { id: existing.sourceId, companyId },
-        data: { status: 'categorized', matchRef: null },
-      });
+    if (existing.voidedAt) {
+      return NextResponse.json({ error: 'This journal entry has already been voided' }, { status: 409 });
     }
 
-    // Reverse balance effects
-    for (const line of existing.lines) {
-      const acct = await db.chartOfAccount.findFirst({ where: { code: line.glAccountCode, companyId } });
-      if (!acct) continue;
-      const net = Number(line.debit) - Number(line.credit);
-      const balanceChange = (acct.type === 'asset' || acct.type === 'expense') ? -net : net;
-      await db.chartOfAccount.update({
-        where: { id: acct.id },
-        data: { balance: { increment: new Prisma.Decimal(balanceChange) } },
-      });
-      if (acct.parentCode) {
-        await db.chartOfAccount.updateMany({
-          where: { code: acct.parentCode, companyId },
-          data: { balance: { increment: new Prisma.Decimal(balanceChange) } },
-        });
-      }
+    // Auto-generated entries must be voided from their source document (the
+    // transaction, invoice, bill, or transfer) so that document's own status
+    // stays in sync with the ledger — voiding it here would desync the two.
+    if (existing.sourceType !== 'manual') {
+      const sourceLabel = { payment: 'the transaction', invoice: 'the invoice', bill: 'the bill', transfer: 'the transfer' }[existing.sourceType] || 'its source document';
+      return NextResponse.json(
+        { error: `This entry was auto-generated. Void ${sourceLabel} instead.` },
+        { status: 400 }
+      );
     }
 
-    // Delete lines then entry
-    await db.journalLine.deleteMany({ where: { journalEntryId: params.id } });
-    await db.journalEntry.delete({ where: { id: params.id, companyId } });
+    const guardError = await closedPeriodGuard(companyId, new Date());
+    if (guardError) return guardError;
 
-    return NextResponse.json({ data: { deleted: true, id: params.id } });
+    const { reversal } = await voidJournalEntry(params.id, companyId, userId);
+
+    await auditLog(companyId, userId, 'journal.void', 'journal_entry', params.id, { before: existing, reversalId: reversal.id });
+
+    return NextResponse.json({ data: { voided: true, id: params.id, reversalId: reversal.id } });
   } catch (error: any) {
     console.error('DELETE /api/journal/[id] error:', error);
-    return NextResponse.json({ error: error.message || 'Failed to delete' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to void journal entry' }, { status: 500 });
   }
 }

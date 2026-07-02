@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
+import { voidJournalEntry, postTransactionToLedger } from '@/lib/journal';
 export const dynamic = 'force-dynamic';
 
 // GET /api/reconciliation/[id] — get a single transaction's reconciliation status
@@ -80,7 +81,10 @@ export async function PUT(
     // action can be: "unreconcile" | "reclassify"
     // status can be: "reconciled" | "categorized" | "toreview" | "excluded"
 
-    const tx = await db.transaction.findUnique({ where: { id: params.id } });
+    const tx = await db.transaction.findUnique({
+      where: { id: params.id },
+      include: { account: { select: { glAccountCode: true } } },
+    });
     if (!tx || tx.companyId !== companyId) {
       return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
     }
@@ -88,13 +92,49 @@ export async function PUT(
     const updateData: any = {};
 
     if (action === 'unreconcile') {
+      if (tx.matchRef) {
+        // The transaction was already posted — reverse the posting instead of
+        // silently detaching it, otherwise the GL still shows the old entry
+        // while the transaction claims to be un-reconciled.
+        const guardError = await closedPeriodGuard(companyId, new Date());
+        if (guardError) return guardError;
+        await voidJournalEntry(tx.matchRef, companyId, userId);
+      }
       updateData.reconciledAt = null;
       updateData.reconciledBy = null;
+      updateData.matchRef = null;
       updateData.status = status || 'categorized';
     } else if (action === 'reclassify') {
-      if (categoryId) {
+      if (categoryId && categoryId !== tx.categoryId) {
+        if (tx.status === 'reconciled' && tx.matchRef) {
+          // Already posted to the GL under the old category — void that entry
+          // and repost under the new one so the ledger matches what's on screen.
+          const category = await db.chartOfAccount.findFirst({ where: { id: categoryId, companyId } });
+          if (!category) {
+            return NextResponse.json({ error: 'Category not found' }, { status: 400 });
+          }
+
+          let entryDate = tx.date;
+          if (await closedPeriodGuard(companyId, entryDate)) {
+            entryDate = new Date(); // original period is closed — post the correction in the current period
+          }
+          const guardError = await closedPeriodGuard(companyId, entryDate);
+          if (guardError) return guardError;
+
+          await voidJournalEntry(tx.matchRef, companyId, userId, entryDate);
+          const newEntry = await postTransactionToLedger(
+            { id: tx.id, date: tx.date, description: tx.description, amount: Number(tx.amount) },
+            tx.account?.glAccountCode ?? undefined,
+            category.code,
+            companyId,
+            entryDate
+          );
+          updateData.matchRef = newEntry.id;
+        }
         updateData.categoryId = categoryId;
-        updateData.status = 'categorized';
+        if (tx.status !== 'reconciled') {
+          updateData.status = 'categorized';
+        }
       }
       if (status) {
         updateData.status = status;

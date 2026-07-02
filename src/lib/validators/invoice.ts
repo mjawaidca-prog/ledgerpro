@@ -15,7 +15,7 @@ export const invoiceSchema = z.object({
   issueDate: z.string().min(1, 'Issue date is required'),
   dueDate: z.string().min(1, 'Due date is required'),
   terms: z.string().max(50).nullable().optional(),
-  currency: z.string().default('USD'),
+  currency: z.string().default('CAD'),
   subtotal: z.coerce.number().min(0),
   taxRate: z.coerce.number().min(0).max(100).nullable().optional(),
   taxAmount: z.coerce.number().min(0).default(0),

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
+import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
 import { billSchema } from '@/lib/validators/bill';
+import { postBillToLedger } from '@/lib/journal';
 export const dynamic = 'force-dynamic';
 
 function generateBillId(kind: 'bill' | 'expense'): string {
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -89,6 +90,13 @@ export async function POST(req: NextRequest) {
     }
 
     const { lineItems, ...billData } = parsed.data;
+
+    if (billData.status !== 'draft' && lineItems.some((item) => !item.categoryId)) {
+      return NextResponse.json(
+        { error: 'Every line item needs a GL category before the bill can be posted (or save it as a draft).' },
+        { status: 400 }
+      );
+    }
 
     const bill = await db.bill.create({
       data: {
@@ -112,9 +120,23 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Post to the GL ledger unless this is a draft — mirrors invoice posting behavior.
+    if (bill.status !== 'draft') {
+      await postBillToLedger(
+        bill.id,
+        bill.vendor?.name ?? 'Unknown',
+        bill.lineItems.map((li) => ({ categoryId: li.categoryId, amount: Number(li.amount) })),
+        Number(bill.taxAmount),
+        Number(bill.total),
+        companyId
+      );
+    }
+
+    await auditLog(companyId, userId, 'bill.create', 'bill', bill.id, { after: bill });
+
     return NextResponse.json({ data: bill }, { status: 201 });
-  } catch (error) {
+  } catch (error: any) {
     console.error('POST /api/bills error:', error);
-    return NextResponse.json({ error: 'Failed to create bill' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to create bill' }, { status: 500 });
   }
 }

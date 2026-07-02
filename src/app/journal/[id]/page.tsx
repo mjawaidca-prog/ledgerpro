@@ -141,7 +141,7 @@ export default function JournalDetailPage() {
   }
 
   async function handleDelete() {
-    if (!confirm('Delete this journal entry? GL balances will be reversed. This cannot be undone.')) return;
+    if (!confirm('Void this journal entry? A reversing entry will be posted — the original stays in the ledger for audit purposes. This cannot be undone.')) return;
     setDeleting(true);
     try {
       const res = await fetch(`/api/journal/${id}`, { method: 'DELETE' });
@@ -184,7 +184,7 @@ export default function JournalDetailPage() {
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={startEdit}><Edit3 size={14} /> Edit</Button>
               <Button variant="ghost" onClick={handleDelete} disabled={deleting} className="text-[var(--danger)] hover:bg-[var(--danger-soft)]">
-                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete
+                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Void
               </Button>
             </div>
           )}
@@ -327,7 +327,7 @@ export default function JournalDetailPage() {
         </Card>
 
         <p className="text-xs text-[var(--text-faint)] mt-4">
-          {isManual ? 'Manual entries can be edited or deleted. System-generated entries are locked for audit integrity.' : 'System-generated entries cannot be edited or deleted. Create a correcting manual entry instead.'}
+          {isManual ? 'Manual entries can be edited or voided directly. System-generated entries are locked here for audit integrity.' : `This entry was auto-generated from a ${entry.sourceType}. Void the ${entry.sourceType} itself to reverse it.`}
         </p>
       </div>
     </AppShell>
