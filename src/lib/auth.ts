@@ -86,7 +86,7 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
         token.activeCompanyId = (user as any).activeCompanyId;
@@ -95,6 +95,21 @@ export const authOptions: NextAuthOptions = {
         // Migration: carry forward old format for backward compatibility
         token.companyId = (user as any).activeCompanyId || (user as any).companyId;
         token.companyName = (user as any).activeCompanyName || (user as any).companyName;
+      } else if (trigger === 'update' && token.id) {
+        // availableCompanies is otherwise frozen at sign-in time — refresh it
+        // on demand (client calls session.update()) after actions like adding
+        // a new company, so it doesn't look like a foreign company the next
+        // time the active-company cookie is validated against this list.
+        const memberships = await db.membership.findMany({
+          where: { userId: token.id as string },
+          include: { company: { select: { id: true, name: true } } },
+          orderBy: { createdAt: 'asc' },
+        });
+        token.availableCompanies = memberships.map((m) => ({
+          id: m.company.id,
+          name: m.company.name,
+          role: m.role,
+        }));
       }
       return token;
     },

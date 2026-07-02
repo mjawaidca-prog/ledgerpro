@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { hash } from 'bcryptjs';
 import { z } from 'zod';
 import crypto from 'crypto';
-import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
+import { createCompanyForUser } from '@/lib/create-company';
 export const dynamic = 'force-dynamic';
 
 const registerSchema = z.object({
@@ -42,12 +42,6 @@ export async function POST(req: NextRequest) {
     // Generate email verification token
     const verificationToken = crypto.randomBytes(32).toString('hex');
 
-    // Find free trial plan (outside transaction)
-    const freePlan = await db.plan.findFirst({
-      where: { name: 'Free Trial' },
-    });
-    if (!freePlan) throw new Error('No free trial plan found. Run seed first.');
-
     // Create everything in a transaction
     const result = await db.$transaction(async (tx) => {
       // Create user
@@ -55,47 +49,9 @@ export async function POST(req: NextRequest) {
         data: { name, email, passwordHash, emailVerificationToken: verificationToken },
       });
 
-      // Create company
-      const company = await tx.company.create({
-        data: {
-          name: companyName,
-          fiscalYearStart: new Date(new Date().getFullYear().toString() + '-01-01'),
-          currency: 'CAD',
-          locale: 'en-CA',
-          timezone: 'America/Edmonton',
-        },
-      });
-
-      // Create membership (owner)
-      await tx.membership.create({
-        data: {
-          userId: user.id,
-          companyId: company.id,
-          role: 'owner',
-        },
-      });
-
-      // Create trial subscription (30 days)
-      const now = new Date();
-      const trialEnd = new Date(now);
-      trialEnd.setDate(trialEnd.getDate() + 30);
-      const periodEnd = new Date(now);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
-
-      await tx.subscription.create({
-        data: {
-          companyId: company.id,
-          planId: freePlan.id,
-          status: 'trialing',
-          trialEndsAt: trialEnd,
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-        },
-      });
-
-      // Create default Chart of Accounts (shared with the lazy-seed path so
-      // both stay in sync, including subType/GIFI classification)
-      await ensureDefaultChartOfAccounts(company.id, tx);
+      // Create company + owner membership + trial subscription + default COA
+      // (shared with the "add another company" flow so both stay in sync)
+      const company = await createCompanyForUser(tx, user.id, companyName);
 
       return { user, company };
     });

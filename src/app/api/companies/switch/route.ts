@@ -35,9 +35,12 @@ export async function POST(req: NextRequest) {
 
     const companyName = membership.company.name;
 
-    // Set both a server-readable AND client-readable cookie
-    // httpOnly cookie → middleware reads it for x-company-id header
-    // non-httpOnly cookie → client JS reads it for display
+    // lp-active-company-id must be readable client-side too: AppShell needs
+    // it to know which company is actually active (and to tell a stale,
+    // foreign-account cookie apart from a legitimate switch) rather than
+    // falling back to the session's stale login-time company. Server-side
+    // trust in this cookie never depended on httpOnly anyway — requireCompany
+    // always re-verifies the resolved user actually belongs to it.
     const cookieOptions = {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax' as const,
@@ -55,7 +58,7 @@ export async function POST(req: NextRequest) {
 
     response.cookies.set('lp-active-company-id', companyId, {
       ...cookieOptions,
-      httpOnly: true,
+      httpOnly: false,
     });
 
     response.cookies.set('lp-active-company-name', companyName, {

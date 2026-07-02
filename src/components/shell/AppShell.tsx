@@ -12,7 +12,9 @@ import { AlertTriangle } from 'lucide-react';
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? match[1] : null;
+  // Cookie values get percent-encoded server-side (e.g. spaces in a company
+  // name) — decode so the raw "Debug%20Co" form doesn't leak into the UI.
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 interface AppShellProps {
@@ -39,6 +41,7 @@ export function AppShell({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
+  const [trialInfo, setTrialInfo] = useState<{ status: string; daysLeft: number | null } | null>(null);
 
   // SSR-safe company info — start with props (matches server render),
   // then hydrate from cookies/session in useEffect
@@ -84,10 +87,10 @@ export function AppShell({
     // either because they were empty, or because they belonged to someone
     // else and just got overridden above.
     if (resolvedId && cookieCompanyId !== resolvedId) {
-      document.cookie = `lp-active-company-id=${resolvedId};path=/;max-age=2592000;SameSite=Lax`;
+      document.cookie = `lp-active-company-id=${encodeURIComponent(resolvedId)};path=/;max-age=2592000;SameSite=Lax`;
     }
     if (resolvedName && cookieCompanyName !== resolvedName) {
-      document.cookie = `lp-active-company-name=${resolvedName};path=/;max-age=2592000;SameSite=Lax`;
+      document.cookie = `lp-active-company-name=${encodeURIComponent(resolvedName)};path=/;max-age=2592000;SameSite=Lax`;
     }
   }, [session]);
 
@@ -108,23 +111,29 @@ export function AppShell({
     localStorage.setItem('lp-density', density);
   }, [density]);
 
-  // Check onboarding status — show banner if company setup incomplete
+  // Check onboarding + trial status for the active company — show banners for
+  // either. /api/companies returns a list (one per company this user belongs
+  // to), so find the entry that matches the currently active company rather
+  // than reading these fields off the array itself.
   useEffect(() => {
-    async function checkOnboarding() {
+    async function checkCompanyStatus() {
       try {
         const res = await fetch('/api/companies');
         const json = await res.json();
-        setOnboardingComplete(json.data?.onboardingComplete ?? true);
+        const list: any[] = Array.isArray(json.data) ? json.data : [];
+        const active = list.find((c) => c.id === companyId) || list[0];
+        setOnboardingComplete(active?.onboardingComplete ?? true);
+        setTrialInfo(active ? { status: active.status, daysLeft: active.trialDaysLeft } : null);
       } catch {
         // If API fails, assume complete to avoid blocking
         setOnboardingComplete(true);
       }
     }
-    // Only check when session is loaded
-    if (session) {
-      checkOnboarding();
+    // Only check when session is loaded and we know which company is active
+    if (session && companyId) {
+      checkCompanyStatus();
     }
-  }, [session]);
+  }, [session, companyId]);
 
   const toggleTheme = useCallback(() => {
     setThemeState((t) => (t === 'dark' ? 'light' : 'dark'));
@@ -171,6 +180,30 @@ export function AppShell({
               </a>
             </div>
           )}
+        {/* Trial status banner — based on this company's signup date */}
+        {trialInfo?.status === 'trialing' && trialInfo.daysLeft !== null && !pathname.startsWith('/settings') && (
+          <div className={cn(
+            'flex items-center gap-3 mx-4 mt-4 px-4 py-3 rounded-xl border text-sm',
+            trialInfo.daysLeft <= 3
+              ? 'border-[var(--danger)] bg-[var(--danger-soft)]'
+              : 'border-[var(--border)] bg-[var(--surface-2)]'
+          )}>
+            <AlertTriangle size={18} className={cn('flex-none', trialInfo.daysLeft <= 3 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')} />
+            <span className="flex-1 text-[var(--text)]">
+              {trialInfo.daysLeft > 0 ? (
+                <><strong>{trialInfo.daysLeft} day{trialInfo.daysLeft !== 1 ? 's' : ''} left</strong> in your free trial.</>
+              ) : (
+                <><strong>Your free trial has ended.</strong></>
+              )}
+            </span>
+            <a
+              href="/settings/billing"
+              className="flex-none px-4 py-1.5 rounded-md bg-[var(--primary)] text-white text-sm font-semibold hover:brightness-[0.95] transition-colors no-underline"
+            >
+              Upgrade
+            </a>
+          </div>
+        )}
         <div className="content">{children}</div>
       </div>
 

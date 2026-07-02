@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -88,6 +89,8 @@ const greeting = () => {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { data: session } = useSession();
+  const firstName = (session?.user?.name || '').split(' ')[0] || 'there';
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +124,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-[22px] font-bold text-[var(--text-strong)] tracking-tight flex items-center gap-2">
             <span className="w-1.5 h-6 rounded-full bg-gradient-to-b from-[var(--primary)] to-[var(--primary-hover)]" />
-            {greeting()}, Rosa 👋
+            {greeting()}, {firstName} 👋
           </h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">
             Here's your financial overview for <span className="font-medium text-[var(--text-strong)]">{rangeLabel}</span>.

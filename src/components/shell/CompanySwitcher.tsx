@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { signOut } from 'next-auth/react';
-import { Check, Plus, Building2, Settings, LogOut } from 'lucide-react';
+import { signOut, useSession } from 'next-auth/react';
+import { Check, Plus, Building2, Settings, LogOut, Loader2 } from 'lucide-react';
 import { clearActiveCompanyCookies } from '@/lib/active-company-cookies';
 
 interface CompanyInfo {
@@ -12,6 +12,7 @@ interface CompanyInfo {
   role: string;
   plan: string;
   status: string;
+  trialDaysLeft: number | null;
 }
 
 export function CompanySwitcher({
@@ -24,10 +25,16 @@ export function CompanySwitcher({
   onSwitch?: (companyId: string) => void;
 }) {
   const router = useRouter();
+  const { update: updateSession } = useSession();
   const [open, setOpen] = useState(false);
   const [companies, setCompanies] = useState<CompanyInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
+
+  const [addingOpen, setAddingOpen] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && !fetched) {
@@ -52,6 +59,41 @@ export function CompanySwitcher({
       window.location.href = '/';
     } catch {
       setLoading(false);
+    }
+  }
+
+  async function handleCreateCompany(e: React.FormEvent) {
+    e.preventDefault();
+    if (newCompanyName.trim().length < 2) {
+      setCreateError('Company name must be at least 2 characters');
+      return;
+    }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch('/api/companies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newCompanyName.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to create company');
+
+      await fetch('/api/companies/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: json.data.companyId }),
+      });
+
+      // Refresh the JWT's availableCompanies list to include the one we just
+      // created — otherwise the next page load treats its own cookie as
+      // belonging to a different account (see AppShell's cookie validation).
+      await updateSession();
+
+      window.location.href = '/onboarding';
+    } catch (err: any) {
+      setCreateError(err.message || 'Failed to create company');
+      setCreating(false);
     }
   }
 
@@ -120,6 +162,11 @@ export function CompanySwitcher({
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                     {c.plan} · {c.role}
+                    {c.status === 'trialing' && c.trialDaysLeft !== null && (
+                      <span style={{ color: c.trialDaysLeft <= 3 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                        {' '}· {c.trialDaysLeft > 0 ? `${c.trialDaysLeft}d left in trial` : 'trial expired'}
+                      </span>
+                    )}
                   </div>
                 </div>
                 {c.id === activeCompanyId && <Check size={15} style={{ color: 'var(--success)', flexShrink: 0 }} />}
@@ -127,7 +174,7 @@ export function CompanySwitcher({
             ))}
             <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
             <button
-              onClick={() => { setOpen(false); router.push('/register'); }}
+              onClick={() => { setCreateError(null); setNewCompanyName(''); setAddingOpen(true); }}
               style={{
                 width: '100%', textAlign: 'left', padding: '8px 10px',
                 display: 'flex', alignItems: 'center', gap: 10,
@@ -161,6 +208,68 @@ export function CompanySwitcher({
             >
               <LogOut size={16} /> Sign Out
             </button>
+          </div>
+        </>
+      )}
+
+      {addingOpen && (
+        <>
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.4)' }}
+            onClick={() => !creating && setAddingOpen(false)}
+          />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            zIndex: 100, width: '100%', maxWidth: 380,
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-lg)', padding: 20,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <Building2 size={18} />
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>New Company</h2>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+              This adds another company under your existing login — you'll be its owner, with a
+              fresh Chart of Accounts and its own 30-day trial.
+            </p>
+            <form onSubmit={handleCreateCompany}>
+              <div className="field">
+                <label>Company name</label>
+                <input
+                  className="input"
+                  autoFocus
+                  value={newCompanyName}
+                  onChange={(e) => setNewCompanyName(e.target.value)}
+                  placeholder="Acme Consulting Inc."
+                  disabled={creating}
+                />
+              </div>
+              {createError && (
+                <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{createError}</div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => setAddingOpen(false)}
+                  disabled={creating}
+                  className="nav-item"
+                  style={{ padding: '8px 14px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'transparent' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  style={{
+                    padding: '8px 14px', border: 'none', borderRadius: 'var(--r-md)',
+                    background: 'var(--primary)', color: '#fff', fontWeight: 600,
+                    display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                  }}
+                >
+                  {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Create Company
+                </button>
+              </div>
+            </form>
           </div>
         </>
       )}
