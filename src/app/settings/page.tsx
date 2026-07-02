@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { BUSINESS_TYPES, PROVINCE_OPTIONS } from '@/lib/taxes';
-import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar } from 'lucide-react';
+import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar, Download, Upload, DatabaseBackup } from 'lucide-react';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -20,6 +20,10 @@ export default function SettingsPage() {
     province: 'AB', fiscalYearStart: '', fiscalYearEnd: '', currency: 'CAD', locale: 'en-CA', timezone: 'America/Edmonton',
   });
   const [message, setMessage] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -62,6 +66,52 @@ export default function SettingsPage() {
     finally { setSaving(false); }
   }
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const res = await fetch('/api/backup/export');
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="(.+)"/);
+      const fileName = match?.[1] || `ledgerpro-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setRestoreResult({ type: 'danger', text: 'Failed to export backup.' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleRestoreFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!confirm('Restore this backup into a brand-new company? Your existing company data will not be touched.')) return;
+
+    setRestoring(true);
+    setRestoreResult(null);
+    try {
+      const text = await file.text();
+      const bundle = JSON.parse(text);
+      const res = await fetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bundle }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Restore failed');
+      setRestoreResult({ type: 'success', text: `Restored into new company "${json.data.name}". Use the company switcher to open it.` });
+    } catch (err: any) {
+      setRestoreResult({ type: 'danger', text: err.message || 'Failed to restore backup — check the file is a valid LedgerPro backup.' });
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   if (loading) return <AppShell companyName="Settings" companyPlan=""><div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-[var(--text-muted)]" size={24} /></div></AppShell>;
 
   return (
@@ -99,6 +149,31 @@ export default function SettingsPage() {
                 </div>
                 <Button type="submit" disabled={saving}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Changes</Button>
               </form>
+            </CardBody>
+          </Card>
+
+          {/* Data Backup & Restore */}
+          <Card>
+            <CardHeader><div className="flex items-center gap-2"><DatabaseBackup size={16} className="text-[var(--text-muted)]" /><h2 className="text-sm font-semibold">Data Backup</h2></div></CardHeader>
+            <CardBody>
+              {restoreResult && <Alert variant={restoreResult.type} className="mb-4">{restoreResult.text}</Alert>}
+              <p className="text-sm text-[var(--text-muted)] mb-4">
+                Your database is automatically backed up by our hosting provider (Neon), which supports point-in-time recovery.
+                This is a self-serve copy of your own data, independent of that — useful for your own records or migrating to a new company.
+              </p>
+              <div className="flex items-center gap-3">
+                <Button variant="secondary" onClick={handleExport} disabled={exporting}>
+                  {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Download Backup
+                </Button>
+                <Button variant="ghost" onClick={() => restoreInputRef.current?.click()} disabled={restoring}>
+                  {restoring ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Restore into New Company
+                </Button>
+                <input ref={restoreInputRef} type="file" accept="application/json" className="hidden" onChange={handleRestoreFile} disabled={restoring} />
+              </div>
+              <p className="text-xs text-[var(--text-faint)] mt-3">
+                Restoring always creates a brand-new company — it never overwrites an existing one. Bank feed connections, audit
+                log history, and import batch history are not included in backups.
+              </p>
             </CardBody>
           </Card>
 
