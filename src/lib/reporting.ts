@@ -63,6 +63,27 @@ export function fiscalYearStartFor(companyFiscalYearStart: Date, asOfDate: Date)
   return new Date(fyStartYear, month, day);
 }
 
+/**
+ * The [start, end] boundaries of the fiscal year labeled `yearLabel` (the
+ * calendar year the fiscal year begins in), anchored on the company's
+ * configured fiscal year start month/day — e.g. a company with a July 1
+ * fiscal year start and yearLabel 2025 runs 2025-07-01 through 2026-06-30.
+ * Calendar-year companies (fiscalYearStart = Jan 1) get plain Jan 1–Dec 31,
+ * so this is a safe drop-in replacement wherever `${year}-01-01`/`-12-31`
+ * was previously hardcoded.
+ */
+export function fiscalYearRangeForLabel(
+  companyFiscalYearStart: Date,
+  yearLabel: number
+): { start: Date; end: Date } {
+  const month = companyFiscalYearStart.getMonth();
+  const day = companyFiscalYearStart.getDate();
+  const start = new Date(yearLabel, month, day);
+  const end = new Date(yearLabel + 1, month, day);
+  end.setDate(end.getDate() - 1);
+  return { start, end: endOfDay(end) };
+}
+
 /** Splits an account's balance into a trial-balance-style debit/credit pair — exactly one side is non-zero. */
 export function toDebitCredit(type: GLType, activity: AccountActivity | undefined): { debit: number; credit: number } {
   const net = normalBalance(type, activity);

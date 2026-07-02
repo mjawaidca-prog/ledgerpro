@@ -1,6 +1,12 @@
 'use client';
 import { useState, useEffect } from 'react';
 
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 interface FiscalYearInfo {
   fiscalYearStart: string; // e.g. "2025-12-01" (current FY start)
   fiscalYearEnd: string;   // e.g. "2026-11-30" (current FY end)
@@ -48,8 +54,15 @@ export function useFiscalYear(): FiscalYearInfo {
       .then(res => res.json())
       .then(json => {
         const companies = json.data || [];
-        if (companies.length > 0 && companies[0].fiscalYearStart) {
-          const fy = computeCurrentFY(companies[0].fiscalYearStart);
+        // /api/companies lists every company this user belongs to — with
+        // multi-company support, companies[0] is whichever was created
+        // first, not necessarily the one currently active. Match against
+        // the active-company cookie (same one AppShell resolves against)
+        // so the fiscal year shown here always matches the company on screen.
+        const activeId = getCookie('lp-active-company-id');
+        const active = companies.find((c: any) => c.id === activeId) || companies[0];
+        if (active?.fiscalYearStart) {
+          const fy = computeCurrentFY(active.fiscalYearStart);
           setInfo({ fiscalYearStart: fy.start, fiscalYearEnd: fy.end, defaultYear: fy.defaultYear, loaded: true });
         } else {
           setInfo(prev => ({ ...prev, loaded: true }));

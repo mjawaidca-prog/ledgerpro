@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, normalBalance, endOfDay } from '@/lib/reporting';
+import { getGLActivity, normalBalance, endOfDay, fiscalYearRangeForLabel } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 function isCOGS(acct: { code: string; detailType: string | null }): boolean {
@@ -55,16 +55,19 @@ export async function GET(req: NextRequest) {
     const year = searchParams.get('year') ?? new Date().getFullYear().toString();
     const compare = searchParams.get('compare') === 'true';
 
-    const startDate = new Date(`${year}-01-01`);
-    const endDate = new Date(`${year}-12-31`);
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    // Falls back to Jan 1 (plain calendar year) if the company record is
+    // somehow missing — matches every other report's fallback behavior.
+    const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+
+    const { start: startDate, end: endDate } = fiscalYearRangeForLabel(fyAnchor, Number(year));
 
     const current = await buildPeriodTotals(companyId, startDate, endDate);
 
     let prior = null;
     if (compare) {
       const priorYear = String(Number(year) - 1);
-      const priorStart = new Date(`${priorYear}-01-01`);
-      const priorEnd = new Date(`${priorYear}-12-31`);
+      const { start: priorStart, end: priorEnd } = fiscalYearRangeForLabel(fyAnchor, Number(priorYear));
       prior = { year: priorYear, ...(await buildPeriodTotals(companyId, priorStart, priorEnd)) };
     }
 

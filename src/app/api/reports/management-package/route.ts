@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, normalBalance, toDebitCredit, endOfDay } from '@/lib/reporting';
+import { getGLActivity, normalBalance, toDebitCredit, endOfDay, fiscalYearStartFor, fiscalYearRangeForLabel } from '@/lib/reporting';
 import { getFinancialAccountBalances } from '@/lib/accounts';
 export const dynamic = 'force-dynamic';
 
@@ -10,10 +10,20 @@ export async function GET(req: NextRequest) {
     const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+
     const { searchParams } = new URL(req.url);
-    const asOf = searchParams.get('asOf') || new Date().toISOString().slice(0, 10);
-    const asOfDate = endOfDay(new Date(asOf));
-    const yearStart = new Date(new Date(asOf).getFullYear(), 0, 1);
+    const now = new Date();
+    // year = the fiscal year's label (its start year), same convention as
+    // /api/reports/profit-loss — defaults to whichever fiscal year contains today.
+    const year = Number(searchParams.get('year') ?? fiscalYearStartFor(fyAnchor, now).getFullYear());
+    const { start: yearStart, end: fyEnd } = fiscalYearRangeForLabel(fyAnchor, year);
+    // Cap "as of" to today for the current/future fiscal year so a
+    // still-in-progress year shows real balances instead of a full year of
+    // (mostly zero) projected activity; a fully past fiscal year shows as of its own end.
+    const asOfDate = fyEnd < now ? fyEnd : endOfDay(now);
+    const asOf = asOfDate.toISOString().slice(0, 10);
 
     const [
       incomeAccounts, expenseAccounts, assetAccounts, liabilityAccounts, equityAccounts,
@@ -76,9 +86,12 @@ export async function GET(req: NextRequest) {
     };
 
     // ─── Cash Flow ───
+    // Seed all 12 months of the fiscal year (not calendar Jan–Dec) so a
+    // non-calendar fiscal year still shows a complete, correctly-ordered grid.
     const monthlyMap: Record<string, { inflow: number; outflow: number }> = {};
     for (let m = 0; m < 12; m++) {
-      const key = `${asOfDate.getFullYear()}-${String(m + 1).padStart(2, '0')}`;
+      const monthDate = new Date(yearStart.getFullYear(), yearStart.getMonth() + m, 1);
+      const key = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
       monthlyMap[key] = { inflow: 0, outflow: 0 };
     }
     for (const tx of transactions) {
@@ -119,6 +132,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       data: {
         asOf,
+        year,
+        fiscalYearStart: yearStart.toISOString().slice(0, 10),
+        fiscalYearEnd: fyEnd.toISOString().slice(0, 10),
         profitLoss: pnl,
         balanceSheet: bs,
         cashFlow: { months: cashFlow, totalInflow: Math.round(totalInflow), totalOutflow: Math.round(totalOutflow), netCashFlow: Math.round(netCashFlow) },

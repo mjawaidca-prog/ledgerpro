@@ -5,21 +5,37 @@ import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { Printer, Loader2, Download, ArrowRight } from 'lucide-react';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 export default function ManagementPackagePage() {
+  const fy = useFiscalYear();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [year, setYear] = useState(fy.defaultYear);
+
+  // Once the company's fiscal year loads, default the selector to its
+  // current fiscal year instead of the plain calendar year used until then.
+  useEffect(() => {
+    if (fy.loaded) setYear(fy.defaultYear);
+  }, [fy.loaded, fy.defaultYear]);
+
+  // 4 fiscal years centered on the current one (same windowing as the P&L page)
+  const yearOptions = Array.from({ length: 4 }, (_, i) => {
+    const y = String(Number(fy.defaultYear || new Date().getFullYear()) - 1 + i);
+    return { value: y, label: y };
+  });
 
   useEffect(() => {
     async function load() {
+      setLoading(true);
       try {
-        const asOf = new Date().toISOString().slice(0, 10);
-        const res = await fetch(`/api/reports/management-package?asOf=${asOf}`);
+        const res = await fetch(`/api/reports/management-package?year=${year}`);
         if (!res.ok) throw new Error('Failed to load');
         setData((await res.json()).data);
       } catch (err: any) {
@@ -27,17 +43,7 @@ export default function ManagementPackagePage() {
       } finally { setLoading(false); }
     }
     load();
-  }, []);
-
-  if (loading) {
-    return (
-      <AppShell>
-        <div className="flex items-center justify-center py-20">
-          <Loader2 size={28} className="animate-spin text-[var(--text-muted)]" />
-        </div>
-      </AppShell>
-    );
-  }
+  }, [year]);
 
   const d = data;
 
@@ -46,23 +52,37 @@ export default function ManagementPackagePage() {
       <div className="content-head">
         <div>
           <h1 className="greet">Management Report Package</h1>
-          <p className="sub">Combined financial statements as of {d.asOf ? format(new Date(d.asOf), 'MMMM d, yyyy') : 'today'}.</p>
+          <p className="sub">
+            Combined financial statements for fiscal year {year}
+            {d?.asOf ? <> — as of {format(new Date(d.asOf), 'MMMM d, yyyy')}</> : ''}.
+          </p>
         </div>
         <div className="spacer" />
+        <label className="field print:hidden" style={{ marginBottom: 0 }}>
+          <Segmented options={yearOptions} value={year} onChange={setYear} />
+        </label>
         <Button variant="secondary" onClick={() => window.print()}>
           <Printer size={16} /> Print Package
         </Button>
       </div>
 
       {/* print-only header */}
-      <div className="hidden print:block mb-6 text-center">
-        <h1 className="text-2xl font-bold">Management Report Package</h1>
-        <p className="text-sm text-gray-500">As of {format(new Date(d.asOf), 'MMMM d, yyyy')}</p>
-      </div>
+      {d && (
+        <div className="hidden print:block mb-6 text-center">
+          <h1 className="text-2xl font-bold">Management Report Package</h1>
+          <p className="text-sm text-gray-500">Fiscal year {year} — as of {format(new Date(d.asOf), 'MMMM d, yyyy')}</p>
+        </div>
+      )}
 
       {error && <p className="text-[var(--danger)]">{error}</p>}
 
-      {d && (
+      {loading && (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 size={28} className="animate-spin text-[var(--text-muted)]" />
+        </div>
+      )}
+
+      {!loading && d && (
         <div className="space-y-6 report-package">
           {/* ─── P&L ─── */}
           <Card>
