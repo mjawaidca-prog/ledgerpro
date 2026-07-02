@@ -28,6 +28,12 @@ interface CustomerOption {
   email: string | null;
 }
 
+interface CategoryOption {
+  id: string;
+  code: string;
+  name: string;
+}
+
 interface LineItem {
   key: string;
   description: string;
@@ -50,6 +56,9 @@ export default function NewInvoicePage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerOpen, setCustomerOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
+
+  // Revenue categories
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
 
   // Invoice fields
   const [invoiceId, setInvoiceId] = useState('');
@@ -75,11 +84,15 @@ export default function NewInvoicePage() {
   const taxAmount = subtotal * (taxRate / 100);
   const total = subtotal + taxAmount;
 
-  // Fetch customers
+  // Fetch customers & revenue categories
   useEffect(() => {
     fetch('/api/contacts?type=customer&status=active&limit=100')
       .then((r) => r.json())
       .then((json) => setCustomers(Array.isArray(json.data) ? json.data : []))
+      .catch(() => {});
+    fetch('/api/coa?type=income')
+      .then((r) => r.json())
+      .then((json) => setCategories(Array.isArray(json.data) ? json.data : []))
       .catch(() => {});
   }, []);
 
@@ -129,6 +142,10 @@ export default function NewInvoicePage() {
     }
     if (lines.some((l) => !l.description.trim())) {
       setError('All line items need a description.');
+      return;
+    }
+    if (newStatus === 'sent' && lines.some((l) => !l.categoryId)) {
+      setError('All line items need a revenue category selected before sending.');
       return;
     }
 
@@ -294,6 +311,7 @@ export default function NewInvoicePage() {
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] overflow-hidden">
             <div className="px-5 py-3 border-b border-[var(--border)] font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] flex items-center gap-4">
               <span className="flex-1">Item</span>
+              <span className="w-[160px]">Category</span>
               <span className="w-[80px] text-right">Qty</span>
               <span className="w-[120px] text-right">Price</span>
               <span className="w-[120px] text-right">Amount</span>
@@ -310,6 +328,16 @@ export default function NewInvoicePage() {
                     onChange={(e) => updateLine(line.key, 'description', e.target.value)}
                     className="flex-1 h-[34px] px-2 rounded-md border border-transparent bg-transparent text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)]"
                   />
+                  <select
+                    value={line.categoryId ?? ''}
+                    onChange={(e) => updateLine(line.key, 'categoryId', e.target.value || null)}
+                    className="w-[160px] h-[34px] px-2 rounded-md border border-transparent bg-transparent text-sm text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)]"
+                  >
+                    <option value="">Select...</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                    ))}
+                  </select>
                   <input
                     type="number"
                     min="0.01"

@@ -141,15 +141,58 @@ export async function postJournalEntry(
 
 /**
  * Post an invoice to the ledger.
- * Invoice: Debit AR (asset), Credit Revenue (income) for the total.
+ * Invoice: Debit AR (asset) for the total, Credit Revenue account(s) per line
+ * item (grouped by GL category) for the subtotal, Credit Sales Tax Payable
+ * for tax collected. Every line item must carry a categoryId — posting tax
+ * collected as revenue, or all revenue to one hardcoded account regardless
+ * of what was actually sold, silently corrupts the P&L.
  */
 export async function postInvoiceToLedger(
   invoiceId: string,
   customerName: string,
+  lineItems: { categoryId: string | null; amount: number }[],
+  taxAmount: number,
   total: number,
   companyId: string,
   tx?: Prisma.TransactionClient
 ) {
+  const client = tx ?? db;
+
+  if (lineItems.some((li) => !li.categoryId)) {
+    throw new Error('Every invoice line item must have a GL revenue category selected before it can be posted.');
+  }
+  const categoryIds = [...new Set(lineItems.map((li) => li.categoryId!))];
+
+  const accounts = await client.chartOfAccount.findMany({
+    where: { id: { in: categoryIds }, companyId },
+  });
+  const acctByIdCode = new Map(accounts.map((a) => [a.id, a.code]));
+
+  const amountByCode = new Map<string, number>();
+  for (const li of lineItems) {
+    const code = acctByIdCode.get(li.categoryId!);
+    if (!code) {
+      throw new Error(`Invoice line item references an unknown GL category (${li.categoryId})`);
+    }
+    amountByCode.set(code, (amountByCode.get(code) ?? 0) + li.amount);
+  }
+
+  const creditLines = [...amountByCode.entries()].map(([code, amount]) => ({
+    glAccountCode: code,
+    description: `Revenue for ${invoiceId}`,
+    debit: 0,
+    credit: amount,
+  }));
+
+  if (taxAmount > 0) {
+    creditLines.push({
+      glAccountCode: '2300', // Sales Tax Payable — GST/HST/PST collected on sales
+      description: `Tax collected for ${invoiceId}`,
+      debit: 0,
+      credit: taxAmount,
+    });
+  }
+
   return postJournalEntry(
     {
       entryDate: new Date(),
@@ -163,12 +206,7 @@ export async function postInvoiceToLedger(
           debit: total,
           credit: 0,
         },
-        {
-          glAccountCode: '4000', // Product Sales (default revenue)
-          description: `Revenue for ${invoiceId}`,
-          debit: 0,
-          credit: total,
-        },
+        ...creditLines,
       ],
     },
     companyId,

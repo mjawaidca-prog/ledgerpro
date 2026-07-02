@@ -17,6 +17,10 @@ interface CustomerOption {
   id: string; name: string; companyName: string | null; email: string | null;
 }
 
+interface CategoryOption {
+  id: string; code: string; name: string;
+}
+
 interface LineItem {
   key: string; id?: string; description: string; quantity: number; unitPrice: number; amount: number; categoryId: string | null;
 }
@@ -45,6 +49,14 @@ export default function EditInvoicePage() {
   const [lines, setLines] = useState<LineItem[]>([]);
   const [taxRate, setTaxRate] = useState(8.5);
   const [paidAmount, setPaidAmount] = useState(0);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+
+  useEffect(() => {
+    fetch('/api/coa?type=income')
+      .then((r) => r.json())
+      .then((json) => setCategories(Array.isArray(json.data) ? json.data : []))
+      .catch(() => {});
+  }, []);
 
   // Fetch invoice
   useEffect(() => {
@@ -110,6 +122,10 @@ export default function EditInvoicePage() {
   async function handleSave(newStatus: string) {
     if (!selectedCustomer) { setError('Please select a customer.'); return; }
     if (lines.some((l) => !l.description.trim())) { setError('All line items need a description.'); return; }
+    if (newStatus === 'sent' && lines.some((l) => !l.categoryId)) {
+      setError('All line items need a revenue category selected before sending.');
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -271,6 +287,7 @@ export default function EditInvoicePage() {
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] overflow-hidden">
             <div className="px-5 py-3 border-b border-[var(--border)] font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] flex items-center gap-4">
               <span className="flex-1">Item</span>
+              <span className="w-[160px]">Category</span>
               <span className="w-[80px] text-right">Qty</span>
               <span className="w-[120px] text-right">Price</span>
               <span className="w-[120px] text-right">Amount</span>
@@ -285,6 +302,17 @@ export default function EditInvoicePage() {
                     readOnly={isLocked}
                     className="flex-1 h-[34px] px-2 rounded-md border border-transparent bg-transparent text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)]"
                   />
+                  <select
+                    value={line.categoryId ?? ''}
+                    onChange={(e) => updateLine(line.key, 'categoryId', e.target.value || null)}
+                    disabled={isLocked}
+                    className="w-[160px] h-[34px] px-2 rounded-md border border-transparent bg-transparent text-sm text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)]"
+                  >
+                    <option value="">Select...</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                    ))}
+                  </select>
                   <input
                     type="number" min="0.01" step="any" value={line.quantity || ''}
                     onChange={(e) => updateLine(line.key, 'quantity', parseFloat(e.target.value) || 0)}

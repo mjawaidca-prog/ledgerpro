@@ -101,6 +101,13 @@ export async function POST(req: NextRequest) {
 
     const { lineItems, ...invoiceData } = parsed.data;
 
+    if (invoiceData.status !== 'draft' && lineItems.some((item) => !item.categoryId)) {
+      return NextResponse.json(
+        { error: 'Every line item needs a GL revenue category before the invoice can be posted (or save it as a draft).' },
+        { status: 400 }
+      );
+    }
+
     // Look up customer name for journal description
     const customer = await db.contact.findUnique({
       where: { id: invoiceData.customerId, companyId },
@@ -136,6 +143,8 @@ export async function POST(req: NextRequest) {
       await postInvoiceToLedger(
         invoice.id,
         customer?.name ?? 'Unknown',
+        invoice.lineItems.map((li) => ({ categoryId: li.categoryId, amount: Number(li.amount) })),
+        Number(invoice.taxAmount),
         Number(invoice.total),
         companyId,
       );
@@ -147,8 +156,8 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ data: invoice }, { status: 201 });
-  } catch (error) {
+  } catch (error: any) {
     console.error('POST /api/invoices error:', error);
-    return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to create invoice' }, { status: 500 });
   }
 }

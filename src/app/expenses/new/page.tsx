@@ -32,16 +32,6 @@ function newLine(): LineItem {
   return { key: `line-${lineKey++}`, description: '', amount: 0, categoryId: null };
 }
 
-const expenseCategories = [
-  { code: '6100', name: 'Software & Subscriptions' },
-  { code: '6200', name: 'Professional Fees' },
-  { code: '6300', name: 'Rent & Lease' },
-  { code: '6400', name: 'Marketing' },
-  { code: '6500', name: 'Travel' },
-  { code: '6600', name: 'Utilities' },
-  { code: '5000', name: 'Cost of Goods Sold' },
-];
-
 function NewBillContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -50,6 +40,7 @@ function NewBillContent() {
   const [kind, setKind] = useState<'bill' | 'expense'>(initialKind);
   const [vendors, setVendors] = useState<VendorOption[]>([]);
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [vendorSearch, setVendorSearch] = useState('');
   const [vendorOpen, setVendorOpen] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState<VendorOption | null>(null);
@@ -71,12 +62,14 @@ function NewBillContent() {
   const taxAmount = subtotal * (taxRate / 100);
   const total = subtotal + taxAmount;
 
-  // Load vendors & accounts
+  // Load vendors, bank accounts & expense categories
   useEffect(() => {
     fetch('/api/contacts?type=supplier&status=active&limit=100')
       .then(r => r.json()).then(j => setVendors(Array.isArray(j.data) ? j.data : [])).catch(() => {});
     fetch('/api/accounts')
       .then(r => r.json()).then(j => setAccounts(Array.isArray(j.data) ? j.data : [])).catch(() => {});
+    fetch('/api/coa?type=expense')
+      .then(r => r.json()).then(j => setCategories(Array.isArray(j.data) ? j.data : [])).catch(() => {});
   }, []);
 
   const filteredVendors = vendors.filter(v =>
@@ -244,8 +237,8 @@ function NewBillContent() {
                     onChange={e => updateLine(line.key, 'categoryId', e.target.value || null)}
                     className="w-[160px] h-[34px] px-2 rounded-md border border-transparent bg-transparent text-sm text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)]">
                     <option value="">Select...</option>
-                    {expenseCategories.map(c => (
-                      <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
                     ))}
                   </select>
                   <input type="number" min="0" step="0.01"

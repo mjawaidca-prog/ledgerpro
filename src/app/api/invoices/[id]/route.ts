@@ -51,7 +51,10 @@ export async function PUT(
       );
     }
 
-    const existing = await db.invoice.findUnique({ where: { id: params.id, companyId } });
+    const existing = await db.invoice.findUnique({
+      where: { id: params.id, companyId },
+      include: { lineItems: { select: { categoryId: true, amount: true } } },
+    });
     if (!existing) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
@@ -60,6 +63,7 @@ export async function PUT(
     const isVoidTransition = invoiceData.status === 'void' && existing.status !== 'void';
     const isOnlyStatusChange = Object.keys(invoiceData).every((k) => k === 'status') && !lineItems;
     const newTotal = invoiceData.total !== undefined ? Number(invoiceData.total) : Number(existing.total);
+    const newTaxAmount = invoiceData.taxAmount !== undefined ? Number(invoiceData.taxAmount) : Number(existing.taxAmount);
     const totalChanged = Math.abs(newTotal - Number(existing.total)) > 0.005;
 
     // Paid or voided invoices are locked to status-only transitions (e.g. void)
@@ -82,6 +86,15 @@ export async function PUT(
       where: { companyId, sourceId: params.id, sourceType: 'invoice', voidedAt: null },
     });
     const becomingPosted = existing.status === 'draft' && invoiceData.status && invoiceData.status !== 'draft';
+    const willPost = !isVoidTransition && (becomingPosted || (existingInvoiceEntry && totalChanged));
+    const effectiveLineItems = lineItems ?? existing.lineItems;
+
+    if (willPost && effectiveLineItems.some((li: any) => !li.categoryId)) {
+      return NextResponse.json(
+        { error: 'Every line item needs a GL revenue category before the invoice can be posted.' },
+        { status: 400 }
+      );
+    }
 
     if (isVoidTransition) {
       const reversalGuard = await closedPeriodGuard(companyId, new Date());
@@ -136,16 +149,23 @@ export async function PUT(
       },
     });
 
-    if (!isVoidTransition && updated && (becomingPosted || (existingInvoiceEntry && totalChanged))) {
-      await postInvoiceToLedger(params.id, updated.customer?.name ?? 'Unknown', newTotal, companyId);
+    if (willPost && updated) {
+      await postInvoiceToLedger(
+        params.id,
+        updated.customer?.name ?? 'Unknown',
+        updated.lineItems.map((li) => ({ categoryId: li.categoryId, amount: Number(li.amount) })),
+        newTaxAmount,
+        newTotal,
+        companyId
+      );
     }
 
     await auditLog(companyId, userId, isVoidTransition ? 'invoice.void' : 'invoice.update', 'invoice', params.id, { before: existing, after: updated });
 
     return NextResponse.json({ data: updated });
-  } catch (error) {
+  } catch (error: any) {
     console.error('PUT /api/invoices/[id] error:', error);
-    return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to update invoice' }, { status: 500 });
   }
 }
 

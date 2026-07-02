@@ -31,15 +31,9 @@ function fromSaved(li: { id: string; description: string; amount: number; catego
   return { key: `line-${lineKey++}`, description: li.description, amount: Number(li.amount), categoryId: li.categoryId };
 }
 
-const expenseCategories = [
-  { code: '6100', name: 'Software & Subscriptions' },
-  { code: '6200', name: 'Professional Fees' },
-  { code: '6300', name: 'Rent & Lease' },
-  { code: '6400', name: 'Marketing' },
-  { code: '6500', name: 'Travel' },
-  { code: '6600', name: 'Utilities' },
-  { code: '5000', name: 'Cost of Goods Sold' },
-];
+interface CategoryOption {
+  id: string; code: string; name: string;
+}
 
 export default function EditBillPage() {
   const router = useRouter();
@@ -61,6 +55,12 @@ export default function EditBillPage() {
   const [lines, setLines] = useState<LineItem[]>([]);
   const [taxRate, setTaxRate] = useState(8.5);
   const [vendor, setVendor] = useState<{ id: string; name: string; companyName: string | null; email: string | null } | null>(null);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+
+  useEffect(() => {
+    fetch('/api/coa?type=expense')
+      .then(r => r.json()).then(j => setCategories(Array.isArray(j.data) ? j.data : [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -204,7 +204,7 @@ export default function EditBillPage() {
                     onChange={e => updateLine(line.key, 'categoryId', e.target.value || null)} disabled={isLocked}
                     className="w-[160px] h-[34px] px-2 rounded-md border border-transparent bg-transparent text-sm text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)]">
                     <option value="">Select...</option>
-                    {expenseCategories.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
                   </select>
                   <input type="number" min="0" step="0.01" value={line.amount || ''}
                     onChange={e => updateLine(line.key, 'amount', parseFloat(e.target.value) || 0)} readOnly={isLocked}
