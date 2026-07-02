@@ -32,6 +32,36 @@ export function exportTrialBalance(data: any): void {
   downloadCSV(`trial-balance-${data.asOf}.csv`, headers, rows);
 }
 
+/**
+ * CaseWare-compatible trial balance export: Account Number, Description, GIFI
+ * Code, Type, and current/prior year Debit & Credit columns — the layout
+ * CaseWare Working Papers' Trial Balance Import wizard expects. Accounts
+ * without a GIFI code export with a blank cell rather than blocking the
+ * export, since the accountant may map GIFI codes inside CaseWare itself.
+ */
+export function exportCaseWareTrialBalance(data: any): void {
+  const hasPrior = !!data.prior;
+  const headers = ['Account Number', 'Description', 'GIFI Code', 'Type', 'Debit', 'Credit'];
+  if (hasPrior) headers.push('Prior Year Debit', 'Prior Year Credit');
+
+  const priorByCode = new Map((data.prior?.rows || []).map((r: any) => [r.code, r]));
+
+  const rows = data.rows.map((r: any) => {
+    const row = [r.code, r.name, r.gifiCode || '', r.type, fmt(r.debit), fmt(r.credit)];
+    if (hasPrior) {
+      const p: any = priorByCode.get(r.code);
+      row.push(fmt(p?.debit ?? 0), fmt(p?.credit ?? 0));
+    }
+    return row;
+  });
+
+  const totalsRow = ['', 'TOTALS', '', '', fmt(data.totalDebits), fmt(data.totalCredits)];
+  if (hasPrior) totalsRow.push(fmt(data.prior.totalDebits), fmt(data.prior.totalCredits));
+  rows.push(totalsRow);
+
+  downloadCSV(`caseware-trial-balance-${data.asOf}.csv`, headers, rows);
+}
+
 export function exportGL(data: any): void {
   const headers = ['Date', 'Description', 'Source', 'Debit', 'Credit', 'Balance'];
   const rows = data.rows.map((r: any) => [

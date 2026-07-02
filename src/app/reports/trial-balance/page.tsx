@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar, Download } from 'lucide-react';
-import { exportTrialBalance } from '@/lib/export';
+import { exportTrialBalance, exportCaseWareTrialBalance } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { format as formatDate, startOfMonth, subMonths, endOfMonth, startOfYear, startOfQuarter } from 'date-fns';
 
@@ -17,6 +17,7 @@ interface TBRow {
   name: string;
   type: string;
   detailType: string | null;
+  gifiCode: string | null;
   debit: number;
   credit: number;
   hasActivity: boolean;
@@ -31,6 +32,7 @@ interface TBData {
   totalCredits: number;
   isBalanced: boolean;
   accountCount: number;
+  prior: (Omit<TBData, 'prior'>) | null;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -52,6 +54,7 @@ export default function TrialBalancePage() {
   const defaultAsOf = fy.fiscalYearEnd || new Date().toISOString().slice(0, 10);
   const [asOf, setAsOf] = useState(defaultAsOf);
   const [activePreset, setActivePreset] = useState('FY End');
+  const [compare, setCompare] = useState(false);
   useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) { setAsOf(fy.fiscalYearEnd); setActivePreset('FY End'); } }, [fy.loaded, fy.fiscalYearEnd]);
 
   const presets = [
@@ -71,7 +74,7 @@ export default function TrialBalancePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/reports/trial-balance?asOf=${asOf}`);
+      const res = await fetch(`/api/reports/trial-balance?asOf=${asOf}&compare=${compare}`);
       if (!res.ok) throw new Error('Failed to fetch trial balance');
       const json = await res.json();
       setData(json.data);
@@ -80,7 +83,7 @@ export default function TrialBalancePage() {
     } finally {
       setLoading(false);
     }
-  }, [asOf]);
+  }, [asOf, compare]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -115,8 +118,15 @@ export default function TrialBalancePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+            <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
+            Compare prior year
+          </label>
           <button onClick={() => exportTrialBalance(data)} className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:text-[var(--primary)] bg-[var(--primary-soft)] px-3 py-1.5 rounded-full transition-colors">
             <Download size={13} /> Export CSV
+          </button>
+          <button onClick={() => exportCaseWareTrialBalance(data)} className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:text-[var(--primary)] bg-[var(--primary-soft)] px-3 py-1.5 rounded-full transition-colors">
+            <Download size={13} /> Export to CaseWare
           </button>
           <div className="flex items-center gap-1">
             <Calendar size={14} className="text-[var(--text-muted)]" />
@@ -239,6 +249,14 @@ export default function TrialBalancePage() {
       <p className="text-xs text-[var(--text-faint)] text-center mt-4">
         Click any account to open its General Ledger · Debits must equal Credits for a balanced trial balance
       </p>
+      {(() => {
+        const missingGifi = data.rows.filter((r) => !r.gifiCode).length;
+        return missingGifi > 0 ? (
+          <p className="text-xs text-[var(--warning)] text-center mt-2">
+            {missingGifi} of {data.rows.length} accounts have no GIFI code set — add one in Chart of Accounts before filing a T2 or exporting to CaseWare for a complete mapping.
+          </p>
+        ) : null;
+      })()}
     </AppShell>
   );
 }

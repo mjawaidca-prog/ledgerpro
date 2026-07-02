@@ -170,6 +170,11 @@ export default function SettingsPage() {
                 </Button>
                 <input ref={restoreInputRef} type="file" accept="application/json" className="hidden" onChange={handleRestoreFile} disabled={restoring} />
               </div>
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <Button variant="ghost" onClick={() => router.push('/settings/import-trial-balance')} className="text-sm">
+                  Import Opening Trial Balance (from QBO or another system)
+                </Button>
+              </div>
               <p className="text-xs text-[var(--text-faint)] mt-3">
                 Restoring always creates a brand-new company — it never overwrites an existing one. Bank feed connections, audit
                 log history, and import batch history are not included in backups.
