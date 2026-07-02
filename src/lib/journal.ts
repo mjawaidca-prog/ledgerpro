@@ -419,9 +419,16 @@ export async function postTransactionToLedger(
   entryDate: Date = transaction.date,
   tx?: Prisma.TransactionClient
 ) {
+  if (!bankAccountCode) {
+    // Never guess (e.g. defaulting to a checking account's code) — a credit
+    // card transaction posted against the wrong GL account silently
+    // misclassifies a liability as an asset movement. Fail loudly instead;
+    // the fix is to link the financial account to a GL account.
+    throw new Error(`Transaction ${transaction.id}'s bank/card account has no linked GL account code. Link it in Chart of Accounts before posting.`);
+  }
   const amount = Math.abs(transaction.amount);
   const isInflow = transaction.amount > 0;
-  const bankCode = bankAccountCode || '1010';
+  const bankCode = bankAccountCode;
 
   const lines = isInflow
     ? [
@@ -464,9 +471,10 @@ export async function voidJournalEntry(
   entryId: string,
   companyId: string,
   userId: string | undefined,
-  reversalDate: Date = new Date()
+  reversalDate: Date = new Date(),
+  outerTx?: Prisma.TransactionClient // pass in an existing transaction (e.g. void-then-repost) for atomicity
 ) {
-  return db.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     const entry = await tx.journalEntry.findUnique({
       where: { id: entryId, companyId },
       include: { lines: true },
@@ -508,5 +516,7 @@ export async function voidJournalEntry(
     });
 
     return { original: entry, reversal };
-  });
+  };
+
+  return outerTx ? run(outerTx) : db.$transaction(run);
 }

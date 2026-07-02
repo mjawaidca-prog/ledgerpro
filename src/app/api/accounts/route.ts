@@ -6,6 +6,7 @@ import {
   getDefaultFinancialAccountGlCode,
   isFinancialAccountKind,
 } from '@/lib/default-coa';
+import { getFinancialAccountBalances } from '@/lib/accounts';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -26,20 +27,11 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    // Calculate current balance from actual transaction amounts
-    // rather than trusting the stored field which can drift from bugs
-    const allTxns = await db.transaction.findMany({
-      where: { companyId, status: { not: 'excluded' } },
-      select: { financialAccountId: true, amount: true },
-    });
-    const balanceByAccount: Record<string, number> = {};
-    for (const tx of allTxns) {
-      balanceByAccount[tx.financialAccountId] = (balanceByAccount[tx.financialAccountId] || 0) + Number(tx.amount);
-    }
+    const balances = await getFinancialAccountBalances(companyId, accounts);
 
     const enriched = accounts.map((a) => ({
       ...a,
-      currentBalance: balanceByAccount[a.id] || 0,
+      currentBalance: balances[a.id] ?? 0,
       pendingReviewCount: a.transactions.length,
     }));
 

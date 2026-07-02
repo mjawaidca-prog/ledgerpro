@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
     const posted: string[] = [];
     const skipped: string[] = [];
     const closedPeriod: string[] = [];
+    const failed: { id: string; error: string }[] = [];
 
     for (const tx of transactions) {
       if (tx.status !== 'categorized' || !tx.category) {
@@ -44,37 +45,46 @@ export async function POST(req: NextRequest) {
       }
 
       const glCode = tx.account?.glAccountCode;
-      const entry = await postTransactionToLedger(
-        { id: tx.id, date: tx.date, description: tx.description, amount: Number(tx.amount) },
-        glCode ?? undefined,
-        tx.category.code,
-        companyId
-      );
+      try {
+        const entry = await postTransactionToLedger(
+          { id: tx.id, date: tx.date, description: tx.description, amount: Number(tx.amount) },
+          glCode ?? undefined,
+          tx.category.code,
+          companyId
+        );
 
-      // Mark transaction as reconciled
-      await db.transaction.update({
-        where: { id: tx.id },
-        data: { status: 'reconciled', matchRef: entry.id },
-      });
+        // Mark transaction as reconciled
+        await db.transaction.update({
+          where: { id: tx.id },
+          data: { status: 'reconciled', matchRef: entry.id },
+        });
 
-      // Update financial account balance
-      if (glCode) {
-        const finAcct = await db.financialAccount.findFirst({ where: { glAccountCode: glCode, companyId: tx.companyId } });
-        if (finAcct) {
-          await db.financialAccount.update({
-            where: { id: finAcct.id },
-            data: { currentBalance: { increment: Number(tx.amount) } },
-          });
+        // Update financial account balance
+        if (glCode) {
+          const finAcct = await db.financialAccount.findFirst({ where: { glAccountCode: glCode, companyId: tx.companyId } });
+          if (finAcct) {
+            await db.financialAccount.update({
+              where: { id: finAcct.id },
+              data: { currentBalance: { increment: Number(tx.amount) } },
+            });
+          }
         }
-      }
 
-      posted.push(tx.id);
+        posted.push(tx.id);
+      } catch (txError: any) {
+        // A single transaction's linked account being unresolved shouldn't
+        // block the rest of the batch from posting.
+        failed.push({ id: tx.id, error: txError.message || 'Failed to post' });
+      }
     }
 
-    await auditLog(companyId, userId, 'transaction.post_gl', 'transaction', undefined, { postedIds: posted, skippedIds: skipped, closedPeriodIds: closedPeriod });
+    await auditLog(companyId, userId, 'transaction.post_gl', 'transaction', undefined, { postedIds: posted, skippedIds: skipped, closedPeriodIds: closedPeriod, failedIds: failed.map((f) => f.id) });
 
     return NextResponse.json({
-      data: { posted: posted.length, skipped: skipped.length, closedPeriod: closedPeriod.length, postedIds: posted, skippedIds: skipped, closedPeriodIds: closedPeriod },
+      data: {
+        posted: posted.length, skipped: skipped.length, closedPeriod: closedPeriod.length, failed: failed.length,
+        postedIds: posted, skippedIds: skipped, closedPeriodIds: closedPeriod, failedTransactions: failed,
+      },
     });
   } catch (error: any) {
     console.error('POST /api/transactions/post-gl error:', error);

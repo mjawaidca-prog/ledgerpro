@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
 import { getGLActivity, normalBalance, toDebitCredit, endOfDay } from '@/lib/reporting';
+import { getFinancialAccountBalances } from '@/lib/accounts';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
         select: { amount: true, date: true },
         orderBy: { date: 'asc' },
       }),
-      db.financialAccount.findMany({ where: { companyId, isActive: true }, select: { name: true, currentBalance: true, kind: true } }),
+      db.financialAccount.findMany({ where: { companyId, isActive: true }, select: { id: true, name: true, currentBalance: true, kind: true, glAccountCode: true } }),
       db.invoice.findMany({ where: { companyId, status: { not: 'void' }, issueDate: { gte: yearStart, lte: asOfDate } }, select: { total: true, paidAmount: true, status: true } }),
       db.bill.findMany({ where: { companyId, status: { not: 'void' }, billDate: { gte: yearStart, lte: asOfDate } }, select: { total: true, paidAmount: true, status: true } }),
       // Income/expense are period flows (this fiscal year to date)
@@ -113,6 +114,8 @@ export async function GET(req: NextRequest) {
     const totalDebits = tbRows.reduce((s, r) => s + r.debit, 0);
     const totalCredits = tbRows.reduce((s, r) => s + r.credit, 0);
 
+    const financialAccountBalances = await getFinancialAccountBalances(companyId, bankAccounts);
+
     return NextResponse.json({
       data: {
         asOf,
@@ -120,7 +123,7 @@ export async function GET(req: NextRequest) {
         balanceSheet: bs,
         cashFlow: { months: cashFlow, totalInflow: Math.round(totalInflow), totalOutflow: Math.round(totalOutflow), netCashFlow: Math.round(netCashFlow) },
         trialBalance: { rows: tbRows, totalDebits: Math.round(totalDebits), totalCredits: Math.round(totalCredits) },
-        bankAccounts: bankAccounts.map(a => ({ name: a.name, balance: Number(a.currentBalance), kind: a.kind })),
+        bankAccounts: bankAccounts.map(a => ({ name: a.name, balance: financialAccountBalances[a.id] ?? 0, kind: a.kind })),
         summary: {
           outstandingInvoices: invoices.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + Number(i.total) - Number(i.paidAmount), 0),
           outstandingBills: bills.filter(b => b.status === 'open' || b.status === 'overdue').reduce((s, b) => s + Number(b.total) - Number(b.paidAmount), 0),

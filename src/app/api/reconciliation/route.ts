@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { getFinancialAccountBalances } from '@/lib/accounts';
 export const dynamic = 'force-dynamic';
 
 // GET /api/reconciliation — get unreconciled items for an account
@@ -67,13 +68,14 @@ export async function GET(req: NextRequest) {
     ]);
 
     const statementBalance = Number(totalUnreconciled._sum.amount || 0);
+    const glBalance = (await getFinancialAccountBalances(companyId, [account]))[account.id] ?? 0;
 
     return NextResponse.json({
       data: {
         account: {
           id: account.id,
           name: account.name,
-          currentBalance: Number(account.currentBalance),
+          currentBalance: glBalance,
           glAccountCode: account.glAccountCode,
         },
         transactions: transactions.map((tx) => ({
@@ -98,7 +100,7 @@ export async function GET(req: NextRequest) {
         stats: {
           unreconciledCount,
           statementBalance,
-          glBalance: Number(account.currentBalance),
+          glBalance,
         },
       },
     });

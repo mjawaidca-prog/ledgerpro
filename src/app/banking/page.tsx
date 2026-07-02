@@ -86,6 +86,7 @@ export default function BankingPage() {
   const [wizardMappings, setWizardMappings] = useState<Record<string, string>>({});
   const [wizardPreview, setWizardPreview] = useState<any[]>([]);
   const [wizardSignDirection, setWizardSignDirection] = useState<'normal' | 'inverted'>('normal');
+  const [wizardPdfAmbiguousSign, setWizardPdfAmbiguousSign] = useState(false);
   const [wizardImporting, setWizardImporting] = useState(false);
   const [wizardAccountName, setWizardAccountName] = useState('Primary Checking');
   const [wizardAccountKind, setWizardAccountKind] = useState<FinancialAccount['kind']>('checking');
@@ -414,6 +415,7 @@ export default function BankingPage() {
     setWizardParsed(null);
     setWizardMappings({});
     setWizardPreview([]);
+    setWizardPdfAmbiguousSign(false);
     setWizardOpen(true);
   }
 
@@ -502,11 +504,20 @@ export default function BankingPage() {
         else if (lower.includes('balance') && !auto.balance) auto.balance = h;
       }
 
+      let pdfAmbiguousSign = false;
       if (isPdf) {
         const amountCols = headers.filter((h: string) => /^Amount_\d+$/i.test(h));
         let negCounts: Record<string, number> = {};
         let posCounts: Record<string, number> = {};
-        for (const col of amountCols) { negCounts[col] = 0; posCounts[col] = 0; }
+        let popCounts: Record<string, number> = {};
+        let magSums: Record<string, number> = {};
+        for (const col of amountCols) { negCounts[col] = 0; posCounts[col] = 0; popCounts[col] = 0; magSums[col] = 0; }
+        for (const row of rows) {
+          for (const col of amountCols) {
+            const v = Math.abs(parseFloat(row.raw?.[col] || '0'));
+            if (v > 0.005) { popCounts[col] = (popCounts[col] || 0) + 1; magSums[col] = (magSums[col] || 0) + v; }
+          }
+        }
         for (const row of rows.slice(0, 10)) {
           for (const col of amountCols) {
             const val = parseFloat(row.raw?.[col] || '0');
@@ -514,15 +525,54 @@ export default function BankingPage() {
             else if (val > 0.005) posCounts[col] = (posCounts[col] || 0) + 1;
           }
         }
-        const sortedByNeg = amountCols.slice().sort((a: string, b: string) => (negCounts[b] || 0) - (negCounts[a] || 0));
-        const sortedByPos = amountCols.slice().sort((a: string, b: string) => (posCounts[b] || 0) - (posCounts[a] || 0));
-        if (sortedByNeg[0] && (negCounts[sortedByNeg[0]] || 0) > 0) auto.debit = sortedByNeg[0];
-        else if (amountCols.length >= 1 && !auto.debit) auto.debit = amountCols[0];
-        const creditCandidate = sortedByPos.find((c: string) => c !== auto.debit);
-        if (creditCandidate && (posCounts[creditCandidate] || 0) > 0) auto.credit = creditCandidate;
-        else if (amountCols.length >= 2 && !auto.credit) auto.credit = amountCols[1];
-        if (amountCols.length >= 3 && !auto.balance) auto.balance = amountCols[amountCols.length - 1];
+
+        // A running-balance column is populated on virtually every row and
+        // carries much larger cumulative values than any single transaction
+        // — unlike debit/credit columns, which only fill in for their
+        // applicable side. Detect it by population rate + magnitude rather
+        // than assuming it's the trailing column, so a 2-column
+        // amount-plus-balance layout isn't mistaken for a debit/credit pair.
+        const totalRows = rows.length || 1;
+        const avgMag = (c: string) => (popCounts[c] ? magSums[c] / popCounts[c] : 0);
+        let balanceCol: string | undefined;
+        if (amountCols.length >= 2) {
+          const stronglyPopulated = amountCols.filter((c: string) => (popCounts[c] || 0) / totalRows > 0.9);
+          for (const c of stronglyPopulated) {
+            const others = amountCols.filter((o: string) => o !== c);
+            const otherMaxAvgMag = Math.max(0, ...others.map(avgMag));
+            if (otherMaxAvgMag === 0 || avgMag(c) > otherMaxAvgMag * 2) {
+              balanceCol = c;
+              break;
+            }
+          }
+        }
+        const splitCols = amountCols.filter((c: string) => c !== balanceCol);
+
+        const sortedByNeg = splitCols.slice().sort((a: string, b: string) => (negCounts[b] || 0) - (negCounts[a] || 0));
+        const sortedByPos = splitCols.slice().sort((a: string, b: string) => (posCounts[b] || 0) - (posCounts[a] || 0));
+        const hasAnyNegative = splitCols.some((c: string) => (negCounts[c] || 0) > 0);
+
+        if (hasAnyNegative) {
+          auto.debit = sortedByNeg[0];
+          const creditCandidate = sortedByPos.find((c: string) => c !== auto.debit);
+          if (creditCandidate) auto.credit = creditCandidate;
+        } else if (splitCols.length >= 2) {
+          // No sign info anywhere — assume the conventional debit-then-credit
+          // column order (e.g. Withdrawal | Deposit). Still worth a review.
+          auto.debit = splitCols[0];
+          auto.credit = splitCols[1];
+          pdfAmbiguousSign = true;
+        } else if (splitCols.length === 1) {
+          // Exactly one unsigned amount column — there is no reliable way to
+          // tell debits from credits apart from this data. Map it as a plain
+          // signed amount rather than silently forcing every row to "debit"
+          // (which would flip genuine deposits into fake expenses).
+          auto.amount = splitCols[0];
+          pdfAmbiguousSign = true;
+        }
+        if (balanceCol) auto.balance = balanceCol;
       }
+      setWizardPdfAmbiguousSign(pdfAmbiguousSign);
 
       const selectedAcct = accounts.find(a => a.id === wizardAccountId);
       setWizardSignDirection(selectedAcct?.kind === 'creditcard' ? 'inverted' : 'normal');
@@ -1194,6 +1244,15 @@ export default function BankingPage() {
                   Map your statement columns to LedgerPro fields.
                 </div>
 
+                {wizardPdfAmbiguousSign && (
+                  <Alert variant="warning">
+                    This PDF's amounts don't have distinguishing signs, CR/DR labels, or separate
+                    debit/credit columns — LedgerPro can't reliably tell deposits from withdrawals
+                    for it. Check the column mapping below against the sample values, and carefully
+                    verify each transaction's amount (and sign) in the review step before importing.
+                  </Alert>
+                )}
+
                 {/* Column Preview — shows sample values so user can identify columns */}
                 {wizardParsed?.headers?.length > 0 && (
                   <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3 overflow-x-auto">
@@ -1317,6 +1376,13 @@ export default function BankingPage() {
                   <p className="text-xs text-[var(--text-muted)]">
                     ⚠️ PDF parsing is best-effort. Please review all transactions carefully before importing.
                   </p>
+                )}
+                {wizardPdfAmbiguousSign && (
+                  <Alert variant="warning">
+                    Debit/credit direction for this file was guessed, not detected — double-check the
+                    amount sign (red = money out, green = money in) on every row below. Go back to fix
+                    the column mapping if any are wrong.
+                  </Alert>
                 )}
 
                 {/* Preview table */}

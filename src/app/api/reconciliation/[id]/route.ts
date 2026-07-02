@@ -121,14 +121,17 @@ export async function PUT(
           const guardError = await closedPeriodGuard(companyId, entryDate);
           if (guardError) return guardError;
 
-          await voidJournalEntry(tx.matchRef, companyId, userId, entryDate);
-          const newEntry = await postTransactionToLedger(
-            { id: tx.id, date: tx.date, description: tx.description, amount: Number(tx.amount) },
-            tx.account?.glAccountCode ?? undefined,
-            category.code,
-            companyId,
-            entryDate
-          );
+          const newEntry = await db.$transaction(async (dtx) => {
+            await voidJournalEntry(tx.matchRef!, companyId, userId, entryDate, dtx);
+            return postTransactionToLedger(
+              { id: tx.id, date: tx.date, description: tx.description, amount: Number(tx.amount) },
+              tx.account?.glAccountCode ?? undefined,
+              category.code,
+              companyId,
+              entryDate,
+              dtx
+            );
+          });
           updateData.matchRef = newEntry.id;
         }
         updateData.categoryId = categoryId;

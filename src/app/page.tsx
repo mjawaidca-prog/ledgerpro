@@ -313,8 +313,8 @@ export default function DashboardPage() {
                   </div>
                   <span className="text-[11px] font-mono uppercase tracking-[0.06em] text-[var(--text-muted)]">CC Debt</span>
                 </div>
-                <div className="font-mono tabular-nums text-2xl font-bold text-[var(--text-strong)] tracking-tight">{money(Math.abs(d.kpis.totalCreditCardDebt))}</div>
-                <div className="text-xs text-[var(--text-muted)] mt-2">Credit card balance{Math.abs(d.kpis.totalCreditCardDebt) > 0 ? ' — money you owe' : ''}</div>
+                <div className="font-mono tabular-nums text-2xl font-bold text-[var(--text-strong)] tracking-tight">{money(d.kpis.totalCreditCardDebt)}</div>
+                <div className="text-xs text-[var(--text-muted)] mt-2">Credit card balance{d.kpis.totalCreditCardDebt > 0 ? ' — money you owe' : ''}</div>
               </button>
             )}
 

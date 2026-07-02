@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+import { getFinancialAccountBalances } from '@/lib/accounts';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -59,6 +60,7 @@ export async function GET(req: NextRequest) {
       overdueInvoices,
       overdueCount,
       totalInvoiceCount,
+      unpostedCategorized,
     ] = await Promise.all([
       // Current period invoices
       db.invoice.findMany({
@@ -78,7 +80,7 @@ export async function GET(req: NextRequest) {
       db.financialAccount.findMany({
         where: { companyId, isActive: true },
         select: {
-          id: true, name: true, currentBalance: true, kind: true, mask: true,
+          id: true, name: true, currentBalance: true, kind: true, mask: true, glAccountCode: true,
           syncStatus: true,
           _count: { select: { transactions: { where: { reconciledAt: null, status: { not: 'excluded' } } } } },
         },
@@ -110,11 +112,28 @@ export async function GET(req: NextRequest) {
       }),
       db.invoice.count({ where: { companyId, status: { in: ['sent', 'overdue'] }, dueDate: { lt: now } } }),
       db.invoice.count({ where: { companyId, status: { not: 'void' } } }),
+      // Categorized-but-not-yet-posted transactions — GL-posted balances alone
+      // understate revenue/expenses right after a big import, before the user
+      // has run "Post to GL" on everything they've just categorized.
+      db.transaction.findMany({
+        where: { companyId, date: { gte: start, lte: end }, status: 'categorized' },
+        select: { amount: true, category: { select: { type: true } } },
+      }),
     ]);
 
     // ─── KPIs ───
-    const currentRevenue = incomeAccounts.reduce((s, a) => s + Number(a.balance), 0);
-    const currentExpenses = expenseAccounts.reduce((s, a) => s + Number(a.balance), 0);
+    // Posted balances (from the GL) plus anything the user has already
+    // categorized but not yet run through "Post to GL" — otherwise revenue/
+    // expense KPIs can show near-$0 right after a large import.
+    let unpostedRevenue = 0;
+    let unpostedExpenses = 0;
+    for (const tx of unpostedCategorized) {
+      if (tx.category?.type === 'income') unpostedRevenue += Number(tx.amount);
+      else if (tx.category?.type === 'expense') unpostedExpenses += Math.abs(Number(tx.amount));
+    }
+
+    const currentRevenue = incomeAccounts.reduce((s, a) => s + Number(a.balance), 0) + unpostedRevenue;
+    const currentExpenses = expenseAccounts.reduce((s, a) => s + Number(a.balance), 0) + unpostedExpenses;
     const netIncome = currentRevenue - currentExpenses;
 
     // Prior period KPIs for delta
@@ -135,12 +154,15 @@ export async function GET(req: NextRequest) {
       .filter(i => i.status === 'sent' || i.status === 'overdue')
       .reduce((s, i) => s + Number(i.total) - Number(i.paidAmount), 0);
 
+    const financialAccountBalances = await getFinancialAccountBalances(companyId, bankAccounts);
     const totalCash = bankAccounts
       .filter(a => a.kind !== 'creditcard')
-      .reduce((s, a) => s + Number(a.currentBalance), 0);
+      .reduce((s, a) => s + (financialAccountBalances[a.id] ?? 0), 0);
+    // Credit card GL balances are positive (liability, amount owed) — no sign
+    // flip needed here or at display time.
     const totalCreditCardDebt = bankAccounts
       .filter(a => a.kind === 'creditcard')
-      .reduce((s, a) => s + Number(a.currentBalance), 0);
+      .reduce((s, a) => s + (financialAccountBalances[a.id] ?? 0), 0);
 
     // ─── Monthly Cash Flow ───
     const monthlyMap: Record<string, { income: number; expenses: number }> = {};
@@ -223,7 +245,7 @@ export async function GET(req: NextRequest) {
         bankAccounts: bankAccounts.map(a => ({
           id: a.id,
           name: a.name,
-          balance: Number(a.currentBalance),
+          balance: financialAccountBalances[a.id] ?? 0,
           kind: a.kind,
           mask: a.mask,
           syncStatus: a.syncStatus,
