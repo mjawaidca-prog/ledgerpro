@@ -17,8 +17,10 @@ interface AccountLine {
   balance: number;
 }
 
+interface EquityGroup { accounts: AccountLine[]; total: number }
 interface BalanceSheetData {
   asOf: string;
+  companyName: string;
   isBalanced: boolean;
   assets: {
     current: { accounts: AccountLine[]; total: number };
@@ -31,13 +33,17 @@ interface BalanceSheetData {
     total: number;
   };
   equity: {
-    accounts: AccountLine[];
+    commonShares: EquityGroup;
+    retainedEarnings: EquityGroup;
+    ownersEquity: EquityGroup;
+    otherEquity: EquityGroup;
     total: number;
   };
   totalLiabilitiesAndEquity: number;
+  prior: (Omit<BalanceSheetData, 'prior'>) | null;
 }
 
-function AccountRow({ account, indent, router }: { account: AccountLine; indent?: boolean; router: any }) {
+function AccountRow({ account, indent, router, priorAmount }: { account: AccountLine; indent?: boolean; router: any; priorAmount?: number }) {
   return (
     <div
       onClick={() => router.push(`/reports/general-ledger?code=${account.code}&name=${encodeURIComponent(account.name)}`)}
@@ -49,9 +55,12 @@ function AccountRow({ account, indent, router }: { account: AccountLine; indent?
           {account.code}{account.detailType ? ` · ${account.detailType}` : ''}
         </div>
       </div>
-      <div className="flex items-center gap-2 ml-4">
+      <div className="flex items-center gap-3 ml-4">
+        {priorAmount !== undefined && (
+          <div className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[90px] text-right">{money(priorAmount)}</div>
+        )}
         <ExternalLink size={12} className="text-[var(--text-faint)] opacity-0 group-hover:opacity-100 transition-opacity" />
-        <div className="text-sm font-mono tabular-nums text-[var(--text)]">
+        <div className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">
           {money(account.balance)}
         </div>
       </div>
@@ -80,13 +89,14 @@ export default function BalanceSheetPage() {
   const [error, setError] = useState<string | null>(null);
   const fy = useFiscalYear();
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  const [compare, setCompare] = useState(false);
   useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) setAsOf(fy.fiscalYearEnd); }, [fy.loaded, fy.fiscalYearEnd]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/reports/balance-sheet?asOf=${asOf}`);
+      const res = await fetch(`/api/reports/balance-sheet?asOf=${asOf}&compare=${compare}`);
       if (!res.ok) throw new Error('Failed to fetch balance sheet');
       const json = await res.json();
       setData(json.data);
@@ -95,7 +105,7 @@ export default function BalanceSheetPage() {
     } finally {
       setLoading(false);
     }
-  }, [asOf]);
+  }, [asOf, compare]);
 
   useEffect(() => {
     fetchData();
@@ -121,6 +131,9 @@ export default function BalanceSheetPage() {
     );
   }
 
+  const priorOf = (group: { accounts: AccountLine[] } | undefined, code: string) =>
+    group?.accounts.find((a) => a.code === code)?.balance;
+
   return (
     <AppShell>
       {/* Header */}
@@ -134,14 +147,19 @@ export default function BalanceSheetPage() {
           </button>
           <div>
             <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">
-              Balance Sheet
+              {data.companyName || 'Balance Sheet'}
             </h1>
             <p className="text-sm text-[var(--text-muted)] mt-0.5">
-              As of {format(new Date(data.asOf), 'MMM d, yyyy')}
+              Balance Sheet · As of {format(new Date(data.asOf), 'MMM d, yyyy')}
+              {data.prior && ` (compared to ${format(new Date(data.prior.asOf), 'MMM d, yyyy')})`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+            <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
+            Compare to prior year
+          </label>
           <input
             type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD"
             value={asOf}
@@ -176,7 +194,7 @@ export default function BalanceSheetPage() {
               Current Assets
             </div>
             {data.assets.current.accounts.map((a) => (
-              <AccountRow key={a.code} account={a} router={router} />
+              <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.assets.current, a.code) ?? 0 : undefined} />
             ))}
             <SectionHeader title="Total Current Assets" total={data.assets.current.total} borderTop />
 
@@ -186,7 +204,7 @@ export default function BalanceSheetPage() {
             </div>
             {data.assets.nonCurrent.accounts.length > 0 ? (
               data.assets.nonCurrent.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} router={router} />
+                <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.assets.nonCurrent, a.code) ?? 0 : undefined} />
               ))
             ) : (
               <div className="text-sm text-[var(--text-faint)] px-3 py-2 italic">No non-current assets</div>
@@ -215,7 +233,7 @@ export default function BalanceSheetPage() {
                 Current Liabilities
               </div>
               {data.liabilities.current.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} router={router} />
+                <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.liabilities.current, a.code) ?? 0 : undefined} />
               ))}
               {data.liabilities.current.accounts.length === 0 && (
                 <div className="text-sm text-[var(--text-faint)] px-3 py-2 italic">No current liabilities</div>
@@ -229,7 +247,7 @@ export default function BalanceSheetPage() {
                     Non-Current Liabilities
                   </div>
                   {data.liabilities.nonCurrent.accounts.map((a) => (
-                    <AccountRow key={a.code} account={a} router={router} />
+                    <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.liabilities.nonCurrent, a.code) ?? 0 : undefined} />
                   ))}
                   <SectionHeader title="Total Non-Current Liabilities" total={data.liabilities.nonCurrent.total} borderTop />
                 </>
@@ -251,9 +269,21 @@ export default function BalanceSheetPage() {
               <h2 className="text-lg font-semibold text-[var(--text-strong)]">Equity</h2>
             </CardHeader>
             <CardBody className="space-y-0">
-              {data.equity.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} router={router} />
-              ))}
+              {([
+                ['Common Shares', data.equity.commonShares, data.prior?.equity.commonShares],
+                ['Retained Earnings', data.equity.retainedEarnings, data.prior?.equity.retainedEarnings],
+                ["Owner's Equity", data.equity.ownersEquity, data.prior?.equity.ownersEquity],
+                ['Other Equity', data.equity.otherEquity, data.prior?.equity.otherEquity],
+              ] as [string, EquityGroup, EquityGroup | undefined][])
+                .filter(([, group]) => group.accounts.length > 0)
+                .map(([label, group, priorGroup]) => (
+                  <div key={label}>
+                    <div className="text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] px-3 py-2 mt-2">{label}</div>
+                    {group.accounts.map((a) => (
+                      <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(priorGroup, a.code) ?? 0 : undefined} />
+                    ))}
+                  </div>
+                ))}
               <div className="flex items-center justify-between py-3 px-3 mt-1 border-t border-[var(--border)]">
                 <span className="text-sm font-bold text-[var(--text-strong)]">Total Equity</span>
                 <span className="text-sm font-bold font-mono tabular-nums text-[var(--text-strong)]">

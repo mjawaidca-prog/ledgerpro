@@ -4,6 +4,7 @@ export type DefaultChartAccount = {
   code: string;
   name: string;
   type: 'asset' | 'liability' | 'equity' | 'income' | 'expense';
+  subType?: 'current_asset' | 'fixed_asset' | 'other_asset' | 'current_liability' | 'long_term_liability' | 'common_shares' | 'retained_earnings' | 'owners_equity' | 'other_equity';
   detailType?: string;
   parentCode?: string;
   description?: string;
@@ -11,22 +12,22 @@ export type DefaultChartAccount = {
 };
 
 export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
-  { code: '1000', name: 'Bank Accounts', type: 'asset', detailType: 'Bank', description: 'Cash and bank accounts' },
-  { code: '1010', name: 'Business Checking', type: 'asset', detailType: 'Bank', parentCode: '1000', description: 'Primary operating account' },
-  { code: '1020', name: 'Business Savings', type: 'asset', detailType: 'Savings', parentCode: '1000', description: 'Reserve or savings account' },
-  { code: '1030', name: 'Undeposited Funds', type: 'asset', detailType: 'Undeposited funds', parentCode: '1000' },
-  { code: '1100', name: 'Accounts Receivable', type: 'asset', detailType: 'Accounts receivable' },
-  { code: '1200', name: 'Prepaid Expenses', type: 'asset', detailType: 'Prepaid expenses' },
-  { code: '1500', name: 'Furniture & Equipment', type: 'asset', detailType: 'Fixed assets' },
-  { code: '2000', name: 'Credit Cards', type: 'liability', detailType: 'Credit card' },
-  { code: '2110', name: 'Business Credit Card', type: 'liability', detailType: 'Credit card', parentCode: '2000' },
-  { code: '2200', name: 'Accounts Payable', type: 'liability', detailType: 'Accounts payable' },
-  { code: '2300', name: 'Sales Tax Payable', type: 'liability', detailType: 'Sales tax payable' },
-  { code: '2400', name: 'Payroll Liabilities', type: 'liability', detailType: 'Payroll liabilities' },
-  { code: '2500', name: 'Loans Payable', type: 'liability', detailType: 'Loans payable' },
-  { code: '3000', name: "Owner's Capital", type: 'equity', detailType: "Owner's equity" },
-  { code: '3100', name: 'Retained Earnings', type: 'equity', detailType: 'Retained earnings' },
-  { code: '3900', name: "Owner's Draw", type: 'equity', detailType: "Owner's equity" },
+  { code: '1000', name: 'Bank Accounts', type: 'asset', subType: 'current_asset', detailType: 'Bank', description: 'Cash and bank accounts' },
+  { code: '1010', name: 'Business Checking', type: 'asset', subType: 'current_asset', detailType: 'Bank', parentCode: '1000', description: 'Primary operating account' },
+  { code: '1020', name: 'Business Savings', type: 'asset', subType: 'current_asset', detailType: 'Savings', parentCode: '1000', description: 'Reserve or savings account' },
+  { code: '1030', name: 'Undeposited Funds', type: 'asset', subType: 'current_asset', detailType: 'Undeposited funds', parentCode: '1000' },
+  { code: '1100', name: 'Accounts Receivable', type: 'asset', subType: 'current_asset', detailType: 'Accounts receivable' },
+  { code: '1200', name: 'Prepaid Expenses', type: 'asset', subType: 'current_asset', detailType: 'Prepaid expenses' },
+  { code: '1500', name: 'Furniture & Equipment', type: 'asset', subType: 'fixed_asset', detailType: 'Fixed assets' },
+  { code: '2000', name: 'Credit Cards', type: 'liability', subType: 'current_liability', detailType: 'Credit card' },
+  { code: '2110', name: 'Business Credit Card', type: 'liability', subType: 'current_liability', detailType: 'Credit card', parentCode: '2000' },
+  { code: '2200', name: 'Accounts Payable', type: 'liability', subType: 'current_liability', detailType: 'Accounts payable' },
+  { code: '2300', name: 'Sales Tax Payable', type: 'liability', subType: 'current_liability', detailType: 'Sales tax payable' },
+  { code: '2400', name: 'Payroll Liabilities', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
+  { code: '2500', name: 'Loans Payable', type: 'liability', subType: 'long_term_liability', detailType: 'Loans payable' },
+  { code: '3000', name: "Owner's Capital", type: 'equity', subType: 'owners_equity', detailType: "Owner's equity" },
+  { code: '3100', name: 'Retained Earnings', type: 'equity', subType: 'retained_earnings', detailType: 'Retained earnings' },
+  { code: '3900', name: "Owner's Draw", type: 'equity', subType: 'owners_equity', detailType: "Owner's equity" },
   { code: '4000', name: 'Product Sales', type: 'income', detailType: 'Product sales' },
   { code: '4100', name: 'Service Revenue', type: 'income', detailType: 'Service revenue' },
   { code: '4908', name: 'Other Income', type: 'income', detailType: 'Other income' },
@@ -77,6 +78,7 @@ export async function ensureDefaultChartOfAccounts(
       code: account.code,
       name: account.name,
       type: account.type,
+      subType: account.subType ?? null,
       detailType: account.detailType ?? null,
       parentCode: account.parentCode ?? null,
       description: account.description ?? null,

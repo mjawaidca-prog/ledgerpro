@@ -60,8 +60,8 @@ export async function POST(req: NextRequest) {
         data: {
           name: companyName,
           fiscalYearStart: new Date(new Date().getFullYear().toString() + '-01-01'),
-          currency: 'USD',
-          locale: 'en-US',
+          currency: 'CAD',
+          locale: 'en-CA',
           timezone: 'America/Edmonton',
         },
       });

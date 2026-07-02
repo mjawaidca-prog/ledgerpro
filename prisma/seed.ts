@@ -123,21 +123,21 @@ async function main() {
 
   const coaData = [
     // Assets
-    { code: '1000', name: 'Bank Accounts', type: 'asset' as const, detailType: 'Bank', description: 'Cash and bank accounts' },
-    { code: '1010', name: 'Chase Business Checking', type: 'asset' as const, detailType: 'Bank', parentCode: '1000', description: 'Primary operating account' },
-    { code: '1020', name: 'Chase Business Savings', type: 'asset' as const, detailType: 'Savings', parentCode: '1000', description: 'Interest-bearing reserve' },
-    { code: '1100', name: 'Accounts Receivable', type: 'asset' as const, detailType: 'Accounts receivable' },
-    { code: '1200', name: 'Prepaid Expenses', type: 'asset' as const, detailType: 'Prepaid expenses' },
+    { code: '1000', name: 'Bank Accounts', type: 'asset' as const, subType: 'current_asset' as const, detailType: 'Bank', description: 'Cash and bank accounts' },
+    { code: '1010', name: 'Chase Business Checking', type: 'asset' as const, subType: 'current_asset' as const, detailType: 'Bank', parentCode: '1000', description: 'Primary operating account' },
+    { code: '1020', name: 'Chase Business Savings', type: 'asset' as const, subType: 'current_asset' as const, detailType: 'Savings', parentCode: '1000', description: 'Interest-bearing reserve' },
+    { code: '1100', name: 'Accounts Receivable', type: 'asset' as const, subType: 'current_asset' as const, detailType: 'Accounts receivable' },
+    { code: '1200', name: 'Prepaid Expenses', type: 'asset' as const, subType: 'current_asset' as const, detailType: 'Prepaid expenses' },
     // Liabilities
-    { code: '2000', name: 'Credit Cards', type: 'liability' as const, detailType: 'Credit card' },
-    { code: '2110', name: 'Amex Business', type: 'liability' as const, detailType: 'Credit card', parentCode: '2000', description: 'Amex Business Gold' },
-    { code: '2120', name: 'Chase Ink', type: 'liability' as const, detailType: 'Credit card', parentCode: '2000' },
-    { code: '2200', name: 'Accounts Payable', type: 'liability' as const, detailType: 'Accounts payable' },
-    { code: '2300', name: 'Sales Tax Payable', type: 'liability' as const, detailType: 'Sales tax payable' },
+    { code: '2000', name: 'Credit Cards', type: 'liability' as const, subType: 'current_liability' as const, detailType: 'Credit card' },
+    { code: '2110', name: 'Amex Business', type: 'liability' as const, subType: 'current_liability' as const, detailType: 'Credit card', parentCode: '2000', description: 'Amex Business Gold' },
+    { code: '2120', name: 'Chase Ink', type: 'liability' as const, subType: 'current_liability' as const, detailType: 'Credit card', parentCode: '2000' },
+    { code: '2200', name: 'Accounts Payable', type: 'liability' as const, subType: 'current_liability' as const, detailType: 'Accounts payable' },
+    { code: '2300', name: 'Sales Tax Payable', type: 'liability' as const, subType: 'current_liability' as const, detailType: 'Sales tax payable' },
     // Equity
-    { code: '3000', name: "Owner's Capital", type: 'equity' as const, detailType: "Owner's equity" },
-    { code: '3100', name: 'Retained Earnings', type: 'equity' as const, detailType: 'Retained earnings' },
-    { code: '3900', name: "Owner's Draw", type: 'equity' as const, detailType: "Owner's equity" },
+    { code: '3000', name: "Owner's Capital", type: 'equity' as const, subType: 'owners_equity' as const, detailType: "Owner's equity" },
+    { code: '3100', name: 'Retained Earnings', type: 'equity' as const, subType: 'retained_earnings' as const, detailType: 'Retained earnings' },
+    { code: '3900', name: "Owner's Draw", type: 'equity' as const, subType: 'owners_equity' as const, detailType: "Owner's equity" },
     // Income
     { code: '4000', name: 'Product Sales', type: 'income' as const, detailType: 'Product sales' },
     { code: '4100', name: 'Service Revenue', type: 'income' as const, detailType: 'Service revenue' },
@@ -161,6 +161,7 @@ async function main() {
         code: a.code,
         name: a.name,
         type: a.type,
+        subType: (a as any).subType ?? null,
         detailType: a.detailType,
         parentCode: a.parentCode,
         description: a.description,

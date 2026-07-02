@@ -10,7 +10,7 @@ import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink, Plus, X } from 'lucide-react';
+import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink, Plus, X, Pencil } from 'lucide-react';
 import { exportChartOfAccounts } from '@/lib/export';
 import type { Column } from '@/components/ui/DataTable';
 
@@ -19,6 +19,8 @@ interface COAEntry {
   code: string;
   name: string;
   type: 'asset' | 'liability' | 'equity' | 'income' | 'expense';
+  subType: string | null;
+  gifiCode: string | null;
   detailType: string | null;
   parentCode: string | null;
   description: string | null;
@@ -26,6 +28,29 @@ interface COAEntry {
   active: boolean;
   financialAccounts: { id: string; name: string; currentBalance: number; kind: string }[];
 }
+
+const SUBTYPE_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  asset: [
+    { value: '', label: '— Not classified —' },
+    { value: 'current_asset', label: 'Current Asset' },
+    { value: 'fixed_asset', label: 'Fixed Asset' },
+    { value: 'other_asset', label: 'Other Asset' },
+  ],
+  liability: [
+    { value: '', label: '— Not classified —' },
+    { value: 'current_liability', label: 'Current Liability' },
+    { value: 'long_term_liability', label: 'Long-Term Liability' },
+  ],
+  equity: [
+    { value: '', label: '— Not classified —' },
+    { value: 'common_shares', label: 'Common Shares' },
+    { value: 'retained_earnings', label: 'Retained Earnings' },
+    { value: 'owners_equity', label: "Owner's Equity" },
+    { value: 'other_equity', label: 'Other Equity' },
+  ],
+  income: [],
+  expense: [],
+};
 
 interface Summary {
   assets: number;
@@ -62,6 +87,53 @@ export default function ChartOfAccountsPage() {
   const [newDescription, setNewDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [editingAccount, setEditingAccount] = useState<COAEntry | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDetailType, setEditDetailType] = useState('');
+  const [editSubType, setEditSubType] = useState('');
+  const [editGifiCode, setEditGifiCode] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editActive, setEditActive] = useState(true);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  function openEdit(acct: COAEntry, e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditingAccount(acct);
+    setEditName(acct.name);
+    setEditDetailType(acct.detailType || '');
+    setEditSubType(acct.subType || '');
+    setEditGifiCode(acct.gifiCode || '');
+    setEditDescription(acct.description || '');
+    setEditActive(acct.active);
+    setEditError(null);
+  }
+
+  async function saveEdit() {
+    if (!editingAccount) return;
+    setEditSaving(true); setEditError(null);
+    try {
+      const res = await fetch(`/api/coa/${editingAccount.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          detailType: editDetailType.trim() || null,
+          subType: editSubType || null,
+          gifiCode: editGifiCode.trim() || null,
+          description: editDescription.trim() || null,
+          active: editActive,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to save');
+      setEditingAccount(null);
+      fetchCOA();
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : 'Failed to save');
+    } finally { setEditSaving(false); }
+  }
 
   async function createAccount() {
     setSaving(true); setSaveError(null);
@@ -296,6 +368,9 @@ export default function ChartOfAccountsPage() {
                         <span className="font-mono text-[var(--text-muted)] w-[60px]">{parent.code}</span>
                         <span className="font-medium text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{parent.name}</span>
                         <span className="text-xs text-[var(--text-muted)]">{parent.detailType}</span>
+                        <button onClick={(e) => openEdit(parent, e)} className="p-1 rounded hover:bg-[var(--surface-3)] opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Pencil size={12} className="text-[var(--text-faint)]" />
+                        </button>
                         <ExternalLink size={12} className="text-[var(--text-faint)] opacity-0 group-hover:opacity-100 mr-1 transition-opacity" />
                         <span className={cn(
                           'font-mono tabular-nums text-sm font-semibold w-[120px] text-right',
@@ -315,6 +390,9 @@ export default function ChartOfAccountsPage() {
                             <span className="font-mono text-[var(--text-faint)] w-[60px] pl-6">{child.code}</span>
                             <span className="text-[var(--text)] flex-1 group-hover:text-[var(--primary)] transition-colors">{child.name}</span>
                             <span className="text-xs text-[var(--text-muted)]">{child.detailType}</span>
+                            <button onClick={(e) => openEdit(child, e)} className="p-1 rounded hover:bg-[var(--surface-3)] opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Pencil size={12} className="text-[var(--text-faint)]" />
+                            </button>
                             <ExternalLink size={12} className="text-[var(--text-faint)] opacity-0 group-hover:opacity-100 mr-1 transition-opacity" />
                             <span className={cn(
                               'font-mono tabular-nums text-sm font-semibold w-[120px] text-right',
@@ -388,6 +466,63 @@ export default function ChartOfAccountsPage() {
               <Button onClick={createAccount} disabled={saving || !newCode.trim() || !newName.trim()}>
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
                 Create Account
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+      {/* Edit Account Modal */}
+      {editingAccount && (
+        <>
+          <div className="fixed inset-0 z-90 bg-black/40 backdrop-blur-sm" onClick={() => setEditingAccount(null)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-100 w-full max-w-[480px] bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)] p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-[var(--text-strong)]">Edit Account {editingAccount.code}</h2>
+              <button onClick={() => setEditingAccount(null)} className="w-8 h-8 grid place-items-center rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-strong)]">
+                <X size={16} />
+              </button>
+            </div>
+
+            {editError && <Alert variant="danger" className="mb-4">{editError}</Alert>}
+
+            <div className="space-y-3">
+              <div className="field">
+                <label>Account Name</label>
+                <input className="input" value={editName} onChange={e => setEditName(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="field">
+                  <label>Detail Type</label>
+                  <input className="input" value={editDetailType} onChange={e => setEditDetailType(e.target.value)} />
+                </div>
+                {(SUBTYPE_OPTIONS[editingAccount.type] || []).length > 0 && (
+                  <div className="field">
+                    <label>Classification</label>
+                    <select className="select" value={editSubType} onChange={e => setEditSubType(e.target.value)}>
+                      {SUBTYPE_OPTIONS[editingAccount.type].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="field">
+                <label>GIFI Code</label>
+                <input className="input" value={editGifiCode} onChange={e => setEditGifiCode(e.target.value)} placeholder="e.g. 1000 (for CRA T2 / CaseWare export)" />
+              </div>
+              <div className="field">
+                <label>Description</label>
+                <input className="input" value={editDescription} onChange={e => setEditDescription(e.target.value)} />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+                <input type="checkbox" checked={editActive} onChange={e => setEditActive(e.target.checked)} />
+                Active
+              </label>
+            </div>
+
+            <div className="flex gap-3 mt-6 justify-end">
+              <Button variant="secondary" onClick={() => setEditingAccount(null)}>Cancel</Button>
+              <Button onClick={saveEdit} disabled={editSaving || !editName.trim()}>
+                {editSaving ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={14} />}
+                Save Changes
               </Button>
             </div>
           </div>

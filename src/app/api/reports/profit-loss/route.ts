@@ -1,97 +1,78 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { requireCompany } from '@/lib/api-helpers';
+import { getGLActivity, normalBalance, endOfDay } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
+
+function isCOGS(acct: { code: string; detailType: string | null }): boolean {
+  if (acct.detailType) return acct.detailType.trim().toLowerCase() === 'cogs';
+  return acct.code === '5000'; // fallback for accounts predating the detailType convention
+}
+
+async function buildPeriodTotals(companyId: string, startDate: Date, endDate: Date) {
+  const [incomeAccounts, expenseAccounts, activity] = await Promise.all([
+    db.chartOfAccount.findMany({ where: { type: 'income', active: true, companyId }, orderBy: { code: 'asc' } }),
+    db.chartOfAccount.findMany({ where: { type: 'expense', active: true, companyId }, orderBy: { code: 'asc' } }),
+    getGLActivity(companyId, { from: startDate, to: endOfDay(endDate) }),
+  ]);
+
+  const revenueByAccount = incomeAccounts.map((acct) => ({
+    code: acct.code,
+    name: acct.name,
+    amount: Math.round(normalBalance(acct.type, activity[acct.code]) * 100) / 100,
+  }));
+
+  const expensesByAccount = expenseAccounts.map((acct) => ({
+    code: acct.code,
+    name: acct.name,
+    isCOGS: isCOGS(acct),
+    amount: Math.round(normalBalance(acct.type, activity[acct.code]) * 100) / 100,
+  }));
+
+  const totalRevenue = revenueByAccount.reduce((s, r) => s + r.amount, 0);
+  const costOfGoodsSold = expensesByAccount.filter((e) => e.isCOGS).reduce((s, e) => s + e.amount, 0);
+  const operatingExpenses = expensesByAccount.filter((e) => !e.isCOGS).reduce((s, e) => s + e.amount, 0);
+  const totalExpenses = costOfGoodsSold + operatingExpenses;
+  const grossProfit = totalRevenue - costOfGoodsSold;
+  const netIncome = totalRevenue - totalExpenses;
+  const netMargin = totalRevenue > 0 ? (netIncome / totalRevenue) * 100 : 0;
+
+  return {
+    revenue: revenueByAccount,
+    expenses: expensesByAccount,
+    totalRevenue,
+    totalExpenses,
+    summary: { totalRevenue, costOfGoodsSold, grossProfit, operatingExpenses, netIncome, netMargin },
+  };
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
     const year = searchParams.get('year') ?? new Date().getFullYear().toString();
-    const period = searchParams.get('period') ?? 'year'; // month, quarter, year
+    const compare = searchParams.get('compare') === 'true';
 
     const startDate = new Date(`${year}-01-01`);
     const endDate = new Date(`${year}-12-31`);
 
-    // Fetch all income and expense accounts
-    const [incomeAccounts, expenseAccounts, invoices, bills] = await Promise.all([
-      db.chartOfAccount.findMany({
-        where: { type: 'income', active: true, companyId },
-        orderBy: { code: 'asc' },
-      }),
-      db.chartOfAccount.findMany({
-        where: { type: 'expense', active: true, companyId },
-        orderBy: { code: 'asc' },
-      }),
-      db.invoice.findMany({
-        where: {
-          companyId,
-          issueDate: { gte: startDate, lte: endDate },
-          status: { not: 'void' },
-        },
-        select: { total: true, status: true },
-      }),
-      db.bill.findMany({
-        where: {
-          companyId,
-          billDate: { gte: startDate, lte: endDate },
-          status: { in: ['paid', 'open', 'overdue'] },
-        },
-        select: { total: true, status: true, lineItems: { select: { categoryId: true, amount: true } } },
-      }),
-    ]);
+    const current = await buildPeriodTotals(companyId, startDate, endDate);
 
-    // Revenue from invoices (accrual basis: all non-void invoices)
-    const totalRevenue = invoices.reduce((sum, inv) => sum + Number(inv.total), 0);
-
-    // Revenue breakdown by GL category — from invoice line items
-    // For simplicity: use the seeded COA balances as the starting point
-    // In production: compute from journal entries
-    const revenueByAccount = incomeAccounts.map((acct) => ({
-      code: acct.code,
-      name: acct.name,
-      amount: Number(acct.balance),
-    }));
-
-    // Expenses by category — from bill line items
-    const expenseMap: Record<string, number> = {};
-    for (const bill of bills) {
-      for (const line of bill.lineItems) {
-        const key = line.categoryId ?? 'uncategorized';
-        expenseMap[key] = (expenseMap[key] || 0) + Number(line.amount);
-      }
+    let prior = null;
+    if (compare) {
+      const priorYear = String(Number(year) - 1);
+      const priorStart = new Date(`${priorYear}-01-01`);
+      const priorEnd = new Date(`${priorYear}-12-31`);
+      prior = { year: priorYear, ...(await buildPeriodTotals(companyId, priorStart, priorEnd)) };
     }
-
-    const expensesByAccount = expenseAccounts.map((acct) => ({
-      code: acct.code,
-      name: acct.name,
-      amount: Number(acct.balance),
-    }));
-
-    const totalExpenses = expensesByAccount.reduce((sum, e) => sum + e.amount, 0);
-    const costOfGoodsSold = expensesByAccount.find(e => e.code === '5000')?.amount ?? 0;
-    const operatingExpenses = totalExpenses - costOfGoodsSold;
-    const grossProfit = totalRevenue - costOfGoodsSold;
-    const netIncome = totalRevenue - totalExpenses;
-    const netMargin = totalRevenue > 0 ? (netIncome / totalRevenue) * 100 : 0;
 
     return NextResponse.json({
       data: {
         period: { year, startDate, endDate },
-        summary: {
-          totalRevenue,
-          costOfGoodsSold,
-          grossProfit,
-          operatingExpenses,
-          netIncome,
-          netMargin,
-        },
-        revenue: revenueByAccount,
-        expenses: expensesByAccount,
-        totalRevenue,
-        totalExpenses,
+        ...current,
+        prior,
       },
     });
   } catch (error) {

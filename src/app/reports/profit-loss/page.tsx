@@ -3,29 +3,31 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
-import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
-import { ArrowLeft, Download, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+
+interface PnLSummary {
+  totalRevenue: number;
+  costOfGoodsSold: number;
+  grossProfit: number;
+  operatingExpenses: number;
+  netIncome: number;
+  netMargin: number;
+}
 
 interface PnLData {
   period: { year: string; startDate: string; endDate: string };
-  summary: {
-    totalRevenue: number;
-    costOfGoodsSold: number;
-    grossProfit: number;
-    operatingExpenses: number;
-    netIncome: number;
-    netMargin: number;
-  };
+  summary: PnLSummary;
   revenue: { code: string; name: string; amount: number }[];
-  expenses: { code: string; name: string; amount: number }[];
+  expenses: { code: string; name: string; isCOGS: boolean; amount: number }[];
   totalRevenue: number;
   totalExpenses: number;
+  prior: ({ year: string; summary: PnLSummary; revenue: { code: string; amount: number }[]; expenses: { code: string; amount: number }[] }) | null;
 }
 
 export default function ProfitLossPage() {
@@ -35,7 +37,12 @@ export default function ProfitLossPage() {
   const [error, setError] = useState<string | null>(null);
   const fy = useFiscalYear();
   const [year, setYear] = useState(fy.defaultYear);
-  const [period, setPeriod] = useState('year');
+  const [compare, setCompare] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+
+  useEffect(() => {
+    fetch('/api/companies').then(r => r.json()).then(json => setCompanyName(json.data?.[0]?.name || '')).catch(() => {});
+  }, []);
 
   useEffect(() => { if (fy.loaded) setYear(fy.defaultYear); }, [fy.loaded, fy.defaultYear]);
 
@@ -49,7 +56,7 @@ export default function ProfitLossPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ year, period });
+      const params = new URLSearchParams({ year, compare: String(compare) });
       const res = await fetch(`/api/reports/profit-loss?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to load report');
       const json = await res.json();
@@ -59,7 +66,7 @@ export default function ProfitLossPage() {
     } finally {
       setLoading(false);
     }
-  }, [year, period]);
+  }, [year, compare]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -76,15 +83,18 @@ export default function ProfitLossPage() {
         <div className="flex-1">
           <h1 className="t-h1">Profit & Loss</h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">
-            Northwind Trading · Fiscal Year {year}
+            {companyName || 'Company'} · Fiscal Year {year}
           </p>
         </div>
+        <label className="flex items-center gap-2 text-sm text-[var(--text-muted)] mr-2">
+          <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
+          Compare to prior year
+        </label>
         <Segmented
           options={yearOptions}
           value={year}
           onChange={setYear}
         />
-        <Button variant="secondary"><Download size={16} /> Export PDF</Button>
       </div>
 
       {loading ? (
@@ -127,6 +137,9 @@ export default function ProfitLossPage() {
               <div className="flex items-center justify-center gap-6 text-sm">
                 <span className="text-[var(--text-muted)]">Gross Profit: <strong className="text-[var(--text-strong)]">{money(data.summary.grossProfit)}</strong></span>
                 <span className="text-[var(--text-muted)]">Margin: <strong className={cn(data.summary.netMargin >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]')}>{data.summary.netMargin.toFixed(1)}%</strong></span>
+                {data.prior && (
+                  <span className="text-[var(--text-muted)]">FY{data.prior.year} Net Income: <strong className={cn(data.prior.summary.netIncome >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]')}>{money(data.prior.summary.netIncome)}</strong></span>
+                )}
               </div>
             </CardBody>
           </Card>
@@ -136,20 +149,29 @@ export default function ProfitLossPage() {
             <CardHeader>
               <h3 className="t-h3">Revenue</h3>
               <div className="spacer" />
+              {data.prior && (
+                <span className="font-mono tabular-nums text-xs text-[var(--text-muted)] mr-3">FY{data.prior.year}: {money(data.prior.summary.totalRevenue)}</span>
+              )}
               <span className="font-mono tabular-nums text-lg font-semibold text-[var(--success)]">
                 {money(data.summary.totalRevenue)}
               </span>
             </CardHeader>
             <div className="divide-y divide-[var(--border)]">
-              {data.revenue.map((item) => (
-                <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
-                  <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
-                  <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{item.name}</span>
-                  <span className="font-mono tabular-nums text-sm font-semibold text-[var(--text-strong)]">
-                    {money(item.amount)}
-                  </span>
-                </div>
-              ))}
+              {data.revenue.map((item) => {
+                const priorAmount = data.prior?.revenue.find((p) => p.code === item.code)?.amount;
+                return (
+                  <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
+                    <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
+                    <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{item.name}</span>
+                    {data.prior && (
+                      <span className="font-mono tabular-nums text-xs text-[var(--text-faint)] w-[100px] text-right">{money(priorAmount ?? 0)}</span>
+                    )}
+                    <span className="font-mono tabular-nums text-sm font-semibold text-[var(--text-strong)] w-[100px] text-right">
+                      {money(item.amount)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </Card>
 
@@ -184,19 +206,25 @@ export default function ProfitLossPage() {
             </CardHeader>
             <div className="divide-y divide-[var(--border)]">
               {data.expenses
-                .filter((e) => e.code !== '5000') // Exclude COGS
-                .map((item) => (
-                  <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
-                    <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
-                    <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">
-                      {item.name}
-                      {!item.amount && <span className="text-[var(--text-faint)] ml-2">— no activity</span>}
-                    </span>
-                    <span className="font-mono tabular-nums text-sm font-semibold text-[var(--text-strong)]">
-                      {money(item.amount)}
-                    </span>
-                  </div>
-                ))}
+                .filter((e) => !e.isCOGS)
+                .map((item) => {
+                  const priorAmount = data.prior?.expenses.find((p) => p.code === item.code)?.amount;
+                  return (
+                    <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
+                      <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
+                      <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">
+                        {item.name}
+                        {!item.amount && <span className="text-[var(--text-faint)] ml-2">— no activity</span>}
+                      </span>
+                      {data.prior && (
+                        <span className="font-mono tabular-nums text-xs text-[var(--text-faint)] w-[100px] text-right">{money(priorAmount ?? 0)}</span>
+                      )}
+                      <span className="font-mono tabular-nums text-sm font-semibold text-[var(--text-strong)] w-[100px] text-right">
+                        {money(item.amount)}
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
           </Card>
 
