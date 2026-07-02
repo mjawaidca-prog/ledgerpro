@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, normalBalance, endOfDay } from '@/lib/reporting';
+import { getGLActivity, normalBalance, endOfDay, fiscalYearStartFor } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 type Acct = { code: string; name: string; type: string; subType: string | null; detailType: string | null };
@@ -28,14 +28,32 @@ function equityBucket(a: Acct): 'common_shares' | 'retained_earnings' | 'owners_
 }
 
 async function buildBalanceSheet(companyId: string, asOfDate: Date) {
-  const [company, accounts, activity] = await Promise.all([
-    db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true } }),
+  const [company, accounts, incomeExpenseAccounts, activity] = await Promise.all([
+    db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } }),
     db.chartOfAccount.findMany({
       where: { type: { in: ['asset', 'liability', 'equity'] }, active: true, companyId },
       orderBy: { code: 'asc' },
     }),
+    db.chartOfAccount.findMany({
+      where: { type: { in: ['income', 'expense'] }, active: true, companyId },
+      select: { code: true, type: true },
+    }),
     getGLActivity(companyId, { to: endOfDay(asOfDate) }),
   ]);
+
+  // Income/expense accounts aren't formally closed to retained earnings after
+  // each period (there's no closing entry), so a point-in-time balance sheet
+  // needs a synthetic "Current Year Earnings" line in Equity for the
+  // fundamental accounting equation to actually hold — otherwise Assets would
+  // never equal Liabilities + Equity for any company with current-year activity.
+  const fyStart = company ? fiscalYearStartFor(company.fiscalYearStart, asOfDate) : new Date(asOfDate.getFullYear(), 0, 1);
+  const yearActivity = await getGLActivity(companyId, { from: fyStart, to: endOfDay(asOfDate) });
+  const currentYearEarnings = Math.round(
+    incomeExpenseAccounts.reduce((s, a) => {
+      const bal = normalBalance(a.type, yearActivity[a.code]); // positive = normal-side amount for that account
+      return s + (a.type === 'income' ? bal : -bal); // net income = revenue - expenses
+    }, 0) * 100
+  ) / 100;
 
   const withBalance = accounts.map((a) => ({
     code: a.code,
@@ -65,10 +83,16 @@ async function buildBalanceSheet(companyId: string, asOfDate: Date) {
 
   const equityGroups: Record<string, typeof equity> = { common_shares: [], retained_earnings: [], owners_equity: [], other_equity: [] };
   for (const a of equity) equityGroups[equityBucket(a)].push(a);
+  if (currentYearEarnings !== 0) {
+    equityGroups.retained_earnings.push({
+      code: '', name: 'Current Year Earnings', detailType: null, subType: 'retained_earnings', type: 'equity',
+      balance: currentYearEarnings,
+    });
+  }
   const equityTotals = Object.fromEntries(
     Object.entries(equityGroups).map(([k, v]) => [k, v.reduce((s, a) => s + a.balance, 0)])
   );
-  const totalEquity = equity.reduce((s, a) => s + a.balance, 0);
+  const totalEquity = equity.reduce((s, a) => s + a.balance, 0) + currentYearEarnings;
 
   const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
   const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01;

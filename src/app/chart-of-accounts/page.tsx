@@ -201,6 +201,9 @@ export default function ChartOfAccountsPage() {
   }
 
   const typeOrder = ['asset', 'liability', 'equity', 'income', 'expense'];
+  const summaryKey: Record<string, keyof Summary> = {
+    asset: 'assets', liability: 'liabilities', equity: 'equity', income: 'income', expense: 'expenses',
+  };
 
   const columns: Column<COAEntry>[] = [
     {
@@ -285,7 +288,7 @@ export default function ChartOfAccountsPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-5 gap-4 mb-5">
         {typeOrder.map((type) => {
-          const val = summary[type as keyof Summary];
+          const val = summary[summaryKey[type]];
           const colorMap: Record<string, { bg: string; text: string }> = {
             asset: { bg: 'bg-[var(--success-soft)]', text: 'text-[var(--success)]' },
             liability: { bg: 'bg-[var(--warning-soft)]', text: 'text-[var(--warning)]' },
@@ -336,7 +339,7 @@ export default function ChartOfAccountsPage() {
           const entries = grouped[type];
           if (!entries || entries.length === 0) return null;
           const isExpanded = expandedGroups.has(type);
-          const typeTotal = summary[type as keyof Summary];
+          const typeTotal = summary[summaryKey[type]];
           const parentEntries = entries.filter(a => !a.parentCode);
 
           return (

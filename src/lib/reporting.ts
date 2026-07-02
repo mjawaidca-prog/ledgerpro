@@ -53,6 +53,16 @@ export function endOfDay(date: Date): Date {
   return d;
 }
 
+/** The fiscal-year start that contains `asOfDate`, anchored on the company's configured fiscal year start month/day. */
+export function fiscalYearStartFor(companyFiscalYearStart: Date, asOfDate: Date): Date {
+  const month = companyFiscalYearStart.getMonth();
+  const day = companyFiscalYearStart.getDate();
+  const year = asOfDate.getFullYear();
+  const thisYearStart = new Date(year, month, day);
+  const fyStartYear = asOfDate < thisYearStart ? year - 1 : year;
+  return new Date(fyStartYear, month, day);
+}
+
 /** Splits an account's balance into a trial-balance-style debit/credit pair — exactly one side is non-zero. */
 export function toDebitCredit(type: GLType, activity: AccountActivity | undefined): { debit: number; credit: number } {
   const net = normalBalance(type, activity);

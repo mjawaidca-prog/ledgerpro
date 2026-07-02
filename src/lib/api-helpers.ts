@@ -32,12 +32,16 @@ export async function requireCompany(
     companyId = cookieCompanyId;
   }
 
-  if (!companyId) {
-    // Fallback to session
+  // Resolve userId from the session whenever the header didn't provide one —
+  // independently of how companyId was resolved above. companyId can come back
+  // from the cookie fallback even when middleware didn't inject x-user-id, and
+  // userId must not be left undefined in that case (routes that require it, like
+  // role checks or audit logging, would silently misbehave).
+  if (!companyId || !userId) {
     const session = await getServerSession();
     const user = session?.user as any;
-    companyId = user?.activeCompanyId || user?.companyId || null;
-    userId = user?.id || undefined;
+    if (!companyId) companyId = user?.activeCompanyId || user?.companyId || null;
+    if (!userId) userId = user?.id || undefined;
   }
 
   if (!companyId) {
