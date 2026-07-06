@@ -100,7 +100,7 @@ export default function AccountantPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyId }),
       });
-      router.push('/');
+      router.push('/dashboard');
     } catch {} finally { setSwitching(null); }
   }
 

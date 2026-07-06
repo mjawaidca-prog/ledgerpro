@@ -92,7 +92,7 @@ export default function OnboardingPage() {
           onboardingComplete: true,
         }),
       });
-      router.push('/');
+      router.push('/dashboard');
       router.refresh();
     } catch {
       setError('Failed to complete setup. You can skip and finish later from Settings.');
@@ -102,7 +102,7 @@ export default function OnboardingPage() {
   }
 
   function handleSkip() {
-    router.push('/');
+    router.push('/dashboard');
   }
 
   return (

@@ -1,8 +1,7 @@
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
 
-// Public marketing site — reachable without signing in.
-const PUBLIC_MARKETING_PATHS = ['/home', '/features', '/pricing', '/faq', '/about', '/privacy', '/terms'];
+const PUBLIC_MARKETING_PATHS = ['/', '/home', '/features', '/pricing', '/faq', '/about', '/privacy', '/terms'];
 
 function isPublicPath(pathname: string) {
   return (
@@ -20,14 +19,6 @@ export default withAuth(
     const { pathname } = req.nextUrl;
     const token = req.nextauth.token;
 
-    // The bare root is the signed-in dashboard, but a logged-out visitor
-    // landing there should see the public marketing homepage, not a login
-    // wall — that's the whole point of having one.
-    if (pathname === '/' && !token) {
-      return NextResponse.redirect(new URL('/home', req.url));
-    }
-
-    // Allow public routes
     if (isPublicPath(pathname)) {
       return NextResponse.next();
     }
@@ -64,12 +55,6 @@ export default withAuth(
     callbacks: {
       authorized: ({ token, req }) => {
         const { pathname } = req.nextUrl;
-        // '/' is handled inside the middleware function above (redirect to
-        // /home when logged out, render the dashboard when logged in) —
-        // authorize it unconditionally here so next-auth doesn't short
-        // -circuit straight to /login before that logic runs.
-        if (pathname === '/') return true;
-        // Allow public paths without authentication
         if (isPublicPath(pathname)) {
           return true;
         }

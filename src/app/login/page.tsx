@@ -33,7 +33,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.push('/');
+    router.push('/dashboard');
   }
 
   return (
@@ -42,13 +42,13 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#1f6feb] to-[#7c3aed] text-white grid place-items-center font-bold text-xl shadow-lg shadow-[#1f6feb]/25">
+            <div className="w-12 h-12 rounded-xl bg-[var(--dark)] text-white grid place-items-center font-bold text-xl shadow-[0_18px_38px_-24px_rgba(179,38,30,.5)]">
               L
             </div>
             <span className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">
               Ledger<span className="text-[var(--primary)]">Pro</span>
             </span>
-            <div className="text-[10px] text-[var(--text-faint)] font-mono mt-1">by NexVar Labs</div>
+            <div className="text-[10px] text-[var(--text-faint)] font-mono mt-1">by NexvarLab</div>
           </div>
           <p className="text-sm text-[var(--text-muted)]">Sign in to your account</p>
         </div>
@@ -108,7 +108,7 @@ export default function LoginPage() {
           </Link>
         </p>
         <p className="text-center text-xs text-[var(--text-faint)] mt-6">
-          Ledger Pro by NexVar Labs
+          LedgerPro by NexvarLab
         </p>
       </div>
     </div>

@@ -31,7 +31,7 @@ interface RailProps {
 }
 
 const mainNavItems = [
-  { href: '/',              label: 'Dashboard',          icon: LayoutDashboard },
+  { href: '/dashboard',     label: 'Dashboard',          icon: LayoutDashboard },
   { href: '/invoices',      label: 'Sales & Invoices',   icon: FileText },
   { href: '/expenses',      label: 'Expenses',           icon: Receipt },
   { href: '/banking',       label: 'Banking',            icon: Building2 },
@@ -57,7 +57,7 @@ export function Rail({ companyName, companyPlan, companyId, userName, userEmail,
 
   function renderLink(item: { href: string; label: string; icon: any }) {
     const Icon = item.icon;
-    const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+    const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
     return (
       <Link key={item.href} href={item.href} className={cn('nav-item', isActive && 'active')}>
         <Icon size={18} />
