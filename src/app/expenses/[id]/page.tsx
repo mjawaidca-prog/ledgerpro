@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, Plus, Trash2, Save, X, Loader2 } from 'lucide-react';
+import { getTaxRate, type Province } from '@/lib/taxes';
 
 interface Bill {
   id: string; kind: 'bill' | 'expense';
@@ -57,9 +58,22 @@ export default function EditBillPage() {
   const [vendor, setVendor] = useState<{ id: string; name: string; companyName: string | null; email: string | null } | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
 
+  // Fetch categories & company tax rate
   useEffect(() => {
     fetch('/api/coa?type=expense')
       .then(r => r.json()).then(j => setCategories(Array.isArray(j.data) ? j.data : [])).catch(() => {});
+    // Fetch company province to default tax rate
+    fetch('/api/companies')
+      .then(r => r.json())
+      .then(json => {
+        const companies = json.data || [];
+        const activeId = document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
+        const active = companies.find((c: any) => c.id === activeId) || companies[0];
+        if (active?.province) {
+          setTaxRate(getTaxRate(active.province as Province).totalRate);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {

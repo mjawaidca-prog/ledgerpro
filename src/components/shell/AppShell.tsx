@@ -160,6 +160,7 @@ export function AppShell({
           onToggleTheme={toggleTheme}
           onDensityChange={setDensity}
           userName={userName}
+          userEmail={userEmail}
           onNotificationsClick={() => setNotificationsOpen(true)}
           onMenuClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         />

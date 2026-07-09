@@ -8,18 +8,24 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { money } from '@/lib/money';
 import { ArrowLeft, Plus, Trash2, Save, Loader2 } from 'lucide-react';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 export default function BudgetEditorPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const isNew = params.id === 'new';
+  const fy = useFiscalYear();
   const [name, setName] = useState('');
-  const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear());
+  // Use string state for year input to avoid parseInt-on-every-keystroke issue
+  // where typing "26" would capture just "2" and immediately react
+  const [fiscalYearText, setFiscalYearText] = useState(fy.defaultYear || String(new Date().getFullYear()));
   const [period, setPeriod] = useState<'monthly' | 'quarterly' | 'annual'>('annual');
   const [lines, setLines] = useState<{ glAccountCode: string; amount: number; period?: string }[]>([]);
   const [coaAccounts, setCoaAccounts] = useState<{ code: string; name: string; type: string }[]>([]);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
+
+  useEffect(() => { if (fy.loaded) setFiscalYearText(fy.defaultYear); }, [fy.loaded, fy.defaultYear]);
 
   useEffect(() => {
     fetch('/api/coa').then(r => r.json()).then(json => setCoaAccounts(json.data || [])).catch(() => {});
@@ -29,7 +35,7 @@ export default function BudgetEditorPage({ params }: { params: { id: string } })
         const b = json.data;
         if (b) {
           setName(b.name);
-          setFiscalYear(b.fiscalYear);
+          setFiscalYearText(String(b.fiscalYear));
           setPeriod(b.period);
           setLines(b.lines.map((l: any) => ({ glAccountCode: l.glAccountCode, amount: Number(l.amount), period: l.period })));
         }
@@ -48,6 +54,7 @@ export default function BudgetEditorPage({ params }: { params: { id: string } })
     if (lines.length === 0) { setMessage({ type: 'danger', text: 'Add at least one budget line.' }); return; }
     setSaving(true); setMessage(null);
 
+    const fiscalYear = parseInt(fiscalYearText) || new Date().getFullYear();
     const payload = { name, fiscalYear, period, lines };
     const url = isNew ? '/api/budgets' : `/api/budgets/${params.id}`;
     const method = isNew ? 'POST' : 'PUT';
@@ -83,7 +90,7 @@ export default function BudgetEditorPage({ params }: { params: { id: string } })
           <CardBody className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="field"><label>Budget Name</label><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Annual Operating Budget" /></div>
-              <div className="field"><label>Fiscal Year</label><input className="input" type="number" value={fiscalYear} onChange={e => setFiscalYear(parseInt(e.target.value) || 2026)} /></div>
+              <div className="field"><label>Fiscal Year</label><input className="input" type="text" inputMode="numeric" pattern="[0-9]*" value={fiscalYearText} onChange={e => setFiscalYearText(e.target.value)} /></div>
             </div>
             <div className="field">
               <label>Period</label>

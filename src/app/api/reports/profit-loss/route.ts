@@ -52,23 +52,39 @@ export async function GET(req: NextRequest) {
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
-    const year = searchParams.get('year') ?? new Date().getFullYear().toString();
+    const startParam = searchParams.get('startDate');
+    const endParam = searchParams.get('endDate');
     const compare = searchParams.get('compare') === 'true';
 
     const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
-    // Falls back to Jan 1 (plain calendar year) if the company record is
-    // somehow missing — matches every other report's fallback behavior.
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
 
-    const { start: startDate, end: endDate } = fiscalYearRangeForLabel(fyAnchor, Number(year));
+    let startDate: Date;
+    let endDate: Date;
+    let year: string;
+
+    if (startParam && endParam) {
+      // Custom date range — use directly
+      startDate = new Date(startParam);
+      endDate = new Date(endParam);
+      year = `${startParam} – ${endParam}`;
+    } else {
+      // Year-based fallback (fiscal-year-aware)
+      year = searchParams.get('year') ?? new Date().getFullYear().toString();
+      const range = fiscalYearRangeForLabel(fyAnchor, Number(year));
+      startDate = range.start;
+      endDate = range.end;
+    }
 
     const current = await buildPeriodTotals(companyId, startDate, endDate);
 
     let prior = null;
     if (compare) {
-      const priorYear = String(Number(year) - 1);
-      const { start: priorStart, end: priorEnd } = fiscalYearRangeForLabel(fyAnchor, Number(priorYear));
-      prior = { year: priorYear, ...(await buildPeriodTotals(companyId, priorStart, priorEnd)) };
+      const priorStart = new Date(startDate);
+      priorStart.setFullYear(priorStart.getFullYear() - 1);
+      const priorEnd = new Date(endDate);
+      priorEnd.setFullYear(priorEnd.getFullYear() - 1);
+      prior = { year: `${priorStart.getFullYear()}`, ...(await buildPeriodTotals(companyId, priorStart, priorEnd)) };
     }
 
     return NextResponse.json({

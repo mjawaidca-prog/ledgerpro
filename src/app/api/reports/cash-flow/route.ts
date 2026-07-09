@@ -1,18 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { requireCompany } from '@/lib/api-helpers';
+import { fiscalYearRangeForLabel } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
-    const year = searchParams.get('year') ?? new Date().getFullYear().toString();
+    const startParam = searchParams.get('startDate');
+    const endParam = searchParams.get('endDate');
 
-    const startDate = new Date(`${year}-01-01`);
-    const endDate = new Date(`${year}-12-31`);
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+
+    let startDate: Date;
+    let endDate: Date;
+    let year: string;
+
+    if (startParam && endParam) {
+      startDate = new Date(startParam);
+      endDate = new Date(endParam);
+      year = `${startParam} – ${endParam}`;
+    } else {
+      year = searchParams.get('year') ?? new Date().getFullYear().toString();
+      const range = fiscalYearRangeForLabel(fyAnchor, Number(year));
+      startDate = range.start;
+      endDate = range.end;
+    }
 
     // Operating activities: invoice payments (inflows) - bill payments (outflows)
     const [paidInvoices, paidBills, transactions] = await Promise.all([
@@ -44,11 +61,14 @@ export async function GET(req: NextRequest) {
     const netOperatingCash = operatingInflows - operatingOutflows;
     const netCashFlow = cashFromCustomers - cashPaidToVendors + netOperatingCash;
 
-    // Monthly breakdown
+    // Monthly breakdown — dynamically generate months from the date range
     const monthly: Record<string, { inflow: number; outflow: number }> = {};
-    for (let m = 0; m < 12; m++) {
-      const key = `${year}-${String(m + 1).padStart(2, '0')}`;
+    const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const endCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+    while (cursor <= endCursor) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
       monthly[key] = { inflow: 0, outflow: 0 };
+      cursor.setMonth(cursor.getMonth() + 1);
     }
 
     for (const t of transactions) {
@@ -78,7 +98,7 @@ export async function GET(req: NextRequest) {
           operatingOutflows,
           netOperatingCash,
           netCashFlow,
-          beginningCash: 0, // Would need prior-year data for true beginning balance
+          beginningCash: 0,
         },
         monthly: monthlyArray,
       },

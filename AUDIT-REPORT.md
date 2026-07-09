@@ -112,6 +112,6 @@ The hardcoded `signMultiplier = account.kind === 'creditcard' ? -1 : 1` was remo
 - [x] **BUG-3** — Added `boilerplateDescRe` filter in `flushRow()` + expanded `skipAnywhereRe` patterns.
 - [x] **BUG-4** — Dashboard now splits `totalCash` (bank only) from `totalCreditCardDebt` (CC only). New KPI card shown on dashboard.
 - [x] **BUG-6** — Duplicate detection now requires description similarity (first 5 chars match) in addition to date + amount.
-- [ ] **BUG-5** — Not yet fixed. Requires including unreviewed transactions in KPI calculations.
-- [ ] **BUG-7** — Column preview already helps. Could be improved with smarter auto-detection.
-- [ ] **BUG-8** — Historical data issue only. No new imports affected.
+- [x] **BUG-5** — Fixed. Dashboard now includes toreview/transfer transactions in KPI calculations using sign-based heuristics for uncategorized transactions.
+- [x] **BUG-7** — Fixed. PDF parser now provides per-column metadata (kind, populatedCount, avgMagnitude, samples) and the frontend wizard uses it for smarter debit/credit column detection.
+- [x] **BUG-8** — Fixed. Added repair API endpoint (GET/POST /api/repair/fix-credit-card-signs) to identify and fix credit card transactions with incorrect signs from import batches created before the signMultiplier fix date (July 1, 2026).

@@ -43,10 +43,10 @@ interface BalanceSheetData {
   prior: (Omit<BalanceSheetData, 'prior'>) | null;
 }
 
-function AccountRow({ account, indent, router, priorAmount }: { account: AccountLine; indent?: boolean; router: any; priorAmount?: number }) {
+function AccountRow({ account, indent, router, priorAmount, glStart, glEnd }: { account: AccountLine; indent?: boolean; router: any; priorAmount?: number; glStart?: string; glEnd?: string }) {
   return (
     <div
-      onClick={() => router.push(`/reports/general-ledger?code=${account.code}&name=${encodeURIComponent(account.name)}`)}
+      onClick={() => router.push(`/reports/general-ledger?code=${account.code}&name=${encodeURIComponent(account.name)}&start=${glStart || '2020-01-01'}&end=${glEnd || new Date().toISOString().slice(0, 10)}`)}
       className={cn('flex items-center justify-between py-2 px-3 rounded-md hover:bg-[var(--primary-soft)] cursor-pointer transition-colors group', indent && 'pl-8')}
     >
       <div className="flex-1 min-w-0">
@@ -194,7 +194,7 @@ export default function BalanceSheetPage() {
               Current Assets
             </div>
             {data.assets.current.accounts.map((a) => (
-              <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.assets.current, a.code) ?? 0 : undefined} />
+              <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.assets.current, a.code) ?? 0 : undefined} glStart={fy.fiscalYearStart} glEnd={asOf} />
             ))}
             <SectionHeader title="Total Current Assets" total={data.assets.current.total} borderTop />
 
@@ -204,7 +204,7 @@ export default function BalanceSheetPage() {
             </div>
             {data.assets.nonCurrent.accounts.length > 0 ? (
               data.assets.nonCurrent.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.assets.nonCurrent, a.code) ?? 0 : undefined} />
+                <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.assets.nonCurrent, a.code) ?? 0 : undefined} glStart={fy.fiscalYearStart} glEnd={asOf} />
               ))
             ) : (
               <div className="text-sm text-[var(--text-faint)] px-3 py-2 italic">No non-current assets</div>
@@ -233,7 +233,7 @@ export default function BalanceSheetPage() {
                 Current Liabilities
               </div>
               {data.liabilities.current.accounts.map((a) => (
-                <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.liabilities.current, a.code) ?? 0 : undefined} />
+                <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.liabilities.current, a.code) ?? 0 : undefined} glStart={fy.fiscalYearStart} glEnd={asOf} />
               ))}
               {data.liabilities.current.accounts.length === 0 && (
                 <div className="text-sm text-[var(--text-faint)] px-3 py-2 italic">No current liabilities</div>
@@ -247,7 +247,7 @@ export default function BalanceSheetPage() {
                     Non-Current Liabilities
                   </div>
                   {data.liabilities.nonCurrent.accounts.map((a) => (
-                    <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.liabilities.nonCurrent, a.code) ?? 0 : undefined} />
+                    <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(data.prior.liabilities.nonCurrent, a.code) ?? 0 : undefined} glStart={fy.fiscalYearStart} glEnd={asOf} />
                   ))}
                   <SectionHeader title="Total Non-Current Liabilities" total={data.liabilities.nonCurrent.total} borderTop />
                 </>
@@ -280,7 +280,7 @@ export default function BalanceSheetPage() {
                   <div key={label}>
                     <div className="text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] px-3 py-2 mt-2">{label}</div>
                     {group.accounts.map((a) => (
-                      <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(priorGroup, a.code) ?? 0 : undefined} />
+                      <AccountRow key={a.code} account={a} router={router} priorAmount={data.prior ? priorOf(priorGroup, a.code) ?? 0 : undefined} glStart={fy.fiscalYearStart} glEnd={asOf} />
                     ))}
                   </div>
                 ))}

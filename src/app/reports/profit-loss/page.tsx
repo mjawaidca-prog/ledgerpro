@@ -4,11 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
-import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
-import { format } from 'date-fns';
-import { ArrowLeft, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
+import { ArrowLeft, TrendingUp, TrendingDown, Loader2, Calendar } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 interface PnLSummary {
@@ -36,7 +35,14 @@ export default function ProfitLossPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fy = useFiscalYear();
-  const [year, setYear] = useState(fy.defaultYear);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY';
+  const lastFYLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear() - 1}` : 'Last FY';
+
+  const [startDate, setStartDate] = useState(fy.fiscalYearStart || `${now.getFullYear()}-01-01`);
+  const [endDate, setEndDate] = useState(fy.fiscalYearEnd || today);
+  const [activePreset, setActivePreset] = useState(fyLabel);
   const [compare, setCompare] = useState(false);
   const [companyName, setCompanyName] = useState('');
 
@@ -44,19 +50,40 @@ export default function ProfitLossPage() {
     fetch('/api/companies').then(r => r.json()).then(json => setCompanyName(json.data?.[0]?.name || '')).catch(() => {});
   }, []);
 
-  useEffect(() => { if (fy.loaded) setYear(fy.defaultYear); }, [fy.loaded, fy.defaultYear]);
+  useEffect(() => {
+    if (fy.loaded && activePreset === fyLabel) {
+      setStartDate(fy.fiscalYearStart);
+      setEndDate(fy.fiscalYearEnd || today);
+    }
+  }, [fy.loaded, fy.fiscalYearStart, fy.fiscalYearEnd]);
 
-  // Generate year options: 4 years centered on current FY
-  const yearOptions = Array.from({ length: 4 }, (_, i) => {
-    const y = String(Number(fy.defaultYear || new Date().getFullYear()) - 1 + i);
-    return { value: y, label: y };
-  });
+  const datePresets = [
+    { label: 'This month', get: () => ({ start: format(startOfMonth(now), 'yyyy-MM-dd'), end: today }) },
+    { label: 'Last month', get: () => ({ start: format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd'), end: format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd') }) },
+    { label: 'This quarter', get: () => ({ start: format(startOfQuarter(now), 'yyyy-MM-dd'), end: today }) },
+    { label: fyLabel, get: () => ({ start: fy.fiscalYearStart || `${now.getFullYear()}-01-01`, end: fy.fiscalYearEnd || today }) },
+    { label: lastFYLabel, get: () => {
+      const s = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
+      s.setFullYear(s.getFullYear() - 1);
+      const e = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
+      e.setFullYear(e.getFullYear() - 1);
+      return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
+    }},
+    { label: 'Custom', get: () => ({ start: startDate, end: endDate }) },
+  ];
+
+  function applyPreset(preset: typeof datePresets[0]) {
+    const { start, end } = preset.get();
+    setStartDate(start);
+    setEndDate(end);
+    setActivePreset(preset.label);
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ year, compare: String(compare) });
+      const params = new URLSearchParams({ startDate, endDate, compare: String(compare) });
       const res = await fetch(`/api/reports/profit-loss?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to load report');
       const json = await res.json();
@@ -66,7 +93,7 @@ export default function ProfitLossPage() {
     } finally {
       setLoading(false);
     }
-  }, [year, compare]);
+  }, [startDate, endDate, compare]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -83,18 +110,39 @@ export default function ProfitLossPage() {
         <div className="flex-1">
           <h1 className="t-h1">Profit & Loss</h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">
-            {companyName || 'Company'} · Fiscal Year {year}
+            {companyName || 'Company'} · {format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}
           </p>
         </div>
         <label className="flex items-center gap-2 text-sm text-[var(--text-muted)] mr-2">
           <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
-          Compare to prior year
+          Compare to prior period
         </label>
-        <Segmented
-          options={yearOptions}
-          value={year}
-          onChange={setYear}
-        />
+      </div>
+
+      {/* Date presets */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Calendar size={14} className="text-[var(--text-muted)]" />
+        {datePresets.map((preset) => (
+          <button
+            key={preset.label}
+            onClick={() => applyPreset(preset)}
+            className={cn(
+              'text-xs px-3 py-1.5 rounded-full font-medium transition-colors',
+              activePreset === preset.label
+                ? 'bg-[var(--primary)] text-white'
+                : 'bg-[var(--surface-3)] text-[var(--text-muted)] hover:text-[var(--text)]'
+            )}
+          >
+            {preset.label}
+          </button>
+        ))}
+        {activePreset === 'Custom' && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+            <span className="text-xs text-[var(--text-faint)]">to</span>
+            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -160,7 +208,7 @@ export default function ProfitLossPage() {
               {data.revenue.map((item) => {
                 const priorAmount = data.prior?.revenue.find((p) => p.code === item.code)?.amount;
                 return (
-                  <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
+                  <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}&start=${startDate}&end=${endDate}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
                     <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
                     <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{item.name}</span>
                     {data.prior && (
@@ -210,7 +258,7 @@ export default function ProfitLossPage() {
                 .map((item) => {
                   const priorAmount = data.prior?.expenses.find((p) => p.code === item.code)?.amount;
                   return (
-                    <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
+                    <div key={item.code} onClick={() => router.push(`/reports/general-ledger?code=${item.code}&name=${encodeURIComponent(item.name)}&start=${startDate}&end=${endDate}`)} className="flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-[var(--primary-soft)] transition-colors group">
                       <span className="font-mono text-xs text-[var(--text-muted)] w-[50px]">{item.code}</span>
                       <span className="text-sm text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">
                         {item.name}

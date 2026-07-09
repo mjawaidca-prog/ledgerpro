@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format, addDays } from 'date-fns';
 import { ArrowLeft, Plus, Trash2, Save, Search, X, Loader2, Building2 } from 'lucide-react';
+import { getTaxRate, type Province } from '@/lib/taxes';
 
 interface VendorOption {
   id: string; name: string; companyName: string | null; email: string | null;
@@ -62,7 +63,7 @@ function NewBillContent() {
   const taxAmount = subtotal * (taxRate / 100);
   const total = subtotal + taxAmount;
 
-  // Load vendors, bank accounts & expense categories
+  // Load vendors, bank accounts, expense categories & company tax rate
   useEffect(() => {
     fetch('/api/contacts?type=supplier&status=active&limit=100')
       .then(r => r.json()).then(j => setVendors(Array.isArray(j.data) ? j.data : [])).catch(() => {});
@@ -70,6 +71,18 @@ function NewBillContent() {
       .then(r => r.json()).then(j => setAccounts(Array.isArray(j.data) ? j.data : [])).catch(() => {});
     fetch('/api/coa?type=expense')
       .then(r => r.json()).then(j => setCategories(Array.isArray(j.data) ? j.data : [])).catch(() => {});
+    // Fetch company province to default tax rate
+    fetch('/api/companies')
+      .then(r => r.json())
+      .then(json => {
+        const companies = json.data || [];
+        const activeId = document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
+        const active = companies.find((c: any) => c.id === activeId) || companies[0];
+        if (active?.province) {
+          setTaxRate(getTaxRate(active.province as Province).totalRate);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const filteredVendors = vendors.filter(v =>

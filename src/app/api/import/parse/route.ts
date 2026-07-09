@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
         rows: result.rows,
         totalRows: result.rows.length,
         errors: result.errors,
+        columnMeta: result.columnMeta || null,
       },
     });
   } catch (error: any) {

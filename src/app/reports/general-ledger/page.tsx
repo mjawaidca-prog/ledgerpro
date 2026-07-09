@@ -6,7 +6,7 @@ import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
-import { format, startOfMonth, endOfMonth, subMonths, startOfYear, startOfQuarter, endOfQuarter } from 'date-fns';
+import { format, startOfMonth, endOfMonth, subMonths, startOfQuarter } from 'date-fns';
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar, Download, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { exportGL } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
@@ -46,15 +46,6 @@ interface GLData {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
 
-const DATE_PRESETS = [
-  { label: 'This month', get: () => ({ start: format(startOfMonth(new Date()), 'yyyy-MM-dd'), end: format(new Date(), 'yyyy-MM-dd') }) },
-  { label: 'Last month', get: () => ({ start: format(startOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd'), end: format(endOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd') }) },
-  { label: 'This quarter', get: () => ({ start: format(startOfQuarter(new Date()), 'yyyy-MM-dd'), end: format(new Date(), 'yyyy-MM-dd') }) },
-  { label: 'Year to date', get: () => ({ start: format(startOfYear(new Date()), 'yyyy-MM-dd'), end: format(new Date(), 'yyyy-MM-dd') }) },
-  { label: 'FY 2026', get: () => ({ start: '2026-01-01', end: '2026-12-31' }) },
-  { label: 'Custom', get: () => ({ start: '2026-01-01', end: new Date().toISOString().slice(0, 10) }) },
-];
-
 const SOURCE_ICONS: Record<string, React.ReactNode> = {
   invoice: <FileText size={14} />,
   bill: <Receipt size={14} />,
@@ -72,13 +63,40 @@ function GLContent() {
   const urlEnd = searchParams.get('end');
 
   const fy = useFiscalYear();
-  const fyStart = fy.fiscalYearStart || new Date().getFullYear() + '-01-01';
-  const fyEnd = fy.fiscalYearEnd || new Date().toISOString().slice(0, 10);
-  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY 2026';
-  const [startDate, setStartDate] = useState(urlStart || fyStart);
-  const [endDate, setEndDate] = useState(urlEnd || fyEnd);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
+  // Compute fallback FY dates — handles empty strings from useFiscalYear before it loads
+  const defaultFYStart = fy.fiscalYearStart || `${now.getFullYear()}-01-01`;
+  const defaultFYEnd = fy.fiscalYearEnd || today;
+  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY';
+  const lastFYLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear() - 1}` : 'Last FY';
+
+  const [startDate, setStartDate] = useState(urlStart || defaultFYStart);
+  const [endDate, setEndDate] = useState(urlEnd || defaultFYEnd);
   const [activePreset, setActivePreset] = useState(urlStart ? 'Custom' : fyLabel);
-  useEffect(() => { if (fy.loaded && !urlStart) { setStartDate(fyStart); setEndDate(fyEnd); setActivePreset(fyLabel); } }, [fy.loaded]);
+  useEffect(() => {
+    if (fy.loaded && !urlStart && activePreset === fyLabel) {
+      setStartDate(defaultFYStart);
+      setEndDate(defaultFYEnd);
+    }
+  }, [fy.loaded]);
+
+  // Dynamic date presets — all 6 matching the other report pages
+  const datePresets = [
+    { label: 'This month', get: () => ({ start: format(startOfMonth(now), 'yyyy-MM-dd'), end: today }) },
+    { label: 'Last month', get: () => ({ start: format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd'), end: format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd') }) },
+    { label: 'This quarter', get: () => ({ start: format(startOfQuarter(now), 'yyyy-MM-dd'), end: today }) },
+    { label: fyLabel, get: () => ({ start: defaultFYStart, end: defaultFYEnd }) },
+    { label: lastFYLabel, get: () => {
+      const s = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
+      s.setFullYear(s.getFullYear() - 1);
+      const e = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
+      e.setFullYear(e.getFullYear() - 1);
+      return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
+    }},
+    { label: 'Custom', get: () => ({ start: startDate, end: endDate }) },
+  ];
   const [data, setData] = useState<GLData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +120,7 @@ function GLContent() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  function applyPreset(preset: typeof DATE_PRESETS[0]) {
+  function applyPreset(preset: typeof datePresets[0]) {
     const { start, end } = preset.get();
     setStartDate(start);
     setEndDate(end);
@@ -145,6 +163,8 @@ function GLContent() {
                   </span>
                 </span>
               ) : 'All accounts'}
+              <span className="text-[var(--text-faint)]"> · </span>
+              <span>{format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}</span>
             </p>
           </div>
         </div>
@@ -159,7 +179,7 @@ function GLContent() {
       {/* Date presets */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <Calendar size={14} className="text-[var(--text-muted)]" />
-        {DATE_PRESETS.map((preset) => (
+        {datePresets.map((preset) => (
           <button
             key={preset.label}
             onClick={() => applyPreset(preset)}
@@ -175,9 +195,9 @@ function GLContent() {
         ))}
         {activePreset === 'Custom' && (
           <div className="flex items-center gap-2">
-            <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)] font-mono" />
+            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
             <span className="text-xs text-[var(--text-faint)]">to</span>
-            <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)] font-mono" />
+            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); setPage(1); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
           </div>
         )}
       </div>

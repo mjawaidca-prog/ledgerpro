@@ -6,11 +6,12 @@ import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
-import { ArrowLeft, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
+import { ArrowLeft, TrendingUp, TrendingDown, Loader2, Calendar } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 interface CashFlowData {
-  period: { year: string };
+  period: { year: string; startDate: string; endDate: string };
   summary: {
     cashFromCustomers: number;
     cashPaidToVendors: number;
@@ -28,14 +29,50 @@ export default function CashFlowPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fy = useFiscalYear();
-  const [year, setYear] = useState(fy.defaultYear);
-  useEffect(() => { if (fy.loaded) setYear(fy.defaultYear); }, [fy.loaded, fy.defaultYear]);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY';
+  const lastFYLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear() - 1}` : 'Last FY';
+
+  const [startDate, setStartDate] = useState(fy.fiscalYearStart || `${now.getFullYear()}-01-01`);
+  const [endDate, setEndDate] = useState(fy.fiscalYearEnd || today);
+  const [activePreset, setActivePreset] = useState(fyLabel);
+
+  useEffect(() => {
+    if (fy.loaded && activePreset === fyLabel) {
+      setStartDate(fy.fiscalYearStart);
+      setEndDate(fy.fiscalYearEnd || today);
+    }
+  }, [fy.loaded, fy.fiscalYearStart, fy.fiscalYearEnd]);
+
+  const datePresets = [
+    { label: 'This month', get: () => ({ start: format(startOfMonth(now), 'yyyy-MM-dd'), end: today }) },
+    { label: 'Last month', get: () => ({ start: format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd'), end: format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd') }) },
+    { label: 'This quarter', get: () => ({ start: format(startOfQuarter(now), 'yyyy-MM-dd'), end: today }) },
+    { label: fyLabel, get: () => ({ start: fy.fiscalYearStart || `${now.getFullYear()}-01-01`, end: fy.fiscalYearEnd || today }) },
+    { label: lastFYLabel, get: () => {
+      const s = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
+      s.setFullYear(s.getFullYear() - 1);
+      const e = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
+      e.setFullYear(e.getFullYear() - 1);
+      return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
+    }},
+    { label: 'Custom', get: () => ({ start: startDate, end: endDate }) },
+  ];
+
+  function applyPreset(preset: typeof datePresets[0]) {
+    const { start, end } = preset.get();
+    setStartDate(start);
+    setEndDate(end);
+    setActivePreset(preset.label);
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/reports/cash-flow?year=${year}`);
+      const params = new URLSearchParams({ startDate, endDate });
+      const res = await fetch(`/api/reports/cash-flow?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch cash flow');
       const json = await res.json();
       setData(json.data);
@@ -44,7 +81,7 @@ export default function CashFlowPage() {
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, [startDate, endDate]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -80,12 +117,35 @@ export default function CashFlowPage() {
           </button>
           <div>
             <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">Cash Flow Statement</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">Fiscal year {year}</p>
+            <p className="text-sm text-[var(--text-muted)] mt-0.5">{format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}</p>
           </div>
         </div>
-        <select value={year} onChange={(e) => setYear(e.target.value)} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)]">
-          {['2026', '2025'].map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+      </div>
+
+      {/* Date presets */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Calendar size={14} className="text-[var(--text-muted)]" />
+        {datePresets.map((preset) => (
+          <button
+            key={preset.label}
+            onClick={() => applyPreset(preset)}
+            className={cn(
+              'text-xs px-3 py-1.5 rounded-full font-medium transition-colors',
+              activePreset === preset.label
+                ? 'bg-[var(--primary)] text-white'
+                : 'bg-[var(--surface-3)] text-[var(--text-muted)] hover:text-[var(--text)]'
+            )}
+          >
+            {preset.label}
+          </button>
+        ))}
+        {activePreset === 'Custom' && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+            <span className="text-xs text-[var(--text-faint)]">to</span>
+            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+          </div>
+        )}
       </div>
 
       {/* Summary cards */}

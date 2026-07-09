@@ -57,12 +57,17 @@ export default function TrialBalancePage() {
   const [compare, setCompare] = useState(false);
   useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) { setAsOf(fy.fiscalYearEnd); setActivePreset('FY End'); } }, [fy.loaded, fy.fiscalYearEnd]);
 
+  // Dynamic presets based on company fiscal year
+  const fyStart = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(new Date().getFullYear(), 0, 1);
+  const fyEnd = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(new Date().getFullYear(), 11, 31);
+  const fyLabel = fy.fiscalYearStart ? `FY ${fyStart.getFullYear()}` : 'FY';
+
   const presets = [
     { label: 'Today', value: new Date().toISOString().slice(0, 10) },
     { label: 'End of last month', value: formatDate(endOfMonth(subMonths(new Date(), 1)), 'yyyy-MM-dd') },
-    { label: 'End of Q1', value: '2026-03-31' },
-    { label: 'End of Q2', value: '2026-06-30' },
-    { label: 'FY 2025', value: '2025-12-31' },
+    { label: 'End of Q1', value: formatDate(endOfMonth(new Date(fyStart.getFullYear(), fyStart.getMonth() + 2, 1)), 'yyyy-MM-dd') },
+    { label: 'End of Q2', value: formatDate(endOfMonth(new Date(fyStart.getFullYear(), fyStart.getMonth() + 5, 1)), 'yyyy-MM-dd') },
+    { label: fyLabel, value: formatDate(fyEnd, 'yyyy-MM-dd') },
   ];
 
   function applyPreset(label: string, value: string) {

@@ -20,6 +20,7 @@ import {
   X,
   Loader2,
 } from 'lucide-react';
+import { getTaxRate, type Province } from '@/lib/taxes';
 
 interface CustomerOption {
   id: string;
@@ -84,7 +85,7 @@ export default function NewInvoicePage() {
   const taxAmount = subtotal * (taxRate / 100);
   const total = subtotal + taxAmount;
 
-  // Fetch customers & revenue categories
+  // Fetch customers, revenue categories, and company tax rate
   useEffect(() => {
     fetch('/api/contacts?type=customer&status=active&limit=100')
       .then((r) => r.json())
@@ -93,6 +94,18 @@ export default function NewInvoicePage() {
     fetch('/api/coa?type=income')
       .then((r) => r.json())
       .then((json) => setCategories(Array.isArray(json.data) ? json.data : []))
+      .catch(() => {});
+    // Fetch company province to default tax rate
+    fetch('/api/companies')
+      .then((r) => r.json())
+      .then((json) => {
+        const companies = json.data || [];
+        const activeId = document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
+        const active = companies.find((c: any) => c.id === activeId) || companies[0];
+        if (active?.province) {
+          setTaxRate(getTaxRate(active.province as Province).totalRate);
+        }
+      })
       .catch(() => {});
   }, []);
 

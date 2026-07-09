@@ -5,11 +5,10 @@ import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
-import { format } from 'date-fns';
-import { Printer, Loader2, Download, ArrowRight } from 'lucide-react';
+import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
+import { Printer, Loader2, Download, ArrowRight, Calendar } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 
 export default function ManagementPackagePage() {
@@ -17,25 +16,50 @@ export default function ManagementPackagePage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [year, setYear] = useState(fy.defaultYear);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY';
+  const lastFYLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear() - 1}` : 'Last FY';
 
-  // Once the company's fiscal year loads, default the selector to its
-  // current fiscal year instead of the plain calendar year used until then.
+  const [startDate, setStartDate] = useState(fy.fiscalYearStart || `${now.getFullYear()}-01-01`);
+  const [endDate, setEndDate] = useState(fy.fiscalYearEnd || today);
+  const [activePreset, setActivePreset] = useState(fyLabel);
+
   useEffect(() => {
-    if (fy.loaded) setYear(fy.defaultYear);
-  }, [fy.loaded, fy.defaultYear]);
+    if (fy.loaded && activePreset === fyLabel) {
+      setStartDate(fy.fiscalYearStart);
+      setEndDate(fy.fiscalYearEnd || today);
+    }
+  }, [fy.loaded, fy.fiscalYearStart, fy.fiscalYearEnd]);
 
-  // 4 fiscal years centered on the current one (same windowing as the P&L page)
-  const yearOptions = Array.from({ length: 4 }, (_, i) => {
-    const y = String(Number(fy.defaultYear || new Date().getFullYear()) - 1 + i);
-    return { value: y, label: y };
-  });
+  const datePresets = [
+    { label: 'This month', get: () => ({ start: format(startOfMonth(now), 'yyyy-MM-dd'), end: today }) },
+    { label: 'Last month', get: () => ({ start: format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd'), end: format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd') }) },
+    { label: 'This quarter', get: () => ({ start: format(startOfQuarter(now), 'yyyy-MM-dd'), end: today }) },
+    { label: fyLabel, get: () => ({ start: fy.fiscalYearStart || `${now.getFullYear()}-01-01`, end: fy.fiscalYearEnd || today }) },
+    { label: lastFYLabel, get: () => {
+      const s = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
+      s.setFullYear(s.getFullYear() - 1);
+      const e = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
+      e.setFullYear(e.getFullYear() - 1);
+      return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
+    }},
+    { label: 'Custom', get: () => ({ start: startDate, end: endDate }) },
+  ];
+
+  function applyPreset(preset: typeof datePresets[0]) {
+    const { start, end } = preset.get();
+    setStartDate(start);
+    setEndDate(end);
+    setActivePreset(preset.label);
+  }
 
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/reports/management-package?year=${year}`);
+        const params = new URLSearchParams({ startDate, endDate });
+        const res = await fetch(`/api/reports/management-package?${params.toString()}`);
         if (!res.ok) throw new Error('Failed to load');
         setData((await res.json()).data);
       } catch (err: any) {
@@ -43,7 +67,7 @@ export default function ManagementPackagePage() {
       } finally { setLoading(false); }
     }
     load();
-  }, [year]);
+  }, [startDate, endDate]);
 
   const d = data;
 
@@ -53,24 +77,47 @@ export default function ManagementPackagePage() {
         <div>
           <h1 className="greet">Management Report Package</h1>
           <p className="sub">
-            Combined financial statements for fiscal year {year}
+            Combined financial statements for {format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}
             {d?.asOf ? <> — as of {format(new Date(d.asOf), 'MMMM d, yyyy')}</> : ''}.
           </p>
         </div>
         <div className="spacer" />
-        <label className="field print:hidden" style={{ marginBottom: 0 }}>
-          <Segmented options={yearOptions} value={year} onChange={setYear} />
-        </label>
         <Button variant="secondary" onClick={() => window.print()}>
           <Printer size={16} /> Print Package
         </Button>
+      </div>
+
+      {/* Date presets */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
+        <Calendar size={14} className="text-[var(--text-muted)]" />
+        {datePresets.map((preset) => (
+          <button
+            key={preset.label}
+            onClick={() => applyPreset(preset)}
+            className={cn(
+              'text-xs px-3 py-1.5 rounded-full font-medium transition-colors',
+              activePreset === preset.label
+                ? 'bg-[var(--primary)] text-white'
+                : 'bg-[var(--surface-3)] text-[var(--text-muted)] hover:text-[var(--text)]'
+            )}
+          >
+            {preset.label}
+          </button>
+        ))}
+        {activePreset === 'Custom' && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setActivePreset('Custom'); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+            <span className="text-xs text-[var(--text-faint)]">to</span>
+            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setActivePreset('Custom'); }} className="text-xs border border-[var(--border)] rounded px-2 py-1.5 bg-[var(--surface)]" />
+          </div>
+        )}
       </div>
 
       {/* print-only header */}
       {d && (
         <div className="hidden print:block mb-6 text-center">
           <h1 className="text-2xl font-bold">Management Report Package</h1>
-          <p className="text-sm text-gray-500">Fiscal year {year} — as of {format(new Date(d.asOf), 'MMMM d, yyyy')}</p>
+          <p className="text-sm text-gray-500">{format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')} — as of {format(new Date(d.asOf), 'MMMM d, yyyy')}</p>
         </div>
       )}
 

@@ -14,11 +14,25 @@ export interface ParsedRow {
   raw: Record<string, string>;
 }
 
+export interface ColumnMeta {
+  name: string;
+  /** 'signed' = has both +/- values, 'positive-only' = all >= 0, 'negative-only' = all <= 0, 'balance' = running-balance column */
+  kind: 'signed' | 'positive-only' | 'negative-only' | 'balance';
+  /** Number of rows where this column has a non-zero value */
+  populatedCount: number;
+  /** Average absolute magnitude of values in this column */
+  avgMagnitude: number;
+  /** Sample values for display (up to 3) */
+  samples: number[];
+}
+
 export interface ParseResult {
   rows: ParsedRow[];
   headers: string[];
   errors: string[];
   fileType: 'csv' | 'ofx' | 'pdf' | 'unknown';
+  /** Per-column metadata for PDF amount columns — aids the wizard's auto-detection */
+  columnMeta?: ColumnMeta[];
 }
 
 function toIsoDate(year: number, month: number, day: number): string | null {
@@ -822,11 +836,87 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
       headers.push(`Amount_${i}`);
     }
 
+    // ── Column type auto-detection ──
+    // Analyze each Amount_N column to determine its likely type: signed (mixed
+    // +/- values), positive-only (dedicated debit or credit column), negative-only,
+    // or a running balance column. This metadata helps the import wizard make
+    // smarter auto-mapping decisions.
+    const amountCols = Array.from({ length: Math.max(maxAmountCols, 0) }, (_, i) => `Amount_${i + 1}`);
+    const columnMeta: ColumnMeta[] = [];
+
+    if (rows.length > 0 && amountCols.length > 0) {
+      // Gather statistics per column
+      const colStats = amountCols.map((colName) => {
+        let populatedCount = 0;
+        let totalMagnitude = 0;
+        let negCount = 0;
+        let posCount = 0;
+        const samples: number[] = [];
+
+        for (const row of rows) {
+          const raw = row.raw[colName];
+          if (raw === undefined || raw === null || raw === '') continue;
+          const val = Number(raw);
+          if (!Number.isFinite(val)) continue;
+          if (Math.abs(val) < 0.001) continue;
+
+          populatedCount++;
+          totalMagnitude += Math.abs(val);
+          if (val < -0.001) negCount++;
+          else posCount++;
+
+          if (samples.length < 3) samples.push(Math.round(val * 100) / 100);
+        }
+
+        const avgMagnitude = populatedCount > 0 ? totalMagnitude / populatedCount : 0;
+
+        return { colName, populatedCount, avgMagnitude, negCount, posCount, samples };
+      });
+
+      // Detect balance columns: heavily populated (>90% of rows) AND
+      // magnitude much larger than other columns (running balance accumulates)
+      const totalRows = rows.length;
+      const stronglyPopulated = colStats.filter((s) => s.populatedCount / totalRows > 0.9);
+
+      for (const stat of colStats) {
+        let kind: ColumnMeta['kind'] = 'signed';
+
+        // Balance detection: high population rate + significantly larger magnitude
+        if (stat.populatedCount / totalRows > 0.9 && amountCols.length >= 2) {
+          const others = colStats.filter((o) => o.colName !== stat.colName);
+          const maxOtherAvg = Math.max(0, ...others.map((o) => o.avgMagnitude));
+          if (maxOtherAvg === 0 || stat.avgMagnitude > maxOtherAvg * 2) {
+            kind = 'balance';
+          }
+        }
+
+        // For non-balance columns, detect sign pattern
+        if (kind !== 'balance') {
+          if (stat.negCount === 0 && stat.posCount > 0) {
+            kind = 'positive-only';
+          } else if (stat.posCount === 0 && stat.negCount > 0) {
+            kind = 'negative-only';
+          } else {
+            kind = 'signed'; // has both positive and negative values
+          }
+        }
+
+        columnMeta.push({
+          name: stat.colName,
+          kind,
+          populatedCount: stat.populatedCount,
+          avgMagnitude: Math.round(stat.avgMagnitude * 100) / 100,
+          samples: stat.samples,
+        });
+      }
+    }
+
     return {
       rows,
       headers,
       errors,
       fileType: 'pdf',
+      columnMeta: columnMeta.length > 0 ? columnMeta : undefined,
     };
   } catch (err) {
     return {

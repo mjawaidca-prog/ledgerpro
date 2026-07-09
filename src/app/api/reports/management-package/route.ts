@@ -14,15 +14,27 @@ export async function GET(req: NextRequest) {
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
 
     const { searchParams } = new URL(req.url);
+    const startParam = searchParams.get('startDate');
+    const endParam = searchParams.get('endDate');
     const now = new Date();
-    // year = the fiscal year's label (its start year), same convention as
-    // /api/reports/profit-loss — defaults to whichever fiscal year contains today.
-    const year = Number(searchParams.get('year') ?? fiscalYearStartFor(fyAnchor, now).getFullYear());
-    const { start: yearStart, end: fyEnd } = fiscalYearRangeForLabel(fyAnchor, year);
-    // Cap "as of" to today for the current/future fiscal year so a
-    // still-in-progress year shows real balances instead of a full year of
-    // (mostly zero) projected activity; a fully past fiscal year shows as of its own end.
-    const asOfDate = fyEnd < now ? fyEnd : endOfDay(now);
+
+    let yearStart: Date;
+    let fyEnd: Date;
+    let year: number;
+    let asOfDate: Date;
+
+    if (startParam && endParam) {
+      yearStart = new Date(startParam);
+      fyEnd = new Date(endParam);
+      year = yearStart.getFullYear();
+      asOfDate = fyEnd < now ? fyEnd : endOfDay(now);
+    } else {
+      year = Number(searchParams.get('year') ?? fiscalYearStartFor(fyAnchor, now).getFullYear());
+      const range = fiscalYearRangeForLabel(fyAnchor, year);
+      yearStart = range.start;
+      fyEnd = range.end;
+      asOfDate = fyEnd < now ? fyEnd : endOfDay(now);
+    }
     const asOf = asOfDate.toISOString().slice(0, 10);
 
     const [
@@ -86,13 +98,15 @@ export async function GET(req: NextRequest) {
     };
 
     // ─── Cash Flow ───
-    // Seed all 12 months of the fiscal year (not calendar Jan–Dec) so a
-    // non-calendar fiscal year still shows a complete, correctly-ordered grid.
+    // Dynamically generate months across the full date range (handles
+    // arbitrary-length periods, non-calendar fiscal years, and custom ranges).
     const monthlyMap: Record<string, { inflow: number; outflow: number }> = {};
-    for (let m = 0; m < 12; m++) {
-      const monthDate = new Date(yearStart.getFullYear(), yearStart.getMonth() + m, 1);
-      const key = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
+    const cursor = new Date(yearStart.getFullYear(), yearStart.getMonth(), 1);
+    const endCursor = new Date(fyEnd.getFullYear(), fyEnd.getMonth(), 1);
+    while (cursor <= endCursor) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
       monthlyMap[key] = { inflow: 0, outflow: 0 };
+      cursor.setMonth(cursor.getMonth() + 1);
     }
     for (const tx of transactions) {
       const key = new Date(tx.date).toISOString().slice(0, 7);

@@ -5,6 +5,8 @@ import { cn } from '@/lib/cn';
 import { Segmented } from '@/components/ui/Segmented';
 import { Button } from '@/components/ui/Button';
 import { GlobalSearch } from './GlobalSearch';
+import { signOut } from 'next-auth/react';
+import { clearActiveCompanyCookies } from '@/lib/active-company-cookies';
 import {
   Search,
   Moon,
@@ -12,6 +14,9 @@ import {
   Bell,
   ChevronDown,
   Calendar,
+  User,
+  Settings,
+  LogOut,
 } from 'lucide-react';
 
 interface TopbarProps {
@@ -20,6 +25,7 @@ interface TopbarProps {
   onToggleTheme: () => void;
   onDensityChange: (d: 'comfortable' | 'compact') => void;
   userName: string;
+  userEmail?: string;
   onNotificationsClick?: () => void;
   onMenuClick?: () => void;
 }
@@ -30,10 +36,12 @@ export function Topbar({
   onToggleTheme,
   onDensityChange,
   userName,
+  userEmail,
   onNotificationsClick,
   onMenuClick,
 }: TopbarProps) {
   const [unreadCount, setUnreadCount] = useState(0);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Poll for unread notification count
   useEffect(() => {
@@ -113,11 +121,60 @@ export function Topbar({
         )}
       </button>
 
-      {/* User avatar */}
-      <button className="bar-btn">
-        <div className="av">{userName.charAt(0)}</div>
-        <ChevronDown size={16} />
-      </button>
+      {/* User avatar + dropdown */}
+      <div style={{ position: 'relative' }}>
+        <button
+          className="bar-btn"
+          onClick={() => setUserMenuOpen(!userMenuOpen)}
+        >
+          <div className="av">{userName.charAt(0)}</div>
+          <ChevronDown size={16} />
+        </button>
+
+        {userMenuOpen && (
+          <>
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+              onClick={() => setUserMenuOpen(false)}
+            />
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+              minWidth: 220, zIndex: 50,
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-lg)',
+              padding: 6, overflow: 'hidden',
+            }}>
+              <div style={{ padding: '10px 12px 8px' }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-strong)' }}>{userName}</div>
+                {userEmail && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>{userEmail}</div>}
+              </div>
+              <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+              <button
+                onClick={() => { setUserMenuOpen(false); window.location.href = '/settings'; }}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '8px 10px',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  cursor: 'pointer', border: 'none', background: 'transparent',
+                  borderRadius: 'var(--r-md)', fontSize: 13, color: 'var(--text)',
+                }}
+              >
+                <Settings size={16} /> Settings
+              </button>
+              <button
+                onClick={() => { clearActiveCompanyCookies(); signOut({ callbackUrl: '/login' }); }}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '8px 10px',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  cursor: 'pointer', border: 'none', background: 'transparent',
+                  borderRadius: 'var(--r-md)', fontSize: 13, color: 'var(--danger)',
+                }}
+              >
+                <LogOut size={16} /> Sign Out
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </header>
     <GlobalSearch />
     </>

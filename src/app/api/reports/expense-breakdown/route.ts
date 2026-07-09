@@ -1,18 +1,35 @@
-import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { requireCompany } from '@/lib/api-helpers';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { fiscalYearRangeForLabel } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const { companyId, userId, error } = await requireCompany(req);
+    const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
-    const year = searchParams.get('year') ?? new Date().getFullYear().toString();
+    const startParam = searchParams.get('startDate');
+    const endParam = searchParams.get('endDate');
 
-    const startDate = new Date(`${year}-01-01`);
-    const endDate = new Date(`${year}-12-31`);
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+
+    let startDate: Date;
+    let endDate: Date;
+    let year: string;
+
+    if (startParam && endParam) {
+      startDate = new Date(startParam);
+      endDate = new Date(endParam);
+      year = `${startParam} – ${endParam}`;
+    } else {
+      year = searchParams.get('year') ?? new Date().getFullYear().toString();
+      const range = fiscalYearRangeForLabel(fyAnchor, Number(year));
+      startDate = range.start;
+      endDate = range.end;
+    }
 
     const [expenseAccounts, bills] = await Promise.all([
       db.chartOfAccount.findMany({
@@ -60,7 +77,7 @@ export async function GET(req: NextRequest) {
         detailType: acct.detailType,
         balance: amount,
         billCount: billData.count,
-        descriptions: billData.descriptions.slice(0, 5), // top 5 descriptions
+        descriptions: billData.descriptions.slice(0, 5),
         percentage: Math.round(pct * 10) / 10,
       };
     });
@@ -68,6 +85,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       data: {
         year,
+        startDate: startDate.toISOString().slice(0, 10),
+        endDate: endDate.toISOString().slice(0, 10),
         totalExpenses,
         categories,
         count: categories.length,

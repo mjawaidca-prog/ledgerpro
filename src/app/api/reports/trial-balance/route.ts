@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, endOfDay, toDebitCredit } from '@/lib/reporting';
+import { getGLActivity, endOfDay, toDebitCredit, fiscalYearStartFor } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
-async function buildTrialBalance(companyId: string, asOfDate: Date) {
+async function buildTrialBalance(companyId: string, asOfDate: Date, fyAnchor: Date) {
   const [accounts, activity, jeCount] = await Promise.all([
     db.chartOfAccount.findMany({ where: { active: true, companyId }, orderBy: { code: 'asc' } }),
     getGLActivity(companyId, { to: asOfDate }),
     db.journalEntry.count({ where: { entryDate: { lte: asOfDate }, companyId } }),
   ]);
+
+  // Compute fiscal year start that contains the asOf date, so the GL link
+  // opens to the same period the TB covers (FY start → asOf date).
+  const fyStart = fiscalYearStartFor(fyAnchor, asOfDate);
+  const glStart = fyStart.toISOString().slice(0, 10);
+  const glEnd = asOfDate.toISOString().slice(0, 10);
 
   const rows = accounts.map((acct) => {
     const act = activity[acct.code];
@@ -24,7 +30,7 @@ async function buildTrialBalance(companyId: string, asOfDate: Date) {
       debit: Math.round(debit * 100) / 100,
       credit: Math.round(credit * 100) / 100,
       hasActivity: !!act && (act.debits > 0 || act.credits > 0),
-      link: `/reports/general-ledger?code=${acct.code}&name=${encodeURIComponent(acct.name)}`,
+      link: `/reports/general-ledger?code=${acct.code}&name=${encodeURIComponent(acct.name)}&start=${glStart}&end=${glEnd}`,
     };
   });
 
@@ -51,13 +57,16 @@ export async function GET(req: NextRequest) {
     const compare = searchParams.get('compare') === 'true';
     const asOfDate = endOfDay(new Date(asOf));
 
-    const current = await buildTrialBalance(companyId, asOfDate);
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+
+    const current = await buildTrialBalance(companyId, asOfDate, fyAnchor);
 
     let prior = null;
     if (compare) {
       const priorAsOfDate = new Date(asOfDate);
       priorAsOfDate.setFullYear(priorAsOfDate.getFullYear() - 1);
-      const priorTB = await buildTrialBalance(companyId, priorAsOfDate);
+      const priorTB = await buildTrialBalance(companyId, priorAsOfDate, fyAnchor);
       prior = { asOf: priorAsOfDate.toISOString().slice(0, 10), ...priorTB };
     }
 

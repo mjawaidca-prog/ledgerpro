@@ -112,12 +112,13 @@ export async function GET(req: NextRequest) {
       }),
       db.invoice.count({ where: { companyId, status: { in: ['sent', 'overdue'] }, dueDate: { lt: now } } }),
       db.invoice.count({ where: { companyId, status: { not: 'void' } } }),
-      // Categorized-but-not-yet-posted transactions — GL-posted balances alone
-      // understate revenue/expenses right after a big import, before the user
-      // has run "Post to GL" on everything they've just categorized.
+      // Unposted transactions — includes both categorized (user has assigned
+      // a COA category) and toreview/transfer (imported but not yet categorized).
+      // GL-posted balances alone understate revenue/expenses right after a big
+      // import, before the user has had a chance to review and post everything.
       db.transaction.findMany({
-        where: { companyId, date: { gte: start, lte: end }, status: 'categorized' },
-        select: { amount: true, category: { select: { type: true } } },
+        where: { companyId, date: { gte: start, lte: end }, status: { in: ['categorized', 'toreview', 'transfer'] } },
+        select: { amount: true, description: true, category: { select: { type: true } } },
       }),
     ]);
 
@@ -128,8 +129,17 @@ export async function GET(req: NextRequest) {
     let unpostedRevenue = 0;
     let unpostedExpenses = 0;
     for (const tx of unpostedCategorized) {
-      if (tx.category?.type === 'income') unpostedRevenue += Number(tx.amount);
-      else if (tx.category?.type === 'expense') unpostedExpenses += Math.abs(Number(tx.amount));
+      if (tx.category?.type === 'income') {
+        unpostedRevenue += Number(tx.amount);
+      } else if (tx.category?.type === 'expense') {
+        unpostedExpenses += Math.abs(Number(tx.amount));
+      } else {
+        // Uncategorized (toreview/transfer): use sign-based heuristic.
+        // Positive amounts are likely income (deposits); negative are likely expenses.
+        const amt = Number(tx.amount);
+        if (amt > 0) unpostedRevenue += amt;
+        else unpostedExpenses += Math.abs(amt);
+      }
     }
 
     const currentRevenue = incomeAccounts.reduce((s, a) => s + Number(a.balance), 0) + unpostedRevenue;

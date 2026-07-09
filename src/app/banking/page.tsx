@@ -477,6 +477,9 @@ export default function BankingPage() {
         }
       }
 
+      // Carry forward column metadata from the first PDF result if present
+      const firstColumnMeta = allResults.find((r: any) => r.columnMeta)?.columnMeta || null;
+
       const combined = {
         headers: combinedHeaders,
         rows: combinedRows,
@@ -484,6 +487,7 @@ export default function BankingPage() {
         fileType: combinedFileType,
         errors: allErrors,
         _fileCount: allResults.length,
+        columnMeta: firstColumnMeta,
       };
 
       setWizardParsed(combined);
@@ -511,6 +515,11 @@ export default function BankingPage() {
         let posCounts: Record<string, number> = {};
         let popCounts: Record<string, number> = {};
         let magSums: Record<string, number> = {};
+
+        // Use server-provided column metadata when available (BUG-7 fix)
+        const serverColumnMeta: Array<{name: string; kind: string; populatedCount: number; avgMagnitude: number; samples: number[]}> | null =
+          combined.columnMeta || null;
+
         for (const col of amountCols) { negCounts[col] = 0; posCounts[col] = 0; popCounts[col] = 0; magSums[col] = 0; }
         for (const row of rows) {
           for (const col of amountCols) {
@@ -535,7 +544,17 @@ export default function BankingPage() {
         const totalRows = rows.length || 1;
         const avgMag = (c: string) => (popCounts[c] ? magSums[c] / popCounts[c] : 0);
         let balanceCol: string | undefined;
-        if (amountCols.length >= 2) {
+
+        // Prefer server-detected balance column if available
+        if (serverColumnMeta) {
+          const serverBalance = serverColumnMeta.find(m => m.kind === 'balance');
+          if (serverBalance && amountCols.includes(serverBalance.name)) {
+            balanceCol = serverBalance.name;
+          }
+        }
+
+        // Fallback: local balance detection
+        if (!balanceCol && amountCols.length >= 2) {
           const stronglyPopulated = amountCols.filter((c: string) => (popCounts[c] || 0) / totalRows > 0.9);
           for (const c of stronglyPopulated) {
             const others = amountCols.filter((o: string) => o !== c);
@@ -552,7 +571,28 @@ export default function BankingPage() {
         const sortedByPos = splitCols.slice().sort((a: string, b: string) => (posCounts[b] || 0) - (posCounts[a] || 0));
         const hasAnyNegative = splitCols.some((c: string) => (negCounts[c] || 0) > 0);
 
-        if (hasAnyNegative) {
+        // Use server column metadata for smarter debit/credit column detection
+        if (serverColumnMeta && splitCols.length >= 2 && !hasAnyNegative) {
+          // Server tells us which columns are positive-only — use this to
+          // distinguish debit vs credit columns that both show as positive.
+          const positiveOnlyCols = serverColumnMeta
+            .filter(m => m.kind === 'positive-only' && splitCols.includes(m.name))
+            .map(m => m.name);
+
+          if (positiveOnlyCols.length >= 2) {
+            // Multiple positive-only columns — likely separate debit and credit.
+            // Debit columns typically have more entries (most transactions are debits)
+            // and smaller average amounts than credit columns (deposits are larger).
+            const byPop = positiveOnlyCols.sort((a, b) => (popCounts[b] || 0) - (popCounts[a] || 0));
+            auto.debit = byPop[0];   // More entries = likely debits
+            auto.credit = byPop[1];  // Fewer entries = likely credits
+          } else {
+            // Fall back to conventional order
+            auto.debit = splitCols[0];
+            auto.credit = splitCols[1];
+            pdfAmbiguousSign = true;
+          }
+        } else if (hasAnyNegative) {
           auto.debit = sortedByNeg[0];
           const creditCandidate = sortedByPos.find((c: string) => c !== auto.debit);
           if (creditCandidate) auto.credit = creditCandidate;
