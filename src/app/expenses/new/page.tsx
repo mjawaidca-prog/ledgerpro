@@ -55,6 +55,12 @@ function NewBillContent() {
   const [lines, setLines] = useState<LineItem[]>([newLine()]);
   const [taxRate, setTaxRate] = useState(8.5);
   const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
+  // Inline vendor creation
+  const [newVendorName, setNewVendorName] = useState('');
+  const [newVendorCompany, setNewVendorCompany] = useState('');
+  const [newVendorEmail, setNewVendorEmail] = useState('');
+  const [creatingContact, setCreatingContact] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'danger' } | null>(null);
@@ -89,6 +95,41 @@ function NewBillContent() {
     !vendorSearch || v.name.toLowerCase().includes(vendorSearch.toLowerCase()) ||
     (v.companyName ?? '').toLowerCase().includes(vendorSearch.toLowerCase())
   );
+
+  async function createVendor() {
+    if (!newVendorName.trim()) {
+      setError('Vendor name is required.');
+      return;
+    }
+    setCreatingContact(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newVendorName.trim(),
+          companyName: newVendorCompany.trim() || null,
+          email: newVendorEmail.trim() || null,
+          type: 'supplier',
+          status: 'active',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to create vendor');
+      setVendors((prev) => [...prev, json.data]);
+      setSelectedVendor(json.data);
+      setVendorSearch('');
+      setVendorOpen(false);
+      setNewVendorName('');
+      setNewVendorCompany('');
+      setNewVendorEmail('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create vendor');
+    } finally {
+      setCreatingContact(false);
+    }
+  }
 
   function updateLine(key: string, field: keyof LineItem, value: any) {
     setLines(prev => prev.map(l => l.key === key ? { ...l, [field]: value } : l));
@@ -206,9 +247,50 @@ function NewBillContent() {
                   <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
                 </div>
                 {vendorOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] z-20 max-h-[200px] overflow-y-auto">
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] z-20 max-h-[320px] overflow-y-auto">
                     {filteredVendors.length === 0 ? (
-                      <div className="px-3 py-4 text-sm text-[var(--text-muted)] text-center">No vendors found.</div>
+                      <div className="p-3 space-y-3">
+                        <div className="text-sm text-[var(--text-muted)] text-center">
+                          {vendorSearch
+                            ? `No vendors matching "${vendorSearch}". Create one:`
+                            : 'No vendors yet. Create your first vendor:'}
+                        </div>
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Vendor name *"
+                            value={newVendorName}
+                            onChange={(e) => setNewVendorName(e.target.value)}
+                            className="w-full h-[34px] px-3 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createVendor(); }}
+                          />
+                          <input
+                            type="text"
+                            placeholder="Company name (optional)"
+                            value={newVendorCompany}
+                            onChange={(e) => setNewVendorCompany(e.target.value)}
+                            className="w-full h-[34px] px-3 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createVendor(); }}
+                          />
+                          <input
+                            type="email"
+                            placeholder="Email (optional)"
+                            value={newVendorEmail}
+                            onChange={(e) => setNewVendorEmail(e.target.value)}
+                            className="w-full h-[34px] px-3 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createVendor(); }}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={createVendor} disabled={creatingContact || !newVendorName.trim()}>
+                            {creatingContact ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                            Create Vendor
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setVendorOpen(false)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
                     ) : filteredVendors.map(v => (
                       <button key={v.id}
                         className="flex items-center gap-3 w-full px-3 py-2.5 text-left hover:bg-[var(--surface-3)]"
@@ -222,6 +304,37 @@ function NewBillContent() {
                         </div>
                       </button>
                     ))}
+                    {/* Always show "Create new vendor" option at bottom */}
+                    {filteredVendors.length > 0 && (
+                      <div>
+                        <div className="border-t border-[var(--border)]" />
+                        <div className="p-3 space-y-2">
+                          <div className="text-xs text-[var(--text-muted)] font-medium">Create new vendor</div>
+                          <input
+                            type="text"
+                            placeholder="Vendor name *"
+                            value={newVendorName}
+                            onChange={(e) => setNewVendorName(e.target.value)}
+                            className="w-full h-[30px] px-2 text-xs rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createVendor(); }}
+                          />
+                          <input
+                            type="text"
+                            placeholder="Company name (optional)"
+                            value={newVendorCompany}
+                            onChange={(e) => setNewVendorCompany(e.target.value)}
+                            className="w-full h-[30px] px-2 text-xs rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createVendor(); }}
+                          />
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={createVendor} disabled={creatingContact || !newVendorName.trim()}>
+                              {creatingContact ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                              Create
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 {(vendorOpen && filteredVendors.length > 0) && (

@@ -75,6 +75,12 @@ export default function NewInvoicePage() {
   // Tax
   const [taxRate, setTaxRate] = useState(8.5);
 
+  // Inline customer creation
+  const [newName, setNewName] = useState('');
+  const [newCompany, setNewCompany] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [creatingContact, setCreatingContact] = useState(false);
+
   // State
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +121,41 @@ export default function NewInvoicePage() {
       c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
       (c.companyName ?? '').toLowerCase().includes(customerSearch.toLowerCase())
   );
+
+  async function createCustomer() {
+    if (!newName.trim()) {
+      setError('Customer name is required.');
+      return;
+    }
+    setCreatingContact(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newName.trim(),
+          companyName: newCompany.trim() || null,
+          email: newEmail.trim() || null,
+          type: 'customer',
+          status: 'active',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to create customer');
+      setCustomers((prev) => [...prev, json.data]);
+      setSelectedCustomer(json.data);
+      setCustomerSearch('');
+      setCustomerOpen(false);
+      setNewName('');
+      setNewCompany('');
+      setNewEmail('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create customer');
+    } finally {
+      setCreatingContact(false);
+    }
+  }
 
   // Terms handlers
   function setTermsAndDate(term: string) {
@@ -283,10 +324,49 @@ export default function NewInvoicePage() {
                   <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
                 </div>
                 {customerOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] z-20 max-h-[200px] overflow-y-auto">
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] z-20 max-h-[320px] overflow-y-auto">
                     {filteredCustomers.length === 0 ? (
-                      <div className="px-3 py-4 text-sm text-[var(--text-muted)] text-center">
-                        No customers found.
+                      <div className="p-3 space-y-3">
+                        <div className="text-sm text-[var(--text-muted)] text-center">
+                          {customerSearch
+                            ? `No customers matching "${customerSearch}". Create one:`
+                            : 'No customers yet. Create your first customer:'}
+                        </div>
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            placeholder="Customer name *"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                            className="w-full h-[34px] px-3 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createCustomer(); }}
+                          />
+                          <input
+                            type="text"
+                            placeholder="Company name (optional)"
+                            value={newCompany}
+                            onChange={(e) => setNewCompany(e.target.value)}
+                            className="w-full h-[34px] px-3 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createCustomer(); }}
+                          />
+                          <input
+                            type="email"
+                            placeholder="Email (optional)"
+                            value={newEmail}
+                            onChange={(e) => setNewEmail(e.target.value)}
+                            className="w-full h-[34px] px-3 rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createCustomer(); }}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={createCustomer} disabled={creatingContact || !newName.trim()}>
+                            {creatingContact ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                            Create Customer
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setCustomerOpen(false)}>
+                            Cancel
+                          </Button>
+                        </div>
                       </div>
                     ) : (
                       filteredCustomers.map((c) => (
@@ -310,6 +390,37 @@ export default function NewInvoicePage() {
                           </div>
                         </button>
                       ))
+                    )}
+                    {/* Always show "Create new customer" option at bottom */}
+                    {filteredCustomers.length > 0 && (
+                      <div>
+                        <div className="border-t border-[var(--border)]" />
+                        <div className="p-3 space-y-2">
+                          <div className="text-xs text-[var(--text-muted)] font-medium">Create new customer</div>
+                          <input
+                            type="text"
+                            placeholder="Customer name *"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                            className="w-full h-[30px] px-2 text-xs rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createCustomer(); }}
+                          />
+                          <input
+                            type="text"
+                            placeholder="Company name (optional)"
+                            value={newCompany}
+                            onChange={(e) => setNewCompany(e.target.value)}
+                            className="w-full h-[30px] px-2 text-xs rounded-md border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)]"
+                            onKeyDown={(e) => { if (e.key === 'Enter') createCustomer(); }}
+                          />
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={createCustomer} disabled={creatingContact || !newName.trim()}>
+                              {creatingContact ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                              Create
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}

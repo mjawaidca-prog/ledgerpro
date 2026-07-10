@@ -290,11 +290,18 @@ model ColumnMapping {
   skipRows            Int              @default(0)
   dateFormat          String           @default("yyyy-MM-dd")
 
+  // Bank Import Redesign: header signature for matching future files
+  headerSignature     String?          // normalized: lowercased, trimmed, pipe-joined headers e.g. "date|description|withdrawals|deposits"
+  mappingsJson        Json?            // full column-to-role mapping e.g. {"Transaction Date":"date","Description":"description",...}
+
   createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  lastUsedAt          DateTime?
 
   importBatches       ImportBatch[]
 
   @@unique([financialAccountId, profileName])
+  @@index([financialAccountId, headerSignature])
 }
 
 enum SignDirection {

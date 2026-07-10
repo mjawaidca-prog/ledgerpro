@@ -826,13 +826,21 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
       errors.unshift(`Note: The primary PDF parser had an issue (${pdfParseError}). Results below are from a best-effort fallback parser.`);
     }
 
-    // Build dynamic headers based on detected amount columns
-    const headers = ['Date', 'Description'];
+    // Build dynamic headers based on detected amount columns.
+    // Bank statements commonly have 3+ financial columns (e.g. Withdrawals,
+    // Deposits, Balance). Ensure we show enough columns so the user can map
+    // each one independently in the import wizard.
     for (const row of rows) {
       const colCount = Object.keys(row.raw).filter(k => k.startsWith('Amount_') && !k.endsWith('_display')).length;
       if (colCount > maxAmountCols) maxAmountCols = colCount;
     }
-    for (let i = 1; i <= Math.max(maxAmountCols, 1); i++) {
+    // Minimum 4 amount columns: covers withdrawal, deposit, balance + one spare.
+    // The import wizard lets the user ignore extras, but missing columns cannot
+    // be mapped later.
+    const minAmountCols = 4;
+    const shownAmountCols = Math.max(maxAmountCols, minAmountCols);
+    const headers = ['Date', 'Description'];
+    for (let i = 1; i <= shownAmountCols; i++) {
       headers.push(`Amount_${i}`);
     }
 

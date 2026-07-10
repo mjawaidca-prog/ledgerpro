@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Button } from '@/components/ui/Button';
@@ -13,7 +13,7 @@ import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import {
   Building2, CreditCard, Plus, Upload, Search, Check, X, ArrowRightLeft, FileText,
-  Loader2, ChevronDown, FileUp, AlertTriangle, MoreHorizontal,
+  Loader2, ChevronDown, FileUp, AlertTriangle, MoreHorizontal, Trash2,
 } from 'lucide-react';
 
 // ─── Types ───
@@ -37,6 +37,7 @@ interface ChartAccount {
   name: string;
   type: 'asset' | 'liability' | 'equity' | 'income' | 'expense';
   detailType: string | null;
+  balance?: number;
 }
 
 interface Transaction {
@@ -57,9 +58,274 @@ interface TransferSuggestion {
   matchedAmount: number;
 }
 
+interface SavedMapping {
+  id: string;
+  financialAccountId: string;
+  profileName: string | null;
+  dateColumn: string;
+  descriptionColumn: string;
+  amountColumn: string | null;
+  debitColumn: string | null;
+  creditColumn: string | null;
+  balanceColumn: string | null;
+  signDirection: 'normal' | 'inverted';
+  headerSignature: string | null;
+  mappingsJson: Record<string, string> | null;
+}
+
 // ─── Import Wizard Steps ───
 
-type WizardStep = 'account' | 'map' | 'review';
+type WizardStep = 'account' | 'upload' | 'map' | 'review';
+
+// ─── Column mapping roles ───
+// These are the roles a user can assign to each uploaded column.
+
+type ColumnRole =
+  | 'ignore'
+  | 'date'
+  | 'description'
+  | 'money_out'
+  | 'money_in'
+  | 'card_charge'
+  | 'card_payment'
+  | 'balance'
+  | 'reference'
+  | 'memo'
+  | 'signed_amount';
+
+interface RoleDef {
+  value: ColumnRole;
+  label: string;
+  help: string;
+}
+
+function bankRoles(): RoleDef[] {
+  return [
+    { value: 'ignore', label: 'Ignore', help: 'Skip this column' },
+    { value: 'date', label: 'Date', help: 'Transaction date' },
+    { value: 'description', label: 'Description', help: 'Merchant or payee name' },
+    { value: 'money_out', label: 'Money Out / Payment', help: 'Withdrawals, payments, debits' },
+    { value: 'money_in', label: 'Money In / Receipt', help: 'Deposits, refunds, credits' },
+    { value: 'signed_amount', label: 'Signed Amount', help: 'Single column with +/- for direction' },
+    { value: 'balance', label: 'Balance', help: 'Running account balance' },
+    { value: 'reference', label: 'Reference / Cheque No.', help: 'Cheque or transaction reference' },
+    { value: 'memo', label: 'Memo', help: 'Additional notes' },
+  ];
+}
+
+function creditCardRoles(): RoleDef[] {
+  return [
+    { value: 'ignore', label: 'Ignore', help: 'Skip this column' },
+    { value: 'date', label: 'Date', help: 'Transaction date' },
+    { value: 'description', label: 'Description', help: 'Merchant or payee name' },
+    { value: 'card_charge', label: 'Charge / Purchase', help: 'New charges or purchases' },
+    { value: 'card_payment', label: 'Payment / Credit', help: 'Payments, refunds, credits' },
+    { value: 'signed_amount', label: 'Signed Amount', help: 'Single column with +/- for direction' },
+    { value: 'balance', label: 'Balance', help: 'Running card balance' },
+    { value: 'reference', label: 'Reference', help: 'Transaction reference number' },
+    { value: 'memo', label: 'Memo', help: 'Additional notes' },
+  ];
+}
+
+// Derive the user-visible column set from the account type
+type AccountImportType = 'bank' | 'credit_card';
+
+function resolveImportType(coaAccount: ChartAccount | null, finAccountKind?: string): AccountImportType {
+  if (!coaAccount) {
+    // Fallback: use financial account kind
+    return finAccountKind === 'creditcard' ? 'credit_card' : 'bank';
+  }
+  if (coaAccount.type === 'liability') return 'credit_card';
+  return 'bank';
+}
+
+function normalizedPreviewColumns(importType: AccountImportType) {
+  if (importType === 'credit_card') {
+    return ['Date', 'Description', 'Charge', 'Payment/Credit', 'Balance', 'Reference', 'Status'];
+  }
+  return ['Date', 'Description', 'Money Out', 'Money In', 'Balance', 'Reference', 'Status'];
+}
+
+// ─── Statement-to-CSV conversion ───────────────────────────────
+// Converts any parsed statement (PDF, OFX, QFX, CSV) into a standardized
+// format where every column has a descriptive name. This ensures the
+// original statement preview always shows meaningful headers, not
+// synthetic names like "Amount_1" / "Amount_2".
+
+interface NormalizedStatement {
+  headers: string[];
+  rows: any[];
+  totalRows: number;
+  fileType: string;
+  errors: string[];
+  columnMeta: any;
+  _fileCount: number;
+}
+
+function normalizeParsedStatement(
+  parsed: { headers: string[]; rows: any[]; totalRows: number; fileType: string; errors: string[]; columnMeta: any; _fileCount: number }
+): NormalizedStatement {
+  const { headers, rows, fileType, columnMeta } = parsed;
+
+  // CSV files: headers are already the original column names — pass through
+  if (fileType === 'csv' || fileType === 'ofx') {
+    return { ...parsed, headers };
+  }
+
+  // PDF: rename synthetic Amount_N columns to descriptive names using
+  // column metadata (sign patterns, population rate, magnitude).
+  if (fileType === 'pdf') {
+    // Build header rename map: old header name → new header name
+    const renameMap = new Map<string, string>();
+    for (const h of headers) {
+      renameMap.set(h, h); // default: keep same name
+    }
+
+    // Gather stats from columnMeta if available
+    const colMetaMap = new Map<string, { kind: string; populatedCount: number; avgMagnitude: number }>();
+    if (Array.isArray(columnMeta)) {
+      for (const m of columnMeta) {
+        colMetaMap.set(m.name, { kind: m.kind, populatedCount: m.populatedCount, avgMagnitude: m.avgMagnitude });
+      }
+    }
+
+    // Collect row-level stats for each Amount_N column
+    const amountCols = headers.filter((h: string) => /^Amount_\d+$/i.test(h));
+    const colStats: Record<string, { negCount: number; posCount: number; popCount: number; sumAbs: number }> = {};
+    for (const col of amountCols) {
+      colStats[col] = { negCount: 0, posCount: 0, popCount: 0, sumAbs: 0 };
+    }
+    for (const row of rows) {
+      for (const col of amountCols) {
+        const val = parseFloat(String(row.raw?.[col] || ''));
+        if (!isNaN(val) && Math.abs(val) > 0.001) {
+          colStats[col].popCount++;
+          colStats[col].sumAbs += Math.abs(val);
+          if (val < 0) colStats[col].negCount++;
+          else colStats[col].posCount++;
+        }
+      }
+    }
+
+    const totalRows = rows.length || 1;
+
+    // First pass: identify the balance column using the server's columnMeta
+    // (which compares magnitudes) or by finding the column with the largest
+    // average magnitude among high-population columns.
+    let balanceColName: string | null = null;
+
+    // Trust server columnMeta first — it does proper magnitude comparison
+    if (colMetaMap.size > 0) {
+      const serverBalance = Array.from(colMetaMap.entries()).find(
+        ([, m]) => m.kind === 'balance'
+      );
+      if (serverBalance) {
+        balanceColName = serverBalance[0];
+      }
+    }
+
+    // Fallback: balance has the largest average magnitude among columns
+    // present on >80% of rows (typically the running balance dwarfs individual txns)
+    if (!balanceColName && amountCols.length >= 2) {
+      const highPopCols = amountCols.filter(
+        (c) => (colStats[c]?.popCount || 0) / totalRows > 0.8
+      );
+      if (highPopCols.length >= 2) {
+        // Pick the one with the largest average magnitude
+        balanceColName = highPopCols.reduce((best, c) =>
+          (colStats[c]?.sumAbs / Math.max(colStats[c]?.popCount || 1, 1)) >
+          (colStats[best]?.sumAbs / Math.max(colStats[best]?.popCount || 1, 1))
+            ? c : best
+        , highPopCols[0]);
+      }
+    }
+
+    // Second pass: rename columns based on their role
+    for (const col of amountCols) {
+      const meta = colMetaMap.get(col);
+      const stats = colStats[col];
+      if (!stats) continue;
+
+      const popRate = stats.popCount / totalRows;
+
+      // 1. Balance column (identified by server meta or magnitude comparison)
+      if (col === balanceColName) {
+        renameMap.set(col, 'Balance');
+        continue;
+      }
+
+      // 2. Use server columnMeta for positive-only columns (separate debit/credit)
+      if (meta?.kind === 'positive-only') {
+        // Among non-balance positive-only columns, the one with MORE entries
+        // is typically debits/withdrawals (most transactions are expenses)
+        const peerPositiveOnly = amountCols.filter(
+          (c: string) => c !== col && c !== balanceColName && colMetaMap.get(c)?.kind === 'positive-only'
+        );
+        const peerMaxPop = Math.max(0, ...peerPositiveOnly.map((c: string) => colStats[c]?.popCount || 0));
+
+        if (stats.popCount >= peerMaxPop) {
+          renameMap.set(col, 'Withdrawals / Debits');
+        } else {
+          renameMap.set(col, 'Deposits / Credits');
+        }
+        continue;
+      }
+
+      // 3. Signed column (has both +/-)
+      if (meta?.kind === 'signed' || (stats.negCount > 0 && stats.posCount > 0)) {
+        renameMap.set(col, 'Amount (signed)');
+        continue;
+      }
+
+      // 4. Fallback for positive-only columns WITHOUT columnMeta
+      if (stats.negCount === 0 && stats.posCount > 0 && popRate < 0.8) {
+        renameMap.set(col, 'Withdrawals / Debits');
+        continue;
+      }
+
+      // 5. Sparse / unknown — keep numbered
+      if (popRate < 0.3) {
+        renameMap.set(col, `Column ${col.replace('Amount_', '')}`);
+      }
+    }
+
+    // If we didn't find any debit/credit columns via columnMeta, try a
+    // simpler fallback: the first non-balance column with decent population
+    // is debits, the next is credits.
+    const renamed = amountCols.filter((c) => renameMap.get(c) !== c || c !== renameMap.get(c));
+    const stillUnnamed = amountCols.filter((c) => {
+      const name = renameMap.get(c);
+      return !name || name === c || name.startsWith('Amount_') || name.startsWith('Column ');
+    });
+
+    if (stillUnnamed.length >= 2 && stillUnnamed.every((c) => (colStats[c]?.popCount || 0) / totalRows > 0.3)) {
+      renameMap.set(stillUnnamed[0], 'Withdrawals / Debits');
+      renameMap.set(stillUnnamed[1], 'Deposits / Credits');
+    } else if (stillUnnamed.length === 1 && (colStats[stillUnnamed[0]]?.popCount || 0) / totalRows > 0.3) {
+      renameMap.set(stillUnnamed[0], 'Amount');
+    }
+
+    // Build new header list and remap raw data in all rows
+    const newHeaders = headers.map((h) => renameMap.get(h) || h);
+
+    // Remap each row's raw keys from old header names to new header names
+    const newRows = rows.map((row: any) => {
+      const newRaw: Record<string, string> = {};
+      if (row.raw) {
+        for (const [key, value] of Object.entries(row.raw)) {
+          const newKey = renameMap.get(key) || key;
+          newRaw[newKey] = String(value ?? '');
+        }
+      }
+      return { ...row, raw: newRaw };
+    });
+
+    return { ...parsed, headers: newHeaders, rows: newRows };
+  }
+
+  // Unknown format: pass through unchanged
+  return parsed;
+}
 
 export default function BankingPage() {
   const { data: session } = useSession();
@@ -80,17 +346,22 @@ export default function BankingPage() {
   // Import wizard
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<WizardStep>('account');
-  const [wizardAccountId, setWizardAccountId] = useState<string>('');
+  const [wizardCoaAccountId, setWizardCoaAccountId] = useState<string>('');       // Chart of Accounts ID
+  const [wizardFinancialAccountId, setWizardFinancialAccountId] = useState<string>(''); // linked FinancialAccount ID
+  const [wizardImportType, setWizardImportType] = useState<AccountImportType>('bank');
   const [wizardFiles, setWizardFiles] = useState<File[]>([]);
   const [wizardParsed, setWizardParsed] = useState<any>(null);
+  // column header → role (e.g. { 'Transaction Date': 'date', 'Withdrawals': 'money_out' })
   const [wizardMappings, setWizardMappings] = useState<Record<string, string>>({});
   const [wizardPreview, setWizardPreview] = useState<any[]>([]);
   const [wizardSignDirection, setWizardSignDirection] = useState<'normal' | 'inverted'>('normal');
   const [wizardPdfAmbiguousSign, setWizardPdfAmbiguousSign] = useState(false);
   const [wizardImporting, setWizardImporting] = useState(false);
-  const [wizardAccountName, setWizardAccountName] = useState('Primary Checking');
-  const [wizardAccountKind, setWizardAccountKind] = useState<FinancialAccount['kind']>('checking');
+  const [wizardSaveMapping, setWizardSaveMapping] = useState(true);
+  const [wizardSavedMapping, setWizardSavedMapping] = useState<SavedMapping | null>(null);
   const [wizardCreatingAccount, setWizardCreatingAccount] = useState(false);
+  const [wizardNewAccountName, setWizardNewAccountName] = useState('');
+  const [wizardNewAccountKind, setWizardNewAccountKind] = useState<FinancialAccount['kind']>('checking');
   const activeCompanyId = (session?.user as any)?.activeCompanyId || (session?.user as any)?.companyId || null;
   const activeUserId = (session?.user as any)?.id || null;
 
@@ -130,71 +401,102 @@ export default function BankingPage() {
     return fetch(input, { ...init, headers: retryHeaders });
   }
 
-  async function createWizardAccount() {
+  // ─── Filter COA accounts for import selector ───
+  const importableCoaAccounts = useMemo(() => {
+    return chartAccounts.filter(
+      (a) =>
+        (a.type === 'asset' && (a.code.startsWith('10') || a.code.startsWith('11') || a.code.startsWith('12'))) ||
+        (a.type === 'liability' && (a.code.startsWith('21') || a.code.startsWith('22')))
+    );
+  }, [chartAccounts]);
+
+  const selectedCoaAccount = useMemo(
+    () => chartAccounts.find((a) => a.id === wizardCoaAccountId) || null,
+    [chartAccounts, wizardCoaAccountId]
+  );
+
+  // ─── Create a new FinancialAccount from the wizard ───
+  async function createWizardFinancialAccount(): Promise<FinancialAccount | null> {
     if (wizardCreatingAccount) return null;
     if (!hasSelectedCompany) {
-      setToast({ message: 'Select a company before creating a bank account for imports.', type: 'danger' });
+      setToast({ message: 'Select a company before creating an account.', type: 'danger' });
+      return null;
+    }
+    if (!wizardCoaAccountId || !selectedCoaAccount) {
+      setToast({ message: 'Select a GL account first.', type: 'danger' });
       return null;
     }
     setWizardCreatingAccount(true);
     try {
-      const name = wizardAccountName.trim() || 'Primary Checking';
-      const glAccountCode = resolveDefaultBankGlCode(wizardAccountKind);
+      const name = wizardNewAccountName.trim() || selectedCoaAccount.name;
+      const kind = wizardImportType === 'credit_card' ? 'creditcard' as const : wizardNewAccountKind;
       const res = await fetchWithTenantHeaders('/api/accounts', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          kind: wizardAccountKind,
-          glAccountCode,
+          kind,
+          glAccountCode: selectedCoaAccount.code,
         }),
       });
       const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.error || 'Failed to create account');
-      }
+      if (!res.ok) throw new Error(json.error || 'Failed to create account');
       const created = json.data as FinancialAccount;
       setAccounts((prev) => [...prev, created]);
-      setWizardAccountId(created.id);
-      setToast({ message: `Created ${created.name} for this import.`, type: 'success' });
+      setWizardFinancialAccountId(created.id);
+      setToast({ message: `Created ${created.name} for imports.`, type: 'success' });
       return created;
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : 'Failed to create account', type: 'danger' });
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Failed to create account', type: 'danger' });
       return null;
     } finally {
       setWizardCreatingAccount(false);
     }
   }
 
-  function resolveDefaultBankGlCode(kind: FinancialAccount['kind']) {
-    if (kind === 'creditcard') {
-      return chartAccounts.find((a) => a.type === 'liability' && a.code.startsWith('21'))?.code
-        || chartAccounts.find((a) => a.type === 'liability' && a.code.startsWith('2'))?.code
-        || null;
-    }
+  // Derive which FinancialAccount is linked to the selected COA account
+  const linkedFinancialAccount = useMemo(() => {
+    if (!selectedCoaAccount) return null;
+    return accounts.find((a) => a.glAccountCode === selectedCoaAccount.code) || null;
+  }, [selectedCoaAccount, accounts]);
 
-    const preferredCodes = kind === 'savings' ? ['1020', '1010', '1000'] : ['1010', '1020', '1000'];
-    for (const code of preferredCodes) {
-      const match = chartAccounts.find((a) => a.code === code);
-      if (match) return match.code;
-    }
-
-    // Fallback: find any asset account starting with 10
-    return chartAccounts.find((a) => a.type === 'asset' && a.code.startsWith('10'))?.code || null;
-  }
-
-  const categoryOptions = chartAccounts;
   const importBlockReason = !hasSelectedCompany
-    ? 'Select a company first. Banking imports need an active company so accounts and the chart of accounts can load.'
-    : !wizardAccountId
-      ? accounts.length === 0
-        ? 'Create a bank account first, then import the statement into that account.'
-        : 'Select the bank account this statement belongs to.'
-      : !Array.isArray(wizardParsed?.rows) || wizardParsed.rows.length === 0
-        ? 'Upload and preview a statement before importing transactions.'
-        : null;
+    ? 'Select a company first.' :
+    !wizardCoaAccountId
+    ? 'Select the Chart of Accounts account this statement belongs to.' :
+    !linkedFinancialAccount && !wizardFinancialAccountId
+    ? 'Create a bank account for this GL account first, then upload.' :
+    !Array.isArray(wizardParsed?.rows) || wizardParsed.rows.length === 0
+    ? 'Upload and preview a statement before importing.' :
+    null;
+
+  // Validation messages for column mapping
+  const mappingValidation = useMemo(() => {
+    if (wizardStep !== 'map' && wizardStep !== 'review') return [];
+    const errors: string[] = [];
+    const roles = Object.values(wizardMappings);
+    if (!roles.includes('date')) errors.push('Choose a Date column.');
+    if (!roles.includes('description')) errors.push('Choose a Description column.');
+    const hasMoneyOut = roles.includes('money_out');
+    const hasMoneyIn = roles.includes('money_in');
+    const hasCharge = roles.includes('card_charge');
+    const hasPayment = roles.includes('card_payment');
+    const hasSignedAmount = roles.includes('signed_amount');
+    if (wizardImportType === 'credit_card') {
+      if (!hasCharge && !hasPayment && !hasSignedAmount)
+        errors.push('Choose at least one amount column (Charge or Payment/Credit).');
+    } else {
+      if (!hasMoneyOut && !hasMoneyIn && !hasSignedAmount)
+        errors.push('Choose at least one amount column (Money Out or Money In).');
+    }
+    const dateCount = roles.filter((r) => r === 'date').length;
+    if (dateCount > 1) errors.push('Only one column can be mapped as Date.');
+    const descCount = roles.filter((r) => r === 'description').length;
+    if (descCount > 1) errors.push('Only one column can be mapped as Description.');
+    const balCount = roles.filter((r) => r === 'balance').length;
+    if (balCount > 1) errors.push('Only one column can be mapped as Balance.');
+    return errors;
+  }, [wizardMappings, wizardStep, wizardImportType]);
 
   // ─── Fetch data ───
 
@@ -266,12 +568,6 @@ export default function BankingPage() {
   useEffect(() => {
     fetchTransactions();
   }, [fetchTransactions]);
-
-  useEffect(() => {
-    if (wizardOpen && !wizardAccountId && accounts.length > 0) {
-      setWizardAccountId(accounts[0].id);
-    }
-  }, [wizardOpen, wizardAccountId, accounts]);
 
   // ─── Transaction actions ───
 
@@ -403,24 +699,115 @@ export default function BankingPage() {
     }
   }
 
+  // ─── Normalize header for signature matching ───
+  function buildHeaderSignature(headers: string[]): string {
+    return headers
+      .map((h) => h.toLowerCase().trim().replace(/\s+/g, ' '))
+      .join('|')
+      .replace(/[^a-z0-9| ]/g, '')
+      .replace(/\s+/g, '_');
+  }
+
+  // ─── Fetch saved mapping for an account + headers ───
+  async function fetchSavedMapping(accountId: string, headers: string[]): Promise<SavedMapping | null> {
+    try {
+      const sig = buildHeaderSignature(headers);
+      const res = await fetchWithTenantHeaders(
+        `/api/column-mappings?accountId=${encodeURIComponent(accountId)}&headers=${encodeURIComponent(sig)}`
+      );
+      const json = await res.json();
+      if (json.data?.length > 0) return json.data[0] as SavedMapping;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ─── Apply a saved mapping to wizardMappings (column header → role) ───
+  function applyMappingToWizard(saved: SavedMapping, headers: string[]): Record<string, string> {
+    const result: Record<string, string> = {};
+
+    // Initialize all to 'ignore'
+    for (const h of headers) {
+      result[h] = 'ignore';
+    }
+
+    // Apply from the saved mapping columns
+    if (saved.dateColumn && headers.includes(saved.dateColumn)) result[saved.dateColumn] = 'date';
+    if (saved.descriptionColumn && headers.includes(saved.descriptionColumn)) result[saved.descriptionColumn] = 'description';
+    if (saved.amountColumn && headers.includes(saved.amountColumn)) result[saved.amountColumn] = 'signed_amount';
+    if (saved.debitColumn && headers.includes(saved.debitColumn)) {
+      result[saved.debitColumn] = wizardImportType === 'credit_card' ? 'card_charge' : 'money_out';
+    }
+    if (saved.creditColumn && headers.includes(saved.creditColumn)) {
+      result[saved.creditColumn] = wizardImportType === 'credit_card' ? 'card_payment' : 'money_in';
+    }
+    if (saved.balanceColumn && headers.includes(saved.balanceColumn)) result[saved.balanceColumn] = 'balance';
+
+    // Also try mappingsJson if available (more precise mapping)
+    if (saved.mappingsJson) {
+      for (const [header, role] of Object.entries(saved.mappingsJson)) {
+        if (headers.includes(header)) {
+          result[header] = role;
+        }
+      }
+    }
+
+    return result;
+  }
+
   // ─── Import wizard ───
 
   function openWizard() {
     setWizardStep('account');
-    setWizardAccountId(accounts[0]?.id ?? '');
-    setWizardAccountName('Primary Checking');
-    setWizardAccountKind('checking');
-    setWizardCreatingAccount(false);
+    setWizardCoaAccountId('');          // Start BLANK — no preselection
+    setWizardFinancialAccountId('');
+    setWizardImportType('bank');
     setWizardFiles([]);
     setWizardParsed(null);
     setWizardMappings({});
     setWizardPreview([]);
     setWizardPdfAmbiguousSign(false);
+    setWizardSaveMapping(true);
+    setWizardSavedMapping(null);
+    setWizardNewAccountName('');
+    setWizardNewAccountKind('checking');
+    setWizardCreatingAccount(false);
     setWizardOpen(true);
   }
 
   function closeWizard() {
     setWizardOpen(false);
+  }
+
+  function handleCoaAccountSelect(coaId: string) {
+    setWizardCoaAccountId(coaId);
+    const coa = chartAccounts.find((a) => a.id === coaId);
+    if (coa) {
+      const importType = resolveImportType(coa);
+      setWizardImportType(importType);
+      setWizardSignDirection(importType === 'credit_card' ? 'inverted' : 'normal');
+
+      // Check if a FinancialAccount is linked
+      const linked = accounts.find((a) => a.glAccountCode === coa.code);
+      if (linked) {
+        setWizardFinancialAccountId(linked.id);
+        setWizardNewAccountKind(linked.kind);
+        setWizardNewAccountName(linked.name);
+      } else {
+        setWizardFinancialAccountId('');
+        setWizardNewAccountName(coa.name);
+        setWizardNewAccountKind(importType === 'credit_card' ? 'creditcard' : 'checking');
+      }
+    }
+  }
+
+  function handleContinueToUpload() {
+    if (!wizardCoaAccountId) {
+      setToast({ message: 'Please select a bank or credit card account before uploading a statement.', type: 'danger' });
+      return;
+    }
+    setWizardStep('upload');
   }
 
   async function handleFiles(files: FileList | File[]) {
@@ -438,7 +825,6 @@ export default function BankingPage() {
     setWizardFiles(fileArray);
 
     try {
-      // Parse all files and combine results
       const allResults: any[] = [];
       const allErrors: string[] = [];
       let combinedFileType = '';
@@ -465,19 +851,34 @@ export default function BankingPage() {
         throw new Error(allErrors[0] || 'No files could be parsed');
       }
 
-      // Combine: use headers from first result, concatenate rows
+      // Combine results — trim headers for consistent matching
       const first = allResults[0];
-      const combinedHeaders = first.headers || [];
+      const rawHeaders: string[] = first.headers || [];
+      const combinedHeaders: string[] = [];
+      for (const h of rawHeaders) {
+        const trimmed = h.trim();
+        combinedHeaders.push(trimmed || '(empty)');
+      }
+
+      // Debug: log headers so we can verify all columns were detected
+      console.log('[Import Wizard] Raw headers from parser:', rawHeaders);
+      console.log('[Import Wizard] Trimmed headers:', combinedHeaders);
+      console.log('[Import Wizard] Column count:', combinedHeaders.length);
       const combinedRows: any[] = [];
 
       for (const result of allResults) {
-        // Only add rows whose headers match the first result's headers
         for (const row of (result.rows || [])) {
-          combinedRows.push(row);
+          // Re-key raw data with trimmed headers so lookups match
+          const trimmedRaw: Record<string, string> = {};
+          if (row.raw) {
+            for (const [key, value] of Object.entries(row.raw)) {
+              trimmedRaw[key.trim()] = String(value ?? '');
+            }
+          }
+          combinedRows.push({ ...row, raw: trimmedRaw });
         }
       }
 
-      // Carry forward column metadata from the first PDF result if present
       const firstColumnMeta = allResults.find((r: any) => r.columnMeta)?.columnMeta || null;
 
       const combined = {
@@ -490,133 +891,163 @@ export default function BankingPage() {
         columnMeta: firstColumnMeta,
       };
 
-      setWizardParsed(combined);
+      // Normalize: convert all formats to a standardized CSV-like representation
+      // so the original statement preview always shows meaningful column names.
+      const normalized = normalizeParsedStatement(combined);
+      setWizardParsed(normalized);
 
-      // Auto-map common column names (same logic as before)
-      const auto: Record<string, string> = {};
-      const headers = combinedHeaders;
+      // Determine the financial account to check for saved mappings
+      const finAcctId = wizardFinancialAccountId || linkedFinancialAccount?.id;
+      let savedMapping: SavedMapping | null = null;
+
+      if (finAcctId) {
+        savedMapping = await fetchSavedMapping(finAcctId, combinedHeaders);
+        setWizardSavedMapping(savedMapping);
+      }
+
+      // Use normalized headers (PDF Amount_N columns have been renamed to
+      // descriptive labels like "Withdrawals / Debits", "Deposits / Credits", "Balance")
+      const headers = normalized.headers;
       const rows = combinedRows;
       const isPdf = combinedFileType === 'pdf';
 
+      // Initialize all columns to 'ignore'
+      const initMappings: Record<string, string> = {};
       for (const h of headers) {
-        const lower = h.toLowerCase();
-        if (lower.includes('date') && !auto.date) auto.date = h;
-        else if ((lower.includes('description') || lower.includes('name') || lower.includes('memo') || lower.includes('particulars') || lower.includes('details')) && !auto.description) auto.description = h;
-        else if ((lower.includes('amount') || lower.includes('value') || lower.includes('sum')) && !auto.amount && !lower.includes('balance')) auto.amount = h;
-        else if ((lower.includes('withdrawal') || lower.includes('debit') || lower.includes('payment') || lower.includes('money out') || lower.includes('outflow')) && !auto.debit) auto.debit = h;
-        else if ((lower.includes('deposit') || lower.includes('credit') || lower.includes('receipt') || lower.includes('money in') || lower.includes('inflow')) && !auto.credit) auto.credit = h;
-        else if (lower.includes('balance') && !auto.balance) auto.balance = h;
+        initMappings[h] = 'ignore';
       }
 
-      let pdfAmbiguousSign = false;
-      if (isPdf) {
-        const amountCols = headers.filter((h: string) => /^Amount_\d+$/i.test(h));
-        let negCounts: Record<string, number> = {};
-        let posCounts: Record<string, number> = {};
-        let popCounts: Record<string, number> = {};
-        let magSums: Record<string, number> = {};
-
-        // Use server-provided column metadata when available (BUG-7 fix)
-        const serverColumnMeta: Array<{name: string; kind: string; populatedCount: number; avgMagnitude: number; samples: number[]}> | null =
-          combined.columnMeta || null;
-
-        for (const col of amountCols) { negCounts[col] = 0; posCounts[col] = 0; popCounts[col] = 0; magSums[col] = 0; }
-        for (const row of rows) {
-          for (const col of amountCols) {
-            const v = Math.abs(parseFloat(row.raw?.[col] || '0'));
-            if (v > 0.005) { popCounts[col] = (popCounts[col] || 0) + 1; magSums[col] = (magSums[col] || 0) + v; }
-          }
-        }
-        for (const row of rows.slice(0, 10)) {
-          for (const col of amountCols) {
-            const val = parseFloat(row.raw?.[col] || '0');
-            if (val < -0.005) negCounts[col] = (negCounts[col] || 0) + 1;
-            else if (val > 0.005) posCounts[col] = (posCounts[col] || 0) + 1;
-          }
+      if (savedMapping) {
+        // Apply saved mapping
+        const applied = applyMappingToWizard(savedMapping, headers);
+        Object.assign(initMappings, applied);
+      } else {
+        // Auto-detect common column names
+        for (const h of headers) {
+          const lower = h.toLowerCase().trim();
+          if ((lower.includes('date') || lower === 'dt') && !Object.values(initMappings).includes('date')) initMappings[h] = 'date';
+          else if ((lower.includes('description') || lower.includes('narrative') || lower.includes('name') || lower.includes('memo') || lower.includes('particulars') || lower.includes('details') || lower.includes('merchant') || lower.includes('payee') || lower.includes('text')) && !Object.values(initMappings).includes('description')) initMappings[h] = 'description';
+          else if ((lower.includes('balance') || lower === 'bal') && !Object.values(initMappings).includes('balance')) initMappings[h] = 'balance';
+          else if ((lower.includes('reference') || lower.includes('check') || lower.includes('cheque') || lower.includes('ref') || lower === 'chq') && !Object.values(initMappings).includes('reference')) initMappings[h] = 'reference';
         }
 
-        // A running-balance column is populated on virtually every row and
-        // carries much larger cumulative values than any single transaction
-        // — unlike debit/credit columns, which only fill in for their
-        // applicable side. Detect it by population rate + magnitude rather
-        // than assuming it's the trailing column, so a 2-column
-        // amount-plus-balance layout isn't mistaken for a debit/credit pair.
-        const totalRows = rows.length || 1;
-        const avgMag = (c: string) => (popCounts[c] ? magSums[c] / popCounts[c] : 0);
-        let balanceCol: string | undefined;
-
-        // Prefer server-detected balance column if available
-        if (serverColumnMeta) {
-          const serverBalance = serverColumnMeta.find(m => m.kind === 'balance');
-          if (serverBalance && amountCols.includes(serverBalance.name)) {
-            balanceCol = serverBalance.name;
+        // Handle amount columns — robust patterns for common global bank formats
+        const auto: Record<string, string> = {};
+        for (const h of headers) {
+          const lower = h.toLowerCase().trim();
+          // Single signed amount column
+          if ((lower.includes('amount') || lower.includes('value') || lower.includes('sum') || lower === 'amt') && !auto.amount && !lower.includes('balance')) {
+            auto.amount = h;
+          }
+          // Money-out patterns: withdrawals, debits, payments, charges, money out
+          else if ((lower.includes('withdrawal') || lower.includes('withdrawn') || lower.includes('debit') || lower.includes('dr') || lower.includes('payment') || lower.includes('money out') || lower.includes('outflow') || lower.includes('charge') || lower.includes('purchase') || lower.includes('paid out') || lower === 'dr') && !auto.debit) {
+            auto.debit = h;
+          }
+          // Money-in patterns: deposits, credits, receipts, money in
+          else if ((lower.includes('deposit') || lower.includes('deposited') || lower.includes('credit') || lower.includes('cr') || lower.includes('receipt') || lower.includes('money in') || lower.includes('inflow') || lower.includes('paid in') || lower.includes('refund') || lower.includes('income') || lower === 'cr') && !auto.credit) {
+            auto.credit = h;
           }
         }
 
-        // Fallback: local balance detection
-        if (!balanceCol && amountCols.length >= 2) {
-          const stronglyPopulated = amountCols.filter((c: string) => (popCounts[c] || 0) / totalRows > 0.9);
-          for (const c of stronglyPopulated) {
-            const others = amountCols.filter((o: string) => o !== c);
-            const otherMaxAvgMag = Math.max(0, ...others.map(avgMag));
-            if (otherMaxAvgMag === 0 || avgMag(c) > otherMaxAvgMag * 2) {
-              balanceCol = c;
-              break;
+        let pdfAmbiguousSign = false;
+        if (isPdf) {
+          const amountCols = headers.filter((h: string) => /^Amount_\d+$/i.test(h));
+          let negCounts: Record<string, number> = {};
+          let posCounts: Record<string, number> = {};
+          let popCounts: Record<string, number> = {};
+          let magSums: Record<string, number> = {};
+
+          const serverColumnMeta: Array<{name: string; kind: string; populatedCount: number; avgMagnitude: number; samples: number[]}> | null =
+            combined.columnMeta || null;
+
+          for (const col of amountCols) { negCounts[col] = 0; posCounts[col] = 0; popCounts[col] = 0; magSums[col] = 0; }
+          for (const row of rows) {
+            for (const col of amountCols) {
+              const v = Math.abs(parseFloat(row.raw?.[col] || '0'));
+              if (v > 0.005) { popCounts[col] = (popCounts[col] || 0) + 1; magSums[col] = (magSums[col] || 0) + v; }
             }
           }
-        }
-        const splitCols = amountCols.filter((c: string) => c !== balanceCol);
+          for (const row of rows.slice(0, 10)) {
+            for (const col of amountCols) {
+              const val = parseFloat(row.raw?.[col] || '0');
+              if (val < -0.005) negCounts[col] = (negCounts[col] || 0) + 1;
+              else if (val > 0.005) posCounts[col] = (posCounts[col] || 0) + 1;
+            }
+          }
 
-        const sortedByNeg = splitCols.slice().sort((a: string, b: string) => (negCounts[b] || 0) - (negCounts[a] || 0));
-        const sortedByPos = splitCols.slice().sort((a: string, b: string) => (posCounts[b] || 0) - (posCounts[a] || 0));
-        const hasAnyNegative = splitCols.some((c: string) => (negCounts[c] || 0) > 0);
+          const totalRows = rows.length || 1;
+          const avgMag = (c: string) => (popCounts[c] ? magSums[c] / popCounts[c] : 0);
+          let balanceCol: string | undefined;
 
-        // Use server column metadata for smarter debit/credit column detection
-        if (serverColumnMeta && splitCols.length >= 2 && !hasAnyNegative) {
-          // Server tells us which columns are positive-only — use this to
-          // distinguish debit vs credit columns that both show as positive.
-          const positiveOnlyCols = serverColumnMeta
-            .filter(m => m.kind === 'positive-only' && splitCols.includes(m.name))
-            .map(m => m.name);
+          if (serverColumnMeta) {
+            const serverBalance = serverColumnMeta.find(m => m.kind === 'balance');
+            if (serverBalance && amountCols.includes(serverBalance.name)) {
+              balanceCol = serverBalance.name;
+            }
+          }
 
-          if (positiveOnlyCols.length >= 2) {
-            // Multiple positive-only columns — likely separate debit and credit.
-            // Debit columns typically have more entries (most transactions are debits)
-            // and smaller average amounts than credit columns (deposits are larger).
-            const byPop = positiveOnlyCols.sort((a, b) => (popCounts[b] || 0) - (popCounts[a] || 0));
-            auto.debit = byPop[0];   // More entries = likely debits
-            auto.credit = byPop[1];  // Fewer entries = likely credits
-          } else {
-            // Fall back to conventional order
+          if (!balanceCol && amountCols.length >= 2) {
+            const stronglyPopulated = amountCols.filter((c: string) => (popCounts[c] || 0) / totalRows > 0.9);
+            for (const c of stronglyPopulated) {
+              const others = amountCols.filter((o: string) => o !== c);
+              const otherMaxAvgMag = Math.max(0, ...others.map(avgMag));
+              if (otherMaxAvgMag === 0 || avgMag(c) > otherMaxAvgMag * 2) {
+                balanceCol = c;
+                break;
+              }
+            }
+          }
+          const splitCols = amountCols.filter((c: string) => c !== balanceCol);
+
+          const sortedByNeg = splitCols.slice().sort((a: string, b: string) => (negCounts[b] || 0) - (negCounts[a] || 0));
+          const sortedByPos = splitCols.slice().sort((a: string, b: string) => (posCounts[b] || 0) - (posCounts[a] || 0));
+          const hasAnyNegative = splitCols.some((c: string) => (negCounts[c] || 0) > 0);
+
+          if (serverColumnMeta && splitCols.length >= 2 && !hasAnyNegative) {
+            const positiveOnlyCols = serverColumnMeta
+              .filter(m => m.kind === 'positive-only' && splitCols.includes(m.name))
+              .map(m => m.name);
+
+            if (positiveOnlyCols.length >= 2) {
+              const byPop = positiveOnlyCols.sort((a, b) => (popCounts[b] || 0) - (popCounts[a] || 0));
+              auto.debit = byPop[0];
+              auto.credit = byPop[1];
+            } else {
+              auto.debit = splitCols[0];
+              auto.credit = splitCols[1];
+              pdfAmbiguousSign = true;
+            }
+          } else if (hasAnyNegative) {
+            auto.debit = sortedByNeg[0];
+            const creditCandidate = sortedByPos.find((c: string) => c !== auto.debit);
+            if (creditCandidate) auto.credit = creditCandidate;
+          } else if (splitCols.length >= 2) {
             auto.debit = splitCols[0];
             auto.credit = splitCols[1];
             pdfAmbiguousSign = true;
+          } else if (splitCols.length === 1) {
+            auto.amount = splitCols[0];
+            pdfAmbiguousSign = true;
           }
-        } else if (hasAnyNegative) {
-          auto.debit = sortedByNeg[0];
-          const creditCandidate = sortedByPos.find((c: string) => c !== auto.debit);
-          if (creditCandidate) auto.credit = creditCandidate;
-        } else if (splitCols.length >= 2) {
-          // No sign info anywhere — assume the conventional debit-then-credit
-          // column order (e.g. Withdrawal | Deposit). Still worth a review.
-          auto.debit = splitCols[0];
-          auto.credit = splitCols[1];
-          pdfAmbiguousSign = true;
-        } else if (splitCols.length === 1) {
-          // Exactly one unsigned amount column — there is no reliable way to
-          // tell debits from credits apart from this data. Map it as a plain
-          // signed amount rather than silently forcing every row to "debit"
-          // (which would flip genuine deposits into fake expenses).
-          auto.amount = splitCols[0];
-          pdfAmbiguousSign = true;
+          if (balanceCol) auto.balance = balanceCol;
         }
-        if (balanceCol) auto.balance = balanceCol;
-      }
-      setWizardPdfAmbiguousSign(pdfAmbiguousSign);
 
-      const selectedAcct = accounts.find(a => a.id === wizardAccountId);
-      setWizardSignDirection(selectedAcct?.kind === 'creditcard' ? 'inverted' : 'normal');
-      setWizardMappings(auto);
+        // Apply auto-mapped roles
+        if (auto.date && headers.includes(auto.date)) initMappings[auto.date] = 'date';
+        if (auto.description && headers.includes(auto.description)) initMappings[auto.description] = 'description';
+        if (auto.amount && headers.includes(auto.amount)) initMappings[auto.amount] = 'signed_amount';
+        if (auto.debit && headers.includes(auto.debit)) {
+          initMappings[auto.debit] = wizardImportType === 'credit_card' ? 'card_charge' : 'money_out';
+        }
+        if (auto.credit && headers.includes(auto.credit)) {
+          initMappings[auto.credit] = wizardImportType === 'credit_card' ? 'card_payment' : 'money_in';
+        }
+        if (auto.balance && headers.includes(auto.balance)) initMappings[auto.balance] = 'balance';
+
+        setWizardPdfAmbiguousSign(pdfAmbiguousSign);
+      }
+
+      setWizardMappings(initMappings);
       setWizardStep('map');
 
       if (allErrors.length > 0) {
@@ -627,34 +1058,77 @@ export default function BankingPage() {
     }
   }
 
-  function generatePreviewFromMappings(mappings: Record<string, string>, parsed: any) {
+  function generatePreviewFromMappings() {
+    const parsed = wizardParsed;
     if (!parsed) return;
+
     const { rows } = parsed;
-    const { date, description, amount, debit, credit } = mappings;
+    const mappings = wizardMappings; // header → role
+
+    // Find which columns map to each role
+    const dateCol = Object.entries(mappings).find(([, role]) => role === 'date')?.[0];
+    const descCol = Object.entries(mappings).find(([, role]) => role === 'description')?.[0];
+    const moneyOutCol = Object.entries(mappings).find(([, role]) => role === 'money_out')?.[0];
+    const moneyInCol = Object.entries(mappings).find(([, role]) => role === 'money_in')?.[0];
+    const chargeCol = Object.entries(mappings).find(([, role]) => role === 'card_charge')?.[0];
+    const paymentCol = Object.entries(mappings).find(([, role]) => role === 'card_payment')?.[0];
+    const signedAmountCol = Object.entries(mappings).find(([, role]) => role === 'signed_amount')?.[0];
+    const balanceCol = Object.entries(mappings).find(([, role]) => role === 'balance')?.[0];
+    const referenceCol = Object.entries(mappings).find(([, role]) => role === 'reference')?.[0];
+
+    const isCreditCard = wizardImportType === 'credit_card';
 
     const preview = rows.slice(0, 10).map((row: any) => {
       let amt = 0;
-      if (amount && row.raw[amount]) {
-        amt = parseFloat(String(row.raw[amount]).replace(/[$,]/g, '')) || 0;
-      } else if (debit && credit) {
-        const dr = parseFloat(String(row.raw[debit] || '0').replace(/[$,]/g, '') || '0') || 0;
-        const cr = parseFloat(String(row.raw[credit] || '0').replace(/[$,]/g, '') || '0') || 0;
-        amt = cr - dr;
-      } else if (debit) {
-        // Only debit column mapped — use it directly
-        amt = parseFloat(String(row.raw[debit] || '0').replace(/[$,]/g, '') || '0') || 0;
-      } else if (credit) {
-        // Only credit column mapped — use it directly
-        amt = parseFloat(String(row.raw[credit] || '0').replace(/[$,]/g, '') || '0') || 0;
+      let rawMoneyOut: number | undefined;
+      let rawMoneyIn: number | undefined;
+      let rawCharge: number | undefined;
+      let rawPayment: number | undefined;
+
+      if (moneyOutCol && row.raw[moneyOutCol] !== undefined) {
+        rawMoneyOut = parseFloat(String(row.raw[moneyOutCol]).replace(/[$,]/g, '')) || 0;
+      }
+      if (moneyInCol && row.raw[moneyInCol] !== undefined) {
+        rawMoneyIn = parseFloat(String(row.raw[moneyInCol]).replace(/[$,]/g, '')) || 0;
+      }
+      if (chargeCol && row.raw[chargeCol] !== undefined) {
+        rawCharge = parseFloat(String(row.raw[chargeCol]).replace(/[$,]/g, '')) || 0;
+      }
+      if (paymentCol && row.raw[paymentCol] !== undefined) {
+        rawPayment = parseFloat(String(row.raw[paymentCol]).replace(/[$,]/g, '')) || 0;
       }
 
-      // Apply sign direction for credit cards
+      if (signedAmountCol && row.raw[signedAmountCol]) {
+        amt = parseFloat(String(row.raw[signedAmountCol]).replace(/[$,]/g, '')) || 0;
+      } else if (isCreditCard && rawCharge !== undefined && rawPayment !== undefined) {
+        amt = rawPayment - rawCharge;
+      } else if (!isCreditCard && rawMoneyOut !== undefined && rawMoneyIn !== undefined) {
+        amt = rawMoneyIn - rawMoneyOut;
+      } else if (rawMoneyOut !== undefined) {
+        amt = -Math.abs(rawMoneyOut);
+      } else if (rawCharge !== undefined) {
+        amt = -Math.abs(rawCharge);
+      } else if (rawMoneyIn !== undefined) {
+        amt = Math.abs(rawMoneyIn);
+      } else if (rawPayment !== undefined) {
+        amt = Math.abs(rawPayment);
+      }
+
       if (wizardSignDirection === 'inverted') amt = -amt;
 
+      const balRaw = balanceCol ? row.raw[balanceCol] : undefined;
+      const bal = balRaw ? parseFloat(String(balRaw).replace(/[$,]/g, '')) || undefined : undefined;
+
       return {
-        date: row.raw[date] ?? row.date ?? '',
-        description: row.raw[description] ?? row.description ?? '',
+        date: dateCol ? (row.raw[dateCol] ?? '') : '',
+        description: descCol ? (row.raw[descCol] ?? '') : '',
         amount: amt,
+        balance: bal,
+        reference: referenceCol ? (row.raw[referenceCol] ?? '') : '',
+        moneyOut: rawMoneyOut,
+        moneyIn: rawMoneyIn,
+        charge: rawCharge,
+        payment: rawPayment,
       };
     });
 
@@ -662,46 +1136,78 @@ export default function BankingPage() {
     setWizardStep('review');
   }
 
-  function generatePreview() {
-    generatePreviewFromMappings(wizardMappings, wizardParsed);
-  }
-
   async function confirmImport() {
     if (!wizardParsed) return;
-    if (importBlockReason) {
-      setToast({ message: importBlockReason, type: 'danger' });
+    if (!wizardCoaAccountId) {
+      setToast({ message: 'Please select an account before importing.', type: 'danger' });
       return;
     }
-    if (!wizardAccountId) {
-      setToast({
-        message: 'Please create or select an account before importing the statement.',
-        type: 'danger',
-      });
-      return;
+
+    // Must have a FinancialAccount to import into
+    let finAcctId = wizardFinancialAccountId || linkedFinancialAccount?.id;
+    if (!finAcctId) {
+      // Auto-create one if needed
+      const created = await createWizardFinancialAccount();
+      if (!created) return;
+      finAcctId = created.id;
     }
+
     setWizardImporting(true);
 
     const { rows } = wizardParsed;
-    const { date, description, amount, debit, credit } = wizardMappings;
+    const mappings = wizardMappings;
+
+    const dateCol = Object.entries(mappings).find(([, role]) => role === 'date')?.[0];
+    const descCol = Object.entries(mappings).find(([, role]) => role === 'description')?.[0];
+    const moneyOutCol = Object.entries(mappings).find(([, role]) => role === 'money_out')?.[0];
+    const moneyInCol = Object.entries(mappings).find(([, role]) => role === 'money_in')?.[0];
+    const chargeCol = Object.entries(mappings).find(([, role]) => role === 'card_charge')?.[0];
+    const paymentCol = Object.entries(mappings).find(([, role]) => role === 'card_payment')?.[0];
+    const signedAmountCol = Object.entries(mappings).find(([, role]) => role === 'signed_amount')?.[0];
+    const balanceCol = Object.entries(mappings).find(([, role]) => role === 'balance')?.[0];
+
+    const isCreditCard = wizardImportType === 'credit_card';
 
     const mappedRows = rows.map((row: any) => {
       let amt = 0;
-      if (amount && row.raw[amount]) {
-        amt = parseFloat(row.raw[amount].replace(/[$,]/g, '')) || 0;
-      } else if (debit && credit) {
-        const dr = parseFloat(row.raw[debit]?.replace(/[$,]/g, '') || '0') || 0;
-        const cr = parseFloat(row.raw[credit]?.replace(/[$,]/g, '') || '0') || 0;
-        amt = cr - dr;
-      } else if (debit) {
-        amt = parseFloat(row.raw[debit]?.replace(/[$,]/g, '') || '0') || 0;
-      } else if (credit) {
-        amt = parseFloat(row.raw[credit]?.replace(/[$,]/g, '') || '0') || 0;
+      let rawMoneyOut: number | undefined;
+      let rawMoneyIn: number | undefined;
+      let rawCharge: number | undefined;
+      let rawPayment: number | undefined;
+
+      if (moneyOutCol && row.raw[moneyOutCol] !== undefined) {
+        rawMoneyOut = parseFloat(String(row.raw[moneyOutCol]).replace(/[$,]/g, '')) || 0;
+      }
+      if (moneyInCol && row.raw[moneyInCol] !== undefined) {
+        rawMoneyIn = parseFloat(String(row.raw[moneyInCol]).replace(/[$,]/g, '')) || 0;
+      }
+      if (chargeCol && row.raw[chargeCol] !== undefined) {
+        rawCharge = parseFloat(String(row.raw[chargeCol]).replace(/[$,]/g, '')) || 0;
+      }
+      if (paymentCol && row.raw[paymentCol] !== undefined) {
+        rawPayment = parseFloat(String(row.raw[paymentCol]).replace(/[$,]/g, '')) || 0;
+      }
+
+      if (signedAmountCol && row.raw[signedAmountCol]) {
+        amt = parseFloat(String(row.raw[signedAmountCol]).replace(/[$,]/g, '')) || 0;
+      } else if (isCreditCard && rawCharge !== undefined && rawPayment !== undefined) {
+        amt = rawPayment - rawCharge;
+      } else if (!isCreditCard && rawMoneyOut !== undefined && rawMoneyIn !== undefined) {
+        amt = rawMoneyIn - rawMoneyOut;
+      } else if (rawMoneyOut !== undefined) {
+        amt = -Math.abs(rawMoneyOut);
+      } else if (rawCharge !== undefined) {
+        amt = -Math.abs(rawCharge);
+      } else if (rawMoneyIn !== undefined) {
+        amt = Math.abs(rawMoneyIn);
+      } else if (rawPayment !== undefined) {
+        amt = Math.abs(rawPayment);
       }
       if (wizardSignDirection === 'inverted') amt = -amt;
 
       return {
-        date: row.raw[date] ?? row.date ?? '',
-        description: row.raw[description] ?? row.description ?? '',
+        date: dateCol ? (row.raw[dateCol] ?? row.date ?? '') : (row.date ?? ''),
+        description: descCol ? (row.raw[descCol] ?? row.description ?? '') : (row.description ?? ''),
         amount: String(amt),
       };
     });
@@ -709,23 +1215,52 @@ export default function BankingPage() {
     try {
       const res = await fetchWithTenantHeaders('/api/import/confirm', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: wizardAccountId,
+          accountId: finAcctId,
           mappedRows,
           fileType: wizardParsed.fileType,
           skipDuplicates: true,
         }),
       });
       const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.error || 'Import failed');
+      if (!res.ok) throw new Error(json.error || 'Import failed');
+      if (!json.data) throw new Error('Import failed');
+
+      // Save column mapping if enabled
+      if (wizardSaveMapping) {
+        try {
+          const headers = wizardParsed.headers || [];
+          const headerSig = buildHeaderSignature(headers);
+
+          // Build the mappingsJson and column references
+          const mappingsJson: Record<string, string> = {};
+          for (const [header, role] of Object.entries(mappings)) {
+            if (role !== 'ignore') mappingsJson[header] = role;
+          }
+
+          await fetchWithTenantHeaders('/api/column-mappings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              financialAccountId: finAcctId,
+              dateColumn: dateCol || '',
+              descriptionColumn: descCol || '',
+              amountColumn: signedAmountCol || null,
+              debitColumn: moneyOutCol || chargeCol || null,
+              creditColumn: moneyInCol || paymentCol || null,
+              balanceColumn: balanceCol || null,
+              signDirection: wizardSignDirection,
+              headerSignature: headerSig,
+              mappingsJson,
+              profileName: wizardSavedMapping?.profileName || null,
+            }),
+          });
+        } catch {
+          // Non-critical — mapping save failed but import succeeded
+        }
       }
-      if (!json.data) {
-        throw new Error('Import failed');
-      }
+
       setToast({
         message: `Imported ${json.data.importedCount} transactions. ${json.data.duplicatesSkipped} duplicates skipped.`,
         type: 'success',
@@ -752,6 +1287,11 @@ export default function BankingPage() {
     if (color) return color;
     return kind === 'creditcard' ? '#7c3aed' : '#1f6feb';
   }
+
+  // Get the available roles for the current import type
+  const availableRoles = useMemo(() => {
+    return wizardImportType === 'credit_card' ? creditCardRoles() : bankRoles();
+  }, [wizardImportType]);
 
   // ─── Render ───
 
@@ -989,9 +1529,9 @@ export default function BankingPage() {
                         }}
                       >
                         <option value="">Categorize...</option>
-                        {categoryOptions.length === 0 ? (
+                        {chartAccounts.length === 0 ? (
                           <option value="" disabled>No categories available</option>
-                        ) : categoryOptions.map((cat) => (
+                        ) : chartAccounts.map((cat) => (
                           <option key={cat.id} value={cat.id}>
                             {cat.code} — {cat.name} ({cat.type})
                           </option>
@@ -1042,8 +1582,8 @@ export default function BankingPage() {
                             <X size={13} />
                           </button>
                           <button
-                            onClick={() => categorizeTransaction(tx.id, categoryOptions[0]?.id || '')}
-                            disabled={categoryOptions.length === 0}
+                            onClick={() => categorizeTransaction(tx.id, chartAccounts[0]?.id || '')}
+                            disabled={chartAccounts.length === 0}
                             className="w-[28px] h-[28px] grid place-items-center rounded-md border border-[var(--border)] text-[var(--text-faint)] hover:text-[var(--success)] hover:border-[var(--success)] transition-colors"
                             title="Accept"
                           >
@@ -1119,9 +1659,9 @@ export default function BankingPage() {
         <>
           <div className="fixed inset-0 z-90 bg-black/40 backdrop-blur-sm" onClick={closeWizard} />
 
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-100 w-full max-w-[640px] bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)]">
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-100 w-full max-w-[800px] max-h-[85vh] overflow-y-auto bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)]">
             {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--border)]">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-[var(--surface)] z-10">
               <h2 className="t-h3 flex-1">Import Statement</h2>
               <div className="flex items-center gap-2">
                 <span className={cn(
@@ -1131,12 +1671,12 @@ export default function BankingPage() {
                 <span className="w-4 h-px bg-[var(--border)]" />
                 <span className={cn(
                   'w-8 h-8 rounded-full grid place-items-center text-xs font-bold',
-                  wizardStep === 'map' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
+                  wizardStep === 'upload' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
                 )}>2</span>
                 <span className="w-4 h-px bg-[var(--border)]" />
                 <span className={cn(
                   'w-8 h-8 rounded-full grid place-items-center text-xs font-bold',
-                  wizardStep === 'review' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
+                  (wizardStep === 'map' || wizardStep === 'review') ? 'bg-[var(--primary)] text-white' : 'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
                 )}>3</span>
               </div>
               <button onClick={closeWizard}
@@ -1145,7 +1685,7 @@ export default function BankingPage() {
               </button>
             </div>
 
-            {/* Step 1 — Account & File */}
+            {/* Step 1 — Select Account from Chart of Accounts */}
             {wizardStep === 'account' && (
               <div className="p-5 space-y-4">
                 {!hasSelectedCompany && (
@@ -1154,68 +1694,117 @@ export default function BankingPage() {
                   </Alert>
                 )}
 
+                <div className="text-sm text-[var(--text-muted)]">
+                  Choose the account this statement belongs to.
+                </div>
+
+                {/* Importable Chart of Accounts */}
                 <div className="field">
-                  <label>Account</label>
-                  <select
-                    className="select"
-                    value={wizardAccountId}
-                    onChange={(e) => {
-                      setWizardAccountId(e.target.value);
-                      // Auto-set sign direction based on account type
-                      const acct = accounts.find(a => a.id === e.target.value);
-                      setWizardSignDirection(acct?.kind === 'creditcard' ? 'inverted' : 'normal');
-                    }}
-                    disabled={accounts.length === 0}
-                  >
-                    {accounts.length === 0 ? (
-                      <option value="">No accounts yet</option>
-                    ) : accounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({a.kind.replace('_', ' ')}) · {money(a.currentBalance)}
-                      </option>
-                    ))}
-                  </select>
-                  {wizardAccountId && (
-                    <span className="hint mt-1">
-                      {accounts.find(a => a.id === wizardAccountId)?.kind === 'creditcard'
-                        ? '💳 Credit card — charges will be auto-inverted to show as outflows.'
-                        : '🏦 Bank account — debits = outflows, credits = inflows.'}
-                    </span>
+                  <label className="text-sm font-medium text-[var(--text-strong)]">
+                    Select account from Chart of Accounts
+                  </label>
+                  {importableCoaAccounts.length === 0 ? (
+                    <div className="text-sm text-[var(--text-muted)] mt-2">
+                      No bank or credit card accounts found in your Chart of Accounts.
+                      Set up accounts in Chart of Accounts first (e.g. 1010 - Business Checking, 2110 - Business Credit Card).
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-1 max-h-[240px] overflow-y-auto border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
+                      {importableCoaAccounts.map((coa) => {
+                        const isSelected = wizardCoaAccountId === coa.id;
+                        const linked = accounts.find((a) => a.glAccountCode === coa.code);
+                        return (
+                          <button
+                            key={coa.id}
+                            onClick={() => handleCoaAccountSelect(coa.id)}
+                            className={cn(
+                              'w-full text-left px-4 py-3 transition-colors hover:bg-[var(--surface-2)]',
+                              isSelected && 'bg-[var(--primary-soft)] border-l-2 border-l-[var(--primary)]'
+                            )}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className={cn(
+                                'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0',
+                                isSelected ? 'border-[var(--primary)]' : 'border-[var(--border-strong)]'
+                              )}>
+                                {isSelected && <span className="w-2.5 h-2.5 rounded-full bg-[var(--primary)]" />}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-semibold text-[var(--text-strong)]">
+                                  {coa.code} — {coa.name}
+                                </div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <Badge variant={coa.type === 'asset' ? 'info' : 'pending'}>
+                                    {coa.type === 'asset' ? 'Bank / Cash' : 'Credit Card'}
+                                  </Badge>
+                                  <span className="text-xs text-[var(--text-muted)] font-mono">
+                                    {money(coa.balance ?? 0)}
+                                  </span>
+                                  {linked && (
+                                    <span className="text-xs text-[var(--success)]">
+                                      ✓ Linked to {linked.name}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <ChevronDown size={16} className={cn(
+                                'text-[var(--text-faint)] transition-transform',
+                                isSelected && 'rotate-180'
+                              )} />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
 
-                {accounts.length === 0 && (
+                {/* If a COA account is selected and linked, show it */}
+                {wizardCoaAccountId && linkedFinancialAccount && (
+                  <div className="bg-[var(--success-soft)] border border-[var(--success)]/20 rounded-lg p-3 text-sm">
+                    <span className="font-medium">Linked account:</span> {linkedFinancialAccount.name}
+                    {' '}({linkedFinancialAccount.kind}) · Balance: {money(linkedFinancialAccount.currentBalance)}
+                  </div>
+                )}
+
+                {/* If COA selected but NOT linked, offer to create one */}
+                {wizardCoaAccountId && !linkedFinancialAccount && !wizardFinancialAccountId && (
                   <Alert variant="warning">
                     <div className="space-y-3">
                       <div className="text-sm">
-                        No bank accounts are available yet. Create one now so this statement has somewhere to import.
+                        No bank account is linked to {selectedCoaAccount?.code} — {selectedCoaAccount?.name}.
+                        Create one now.
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-2 gap-3">
                         <div className="field">
                           <label>Account name</label>
                           <input
                             className="input"
-                            value={wizardAccountName}
-                            onChange={(e) => setWizardAccountName(e.target.value)}
-                            placeholder="Primary Checking"
+                            value={wizardNewAccountName}
+                            onChange={(e) => setWizardNewAccountName(e.target.value)}
+                            placeholder={selectedCoaAccount?.name || 'Account name'}
                           />
                         </div>
                         <div className="field">
                           <label>Account type</label>
                           <select
                             className="select"
-                            value={wizardAccountKind}
-                            onChange={(e) => setWizardAccountKind(e.target.value as FinancialAccount['kind'])}
+                            value={wizardNewAccountKind}
+                            onChange={(e) => setWizardNewAccountKind(e.target.value as FinancialAccount['kind'])}
                           >
-                            <option value="checking">Checking</option>
-                            <option value="savings">Savings</option>
-                            <option value="creditcard">Credit card</option>
-                            <option value="payoutclearing">Payout clearing</option>
+                            {wizardImportType === 'credit_card' ? (
+                              <option value="creditcard">Credit card</option>
+                            ) : (
+                              <>
+                                <option value="checking">Checking</option>
+                                <option value="savings">Savings</option>
+                              </>
+                            )}
                           </select>
                         </div>
                       </div>
                       <div className="flex justify-end">
-                        <Button onClick={createWizardAccount} disabled={wizardCreatingAccount || !hasSelectedCompany}>
+                        <Button onClick={createWizardFinancialAccount} disabled={wizardCreatingAccount || !hasSelectedCompany}>
                           {wizardCreatingAccount ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
                           Create account
                         </Button>
@@ -1223,6 +1812,38 @@ export default function BankingPage() {
                     </div>
                   </Alert>
                 )}
+
+                <div className="flex gap-3 pt-4 border-t border-[var(--border)]">
+                  <Button variant="secondary" onClick={closeWizard}>
+                    Cancel
+                  </Button>
+                  <div className="flex-1" />
+                  <Button onClick={handleContinueToUpload} disabled={!wizardCoaAccountId}>
+                    Continue
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2 — Upload Statement */}
+            {wizardStep === 'upload' && (
+              <div className="p-5 space-y-4">
+                {/* Selected account info */}
+                {selectedCoaAccount && (
+                  <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3 text-sm">
+                    <span className="text-[var(--text-muted)]">Importing into:</span>{' '}
+                    <span className="font-semibold text-[var(--text-strong)]">
+                      {selectedCoaAccount.code} — {selectedCoaAccount.name}
+                    </span>
+                    <Badge variant={wizardImportType === 'credit_card' ? 'pending' : 'info'} className="ml-2">
+                      {wizardImportType === 'credit_card' ? 'Credit Card' : 'Bank'}
+                    </Badge>
+                  </div>
+                )}
+
+                <div className="text-sm text-[var(--text-muted)]">
+                  Upload your statement file. Supported formats: CSV, OFX, QFX, PDF.
+                </div>
 
                 {/* Drop zone */}
                 <div
@@ -1274,43 +1895,97 @@ export default function BankingPage() {
                     }}
                   />
                 </div>
+
+                <div className="flex gap-3 pt-4 border-t border-[var(--border)]">
+                  <Button variant="secondary" onClick={() => setWizardStep('account')}>
+                    Back
+                  </Button>
+                  <div className="flex-1" />
+                </div>
               </div>
             )}
 
-            {/* Step 2 — Map columns */}
+            {/* Step 3 — Map Columns & Preview */}
             {wizardStep === 'map' && wizardParsed && (
               <div className="p-5 space-y-4">
-                <div className="text-sm text-[var(--text-muted)] mb-2">
-                  Map your statement columns to LedgerPro fields.
+                {/* File info bar */}
+                <div className="flex items-center gap-3 text-sm flex-wrap">
+                  <Badge variant="info">{wizardParsed.fileType?.toUpperCase()}</Badge>
+                  <span className="text-[var(--text-muted)]">
+                    {wizardParsed.totalRows} rows · {wizardParsed.headers.length} columns
+                  </span>
+                  {wizardFiles.length > 0 && (
+                    <span className="text-[var(--text-muted)] text-xs truncate max-w-[250px]">
+                      {wizardFiles.map(f => f.name).join(', ')}
+                    </span>
+                  )}
                 </div>
 
-                {wizardPdfAmbiguousSign && (
-                  <Alert variant="warning">
-                    This PDF's amounts don't have distinguishing signs, CR/DR labels, or separate
-                    debit/credit columns — LedgerPro can't reliably tell deposits from withdrawals
-                    for it. Check the column mapping below against the sample values, and carefully
-                    verify each transaction's amount (and sign) in the review step before importing.
+                {/* Saved mapping banner */}
+                {wizardSavedMapping && (
+                  <Alert variant="info">
+                    <div className="flex items-center gap-2">
+                      <Check size={16} />
+                      <span>
+                        Saved mapping applied from {wizardSavedMapping.profileName || 'previous import'}.
+                        You can adjust the mapping below before importing.
+                      </span>
+                    </div>
                   </Alert>
                 )}
 
-                {/* Column Preview — shows sample values so user can identify columns */}
-                {wizardParsed?.headers?.length > 0 && (
-                  <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3 overflow-x-auto">
-                    <div className="text-xs font-semibold text-[var(--text-muted)] mb-2">Column Preview (first 3 rows)</div>
-                    <table className="w-full text-xs font-mono">
+                {wizardPdfAmbiguousSign && (
+                  <Alert variant="warning">
+                    This file's amounts don't have distinguishing signs or separate debit/credit columns —
+                    LedgerPro can't reliably tell debits from credits for it. Check the column mapping below
+                    against the sample values, and carefully verify each transaction in the review step before importing.
+                  </Alert>
+                )}
+
+                <div className="text-sm text-[var(--text-muted)]">
+                  Select how each statement column should be used.
+                </div>
+
+                {/* A. Original Statement Preview with "Treat as" dropdowns above each column */}
+                <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg overflow-hidden">
+                  <div className="px-4 py-2 border-b border-[var(--border)] flex items-center gap-2">
+                    <FileText size={14} className="text-[var(--text-muted)]" />
+                    <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                      Original Statement Preview
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
                       <thead>
                         <tr className="border-b border-[var(--border)]">
-                          {wizardParsed.headers.map((h: string) => (
-                            <th key={h} className="text-left px-2 py-1 text-[var(--text-faint)] whitespace-nowrap">{h}</th>
+                          {wizardParsed.headers.map((header: string) => (
+                            <th key={header} className="px-2 py-1 align-top">
+                              <div className="text-[var(--text-faint)] text-[10px] mb-1 truncate max-w-[140px]" title={header}>
+                                {header}
+                              </div>
+                              <select
+                                className="w-full h-[28px] px-1 text-[11px] rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)]"
+                                value={wizardMappings[header] || 'ignore'}
+                                onChange={(e) =>
+                                  setWizardMappings({ ...wizardMappings, [header]: e.target.value })
+                                }
+                              >
+                                {availableRoles.map((role) => (
+                                  <option key={role.value} value={role.value} title={role.help}>
+                                    {role.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {wizardParsed.rows.slice(0, 3).map((row: any, ri: number) => (
+                        {wizardParsed.rows.slice(0, 5).map((row: any, ri: number) => (
                           <tr key={ri} className="border-b border-[var(--border)] last:border-0">
-                            {wizardParsed.headers.map((h: string) => (
-                              <td key={h} className="px-2 py-1 text-[var(--text)] whitespace-nowrap max-w-[150px] truncate">
-                                {row.raw?.[h] ?? row[h] ?? ''}
+                            {wizardParsed.headers.map((header: string) => (
+                              <td key={header} className="px-2 py-1.5 text-[var(--text)] whitespace-nowrap max-w-[140px] truncate font-mono text-[11px]">
+                                {row.raw?.[header] ?? row[header] ?? ''}
                               </td>
                             ))}
                           </tr>
@@ -1318,44 +1993,174 @@ export default function BankingPage() {
                       </tbody>
                     </table>
                   </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  {[
-                    { key: 'date', label: 'Date', help: 'Transaction date column' },
-                    { key: 'description', label: 'Description', help: 'Merchant/payee name' },
-                    { key: 'amount', label: 'Amount (signed)', help: 'Single column with +/- signs' },
-                    { key: 'debit', label: 'Debit / Payment Column', help: 'Money OUT — withdrawals, payments, charges' },
-                    { key: 'credit', label: 'Credit / Receipt Column', help: 'Money IN — deposits, refunds, interest' },
-                    { key: 'balance', label: 'Balance (optional)', help: 'Running account balance after transaction' },
-                  ].map((field) => (
-                    <div className="field" key={field.key}>
-                      <label title={field.help}>{field.label}</label>
-                      <select
-                        className="select"
-                        value={wizardMappings[field.key] || ''}
-                        onChange={(e) =>
-                          setWizardMappings({ ...wizardMappings, [field.key]: e.target.value })
-                        }
-                      >
-                        <option value="">— Ignore —</option>
-                        {wizardParsed.headers.map((h: string) => (
-                          <option key={h} value={h}>{h}</option>
-                        ))}
-                      </select>
-                    </div>
-                  ))}
                 </div>
 
-                {/* Sign direction + Statement type guidance */}
-                <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-4 space-y-3">
+                {/* B. Normalized Import Preview */}
+                {(() => {
+                  const dateCol = Object.entries(wizardMappings).find(([, r]) => r === 'date')?.[0];
+                  const descCol = Object.entries(wizardMappings).find(([, r]) => r === 'description')?.[0];
+                  const moneyOutCol = Object.entries(wizardMappings).find(([, r]) => r === 'money_out')?.[0];
+                  const moneyInCol = Object.entries(wizardMappings).find(([, r]) => r === 'money_in')?.[0];
+                  const chargeCol = Object.entries(wizardMappings).find(([, r]) => r === 'card_charge')?.[0];
+                  const paymentCol = Object.entries(wizardMappings).find(([, r]) => r === 'card_payment')?.[0];
+                  const signedAmtCol = Object.entries(wizardMappings).find(([, r]) => r === 'signed_amount')?.[0];
+                  const balCol = Object.entries(wizardMappings).find(([, r]) => r === 'balance')?.[0];
+                  const refCol = Object.entries(wizardMappings).find(([, r]) => r === 'reference')?.[0];
+                  const isCC = wizardImportType === 'credit_card';
+                  const normCols = normalizedPreviewColumns(wizardImportType);
+
+                  const previewRows = wizardParsed.rows.slice(0, 5).map((row: any) => {
+                    let amt = 0;
+                    let rawMoneyOut: number | undefined;
+                    let rawMoneyIn: number | undefined;
+                    let rawCharge: number | undefined;
+                    let rawPayment: number | undefined;
+
+                    // Parse individual column values first
+                    if (moneyOutCol && row.raw[moneyOutCol] !== undefined) {
+                      rawMoneyOut = parseFloat(String(row.raw[moneyOutCol]).replace(/[$,]/g, '')) || 0;
+                    }
+                    if (moneyInCol && row.raw[moneyInCol] !== undefined) {
+                      rawMoneyIn = parseFloat(String(row.raw[moneyInCol]).replace(/[$,]/g, '')) || 0;
+                    }
+                    if (chargeCol && row.raw[chargeCol] !== undefined) {
+                      rawCharge = parseFloat(String(row.raw[chargeCol]).replace(/[$,]/g, '')) || 0;
+                    }
+                    if (paymentCol && row.raw[paymentCol] !== undefined) {
+                      rawPayment = parseFloat(String(row.raw[paymentCol]).replace(/[$,]/g, '')) || 0;
+                    }
+
+                    // Compute net amount in the same way confirmImport does
+                    if (signedAmtCol && row.raw[signedAmtCol]) {
+                      amt = parseFloat(String(row.raw[signedAmtCol]).replace(/[$,]/g, '')) || 0;
+                      if (wizardSignDirection === 'inverted') amt = -amt;
+                    } else if (isCC && rawCharge !== undefined && rawPayment !== undefined) {
+                      amt = rawPayment - rawCharge;
+                    } else if (!isCC && rawMoneyOut !== undefined && rawMoneyIn !== undefined) {
+                      amt = rawMoneyIn - rawMoneyOut;
+                    } else if (rawMoneyOut !== undefined) {
+                      amt = -Math.abs(rawMoneyOut);
+                    } else if (rawCharge !== undefined) {
+                      amt = -Math.abs(rawCharge);
+                    } else if (rawMoneyIn !== undefined) {
+                      amt = Math.abs(rawMoneyIn);
+                    } else if (rawPayment !== undefined) {
+                      amt = Math.abs(rawPayment);
+                    }
+                    if (wizardSignDirection === 'inverted') amt = -amt;
+
+                    return {
+                      date: dateCol ? (row.raw[dateCol] ?? '') : '',
+                      description: descCol ? (row.raw[descCol] ?? '') : '',
+                      amount: amt,
+                      balance: balCol ? parseFloat(String(row.raw[balCol] || '').replace(/[$,]/g, '')) || null : null,
+                      reference: refCol ? (row.raw[refCol] ?? '') : '',
+                    };
+                  });
+
+                  const hasAnyData = previewRows.some((r: any) => r.date || r.description || r.amount !== 0);
+
+                  return (
+                    <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg overflow-hidden">
+                      <div className="px-4 py-2 border-b border-[var(--border)] flex items-center gap-2">
+                        <ArrowRightLeft size={14} className="text-[var(--text-muted)]" />
+                        <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                          Normalized Import Preview
+                        </span>
+                        <span className="text-[10px] text-[var(--text-faint)] ml-auto">
+                          {isCC ? 'Credit Card Labels' : 'Bank Labels'}
+                        </span>
+                      </div>
+                      {hasAnyData ? (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-[var(--border)]">
+                                {normCols.map((col) => (
+                                  <th key={col} className="text-left px-3 py-2 font-mono text-[10px] uppercase text-[var(--text-muted)] whitespace-nowrap">
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {previewRows.map((row: any, ri: number) => (
+                                <tr key={ri} className="border-b border-[var(--border)] last:border-0">
+                                  <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">{row.date}</td>
+                                  <td className="px-3 py-1.5 text-[11px] truncate max-w-[200px]">{row.description}</td>
+                                  {isCC ? (
+                                    <>
+                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
+                                        {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
+                                      </td>
+                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
+                                        {row.amount > 0 ? money(row.amount) : '—'}
+                                      </td>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
+                                        {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
+                                      </td>
+                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
+                                        {row.amount > 0 ? money(row.amount) : '—'}
+                                      </td>
+                                    </>
+                                  )}
+                                  <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap text-[var(--text-muted)]">
+                                    {row.balance !== null ? money(row.balance) : '—'}
+                                  </td>
+                                  <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap text-[var(--text-muted)]">
+                                    {row.reference || '—'}
+                                  </td>
+                                  <td className="px-3 py-1.5 whitespace-nowrap">
+                                    <Badge variant="pending">Ready</Badge>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="px-4 py-6 text-center text-xs text-[var(--text-muted)]">
+                          Map at least a Date and Description column to see the normalized preview.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Save mapping checkbox */}
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-[var(--text-strong)]">
+                  <input
+                    type="checkbox"
+                    checked={wizardSaveMapping}
+                    onChange={(e) => setWizardSaveMapping(e.target.checked)}
+                    className="w-4 h-4 rounded border-[var(--border-strong)] text-[var(--primary)] focus:ring-[var(--ring)]"
+                  />
+                  Save this mapping for this account and statement format
+                </label>
+
+                {/* Mapping validation errors */}
+                {mappingValidation.length > 0 && (
+                  <div className="bg-[var(--danger-soft)] border border-[var(--danger)]/20 rounded-lg p-3">
+                    <ul className="list-disc ml-4 text-xs text-[var(--danger)] space-y-0.5">
+                      {mappingValidation.map((msg, i) => (
+                        <li key={i}>{msg}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Sign direction */}
+                <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-4">
                   <div className="flex items-center gap-3">
                     <div className="field flex-1">
-                      <label>Sign Direction</label>
+                      <label className="text-xs">Sign Direction</label>
                       <Segmented
                         options={[
-                          { value: 'normal', label: 'Normal (bank)' },
-                          { value: 'inverted', label: 'Inverted (credit card)' },
+                          { value: 'normal', label: wizardImportType === 'credit_card' ? 'Normal (credit card)' : 'Normal (bank)' },
+                          { value: 'inverted', label: wizardImportType === 'credit_card' ? 'Inverted (bank)' : 'Inverted (credit card)' },
                         ]}
                         value={wizardSignDirection}
                         onChange={(v) => setWizardSignDirection(v as 'normal' | 'inverted')}
@@ -1363,22 +2168,30 @@ export default function BankingPage() {
                     </div>
                     <div className="flex-1 text-xs text-[var(--text-muted)] leading-relaxed">
                       {wizardSignDirection === 'normal' ? (
-                        <span><strong>Bank checking/savings:</strong> Debits = money out (negative). Credits = money in (positive).</span>
+                        wizardImportType === 'credit_card' ? (
+                          <span><strong>Credit card (normal):</strong> Charges are positive on statements but are actually money OUT. Sign is flipped so your books show the expense correctly.</span>
+                        ) : (
+                          <span><strong>Bank (normal):</strong> Debits = money out (negative). Credits = money in (positive).</span>
+                        )
                       ) : (
-                        <span><strong>Credit card:</strong> Charges look positive on statements but are money OUT. We flip the sign so your books are correct.</span>
+                        wizardImportType === 'credit_card' ? (
+                          <span><strong>Inverted (bank-style):</strong> Amounts are treated like a bank statement. Use this if your credit card statement already has charges as negatives.</span>
+                        ) : (
+                          <span><strong>Inverted (credit-card-style):</strong> Signs are reversed. Use this if your bank statement uses the opposite sign convention.</span>
+                        )
                       )}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex gap-3 pt-2">
-                  <Button variant="secondary" onClick={() => setWizardStep('account')}>
+                  <Button variant="secondary" onClick={() => setWizardStep('upload')}>
                     Back
                   </Button>
                   <div className="flex-1" />
                   <Button
-                    onClick={generatePreview}
-                    disabled={!wizardMappings.date || (!wizardMappings.amount && !wizardMappings.debit && !wizardMappings.credit)}
+                    onClick={generatePreviewFromMappings}
+                    disabled={mappingValidation.some(m => m.includes('Date') || m.includes('Description') || m.includes('least one amount'))}
                   >
                     Preview & Continue
                   </Button>
@@ -1386,10 +2199,10 @@ export default function BankingPage() {
               </div>
             )}
 
-            {/* Step 3 — Review & Confirm */}
+            {/* Step 3b — Review & Confirm */}
             {wizardStep === 'review' && (
               <div className="p-5 space-y-4">
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-4 text-sm flex-wrap">
                   <div className="bg-[var(--success-soft)] px-3 py-2 rounded-lg">
                     <span className="font-semibold text-[var(--success)]">{wizardParsed?.totalRows}</span>
                     <span className="text-[var(--text-muted)] ml-1">transactions found</span>
@@ -1400,6 +2213,9 @@ export default function BankingPage() {
                     </div>
                   )}
                   <Badge variant="info">{wizardParsed?.fileType?.toUpperCase()}</Badge>
+                  <Badge variant={wizardImportType === 'credit_card' ? 'pending' : 'info'}>
+                    {wizardImportType === 'credit_card' ? 'Credit Card' : 'Bank'}
+                  </Badge>
                 </div>
 
                 {/* Parse warnings */}
@@ -1425,32 +2241,81 @@ export default function BankingPage() {
                   </Alert>
                 )}
 
-                {/* Preview table */}
-                <div className="border border-[var(--border)] rounded-lg overflow-hidden max-h-[300px] overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-[var(--surface-2)]">
-                        <th className="text-left px-3 py-2 font-mono text-micro uppercase text-[var(--text-muted)]">Date</th>
-                        <th className="text-left px-3 py-2 font-mono text-micro uppercase text-[var(--text-muted)]">Description</th>
-                        <th className="text-right px-3 py-2 font-mono text-micro uppercase text-[var(--text-muted)]">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {wizardPreview.map((row: any, i: number) => (
-                        <tr key={i} className="border-t border-[var(--border)]">
-                          <td className="px-3 py-2 font-mono">{row.date}</td>
-                          <td className="px-3 py-2 truncate max-w-[300px]">{row.description}</td>
-                          <td className={cn(
-                            'px-3 py-2 text-right font-mono tabular-nums',
-                            row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--success)]'
-                          )}>
-                            {money(row.amount)}
-                          </td>
+                {/* Normalized preview table for final review */}
+                <div className="border border-[var(--border)] rounded-lg overflow-hidden">
+                  <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface-2)]">
+                    <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                      Final Preview — {wizardImportType === 'credit_card' ? 'Credit Card' : 'Bank'} Labels
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-[var(--surface-2)] sticky top-0">
+                          {normalizedPreviewColumns(wizardImportType).map((col) => (
+                            <th key={col} className="text-left px-3 py-2 font-mono text-micro uppercase text-[var(--text-muted)] whitespace-nowrap">
+                              {col}
+                            </th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {wizardPreview.map((row: any, i: number) => {
+                          const isCC = wizardImportType === 'credit_card';
+                          return (
+                            <tr key={i} className="border-t border-[var(--border)]">
+                              <td className="px-3 py-2 font-mono text-xs">{row.date}</td>
+                              <td className="px-3 py-2 text-xs truncate max-w-[200px]">{row.description}</td>
+                              {isCC ? (
+                                <>
+                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
+                                    {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
+                                  </td>
+                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
+                                    {row.amount > 0 ? money(row.amount) : '—'}
+                                  </td>
+                                </>
+                              ) : (
+                                <>
+                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
+                                    {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
+                                  </td>
+                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
+                                    {row.amount > 0 ? money(row.amount) : '—'}
+                                  </td>
+                                </>
+                              )}
+                              <td className="px-3 py-2 text-right font-mono tabular-nums text-xs text-[var(--text-muted)]">
+                                {row.balance !== undefined && row.balance !== null ? money(row.balance) : '—'}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs text-[var(--text-muted)]">
+                                {row.reference || '—'}
+                              </td>
+                              <td className="px-3 py-2">
+                                <Badge variant="pending">Ready</Badge>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {wizardPreview.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-3 py-8 text-center text-xs text-[var(--text-muted)]">
+                              No preview available. Go back and map your columns.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
+
+                {/* Save mapping reminder */}
+                {wizardSaveMapping && (
+                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <Check size={14} className="text-[var(--success)]" />
+                    Mapping will be saved for this account and applied to future uploads with matching columns.
+                  </div>
+                )}
 
                 <div className="flex gap-3">
                   <Button variant="secondary" onClick={() => setWizardStep('map')}>
