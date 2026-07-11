@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Printer } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { ReportHeader } from '@/components/reports/ReportHeader';
 import { formatReportPeriod } from '@/lib/reporting';
@@ -110,7 +110,12 @@ export default function ARAgingPage() {
             />
           </div>
         </div>
-        <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)] font-mono" />
+        <div className="flex items-center gap-2">
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)] bg-[var(--surface-3)] px-3 py-1.5 rounded-full transition-colors print:hidden">
+            <Printer size={13} /> Print
+          </button>
+          <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)] font-mono" />
+        </div>
       </div>
 
       {/* Summary cards */}

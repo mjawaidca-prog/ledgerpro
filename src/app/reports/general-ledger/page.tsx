@@ -7,7 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format, startOfMonth, endOfMonth, subMonths, startOfQuarter } from 'date-fns';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar, Download, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar, Download, Printer, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { exportGL } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { ReportHeader } from '@/components/reports/ReportHeader';
@@ -158,6 +158,9 @@ function GLContent() {
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)] bg-[var(--surface-3)] px-3 py-1.5 rounded-full transition-colors print:hidden">
+            <Printer size={13} /> Print
+          </button>
           <button onClick={() => exportGL(data)} className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:text-[var(--primary)] bg-[var(--primary-soft)] px-3 py-1.5 rounded-full transition-colors">
             <Download size={13} /> Export CSV
           </button>

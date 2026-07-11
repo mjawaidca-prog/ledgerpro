@@ -7,7 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
-import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar, Download } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar, Download, Printer } from 'lucide-react';
 import { exportTrialBalance, exportCaseWareTrialBalance } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { format as formatDate, startOfMonth, subMonths, endOfMonth, startOfYear, startOfQuarter } from 'date-fns';
@@ -58,6 +58,7 @@ export default function TrialBalancePage() {
   const [asOf, setAsOf] = useState(defaultAsOf);
   const [activePreset, setActivePreset] = useState('FY End');
   const [compare, setCompare] = useState(false);
+  const [hideZeroBalances, setHideZeroBalances] = useState(false);
   useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) { setAsOf(fy.fiscalYearEnd); setActivePreset('FY End'); } }, [fy.loaded, fy.fiscalYearEnd]);
 
   // Dynamic presets based on company fiscal year
@@ -132,6 +133,13 @@ export default function TrialBalancePage() {
             <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
             Compare prior year
           </label>
+          <label className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+            <input type="checkbox" checked={hideZeroBalances} onChange={(e) => setHideZeroBalances(e.target.checked)} />
+            Hide zero balances
+          </label>
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)] bg-[var(--surface-3)] px-3 py-1.5 rounded-full transition-colors print:hidden">
+            <Printer size={13} /> Print
+          </button>
           <button onClick={() => exportTrialBalance(data)} className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:text-[var(--primary)] bg-[var(--primary-soft)] px-3 py-1.5 rounded-full transition-colors">
             <Download size={13} /> Export CSV
           </button>
@@ -181,8 +189,10 @@ export default function TrialBalancePage() {
               </thead>
               <tbody>
                 {TYPE_ORDER.map((type) => {
-                  const rows = data.grouped[type];
-                  if (!rows || rows.length === 0) return null;
+                  const allRows = data.grouped[type];
+                  if (!allRows || allRows.length === 0) return null;
+                  const rows = hideZeroBalances ? allRows.filter(r => r.debit !== 0 || r.credit !== 0) : allRows;
+                  if (rows.length === 0) return null;
                   const typeTotalDebit = rows.reduce((s, r) => s + r.debit, 0);
                   const typeTotalCredit = rows.reduce((s, r) => s + r.credit, 0);
 

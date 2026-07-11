@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import {
-  ArrowLeft, Loader2, TrendingDown, TrendingUp, BarChart3,
+  ArrowLeft, Loader2, TrendingDown, TrendingUp, BarChart3, Printer,
 } from 'lucide-react';
 import { ReportHeader } from '@/components/reports/ReportHeader';
 import {
@@ -62,7 +62,7 @@ function BudgetVsActualContent() {
     <AppShell>
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => router.push('/budgets')} className="p-2 rounded-lg hover:bg-[var(--surface-3)]"><ArrowLeft size={18} className="text-[var(--text-muted)]" /></button>
-        <div>
+        <div className="flex-1">
           <ReportHeader
             companyName={data?.companyName || ''}
             statementName="Budget vs Actual"
@@ -70,6 +70,9 @@ function BudgetVsActualContent() {
             subtitle={data?.budget.name}
           />
         </div>
+        <button onClick={() => window.print()} className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)] bg-[var(--surface-3)] px-3 py-1.5 rounded-full transition-colors print:hidden">
+          <Printer size={13} /> Print
+        </button>
       </div>
 
       {loading && <div className="flex items-center justify-center h-48"><Loader2 size={24} className="animate-spin text-[var(--text-muted)]" /></div>}

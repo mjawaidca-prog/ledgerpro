@@ -7,7 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
-import { ArrowLeft, Loader2, Calendar } from 'lucide-react';
+import { ArrowLeft, Loader2, Calendar, Printer } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { ReportHeader } from '@/components/reports/ReportHeader';
 import { formatReportPeriod } from '@/lib/reporting';
@@ -128,6 +128,9 @@ export default function ExpenseBreakdownPage() {
             />
           </div>
         </div>
+        <button onClick={() => window.print()} className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)] bg-[var(--surface-3)] px-3 py-1.5 rounded-full transition-colors print:hidden">
+          <Printer size={13} /> Print
+        </button>
       </div>
 
       {/* Date presets */}
