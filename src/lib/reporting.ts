@@ -107,8 +107,20 @@ export function formatReportPeriod(
   endDate: Date | string,
   startDate?: Date | string
 ): string {
+  // Parse a YYYY-MM-DD string as local time — new Date("2025-11-30")
+  // parses as UTC midnight which shifts to the previous day in
+  // timezones behind UTC (all of North America).
+  const parseLocal = (d: Date | string): Date => {
+    if (d instanceof Date) return d;
+    const parts = d.split('-');
+    if (parts.length === 3) {
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    }
+    return new Date(d);
+  };
+
   const fmt = (d: Date | string): string => {
-    const date = typeof d === 'string' ? new Date(d) : d;
+    const date = parseLocal(d);
     return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   };
 
