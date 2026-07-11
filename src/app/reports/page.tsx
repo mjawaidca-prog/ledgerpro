@@ -1,11 +1,10 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
-import { useCompany } from '@/lib/company-context';
-import { useFiscalYear } from '@/hooks/useFiscalYear';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
   ArrowRight, Receipt, Building2, Scale, BookOpen,
@@ -84,16 +83,21 @@ const reports = [
 
 export default function ReportsPage() {
   const router = useRouter();
-  const { companyName } = useCompany();
-  const fy = useFiscalYear();
-  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'current fiscal year';
+  const [companyName, setCompanyName] = useState('your company');
+
+  useEffect(() => {
+    fetch('/api/companies')
+      .then(r => r.json())
+      .then(json => setCompanyName(json.data?.[0]?.name || 'your company'))
+      .catch(() => {});
+  }, []);
 
   return (
     <AppShell>
       <div className="content-head">
         <div>
           <h1 className="greet">Reports</h1>
-          <p className="sub">Financial reports for {companyName} — {fyLabel}.</p>
+          <p className="sub">Financial reports for {companyName}.</p>
         </div>
       </div>
 
