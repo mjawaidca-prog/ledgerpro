@@ -11,6 +11,7 @@ import { format, addMonths, startOfMonth } from 'date-fns';
 import { Plus, Trash2, Loader2, Save, Download, BarChart3, BookOpen } from 'lucide-react';
 import { exportReport } from '@/lib/export';
 import { useRouter } from 'next/navigation';
+import { ReportHeader } from '@/components/reports/ReportHeader';
 
 export default function CustomReportBuilder() {
   const router = useRouter();
@@ -79,8 +80,12 @@ export default function CustomReportBuilder() {
     <AppShell>
       <div className="content-head">
         <div>
-          <h1 className="greet">Custom Report Builder</h1>
-          <p className="sub">Select accounts, choose grouping, and generate custom reports.</p>
+          <ReportHeader
+            companyName={reportData?.companyName || ''}
+            statementName="Custom Report"
+            periodLabel={new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            subtitle="Select accounts, choose grouping, and generate custom reports."
+          />
         </div>
         <div className="spacer" />
         <Button variant="secondary" onClick={handleSaveTemplate} disabled={selectedAccounts.length === 0}><Save size={14} /> Save Template</Button>

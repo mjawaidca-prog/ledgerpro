@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
-    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } });
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
 
     const { searchParams } = new URL(req.url);
@@ -145,6 +145,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       data: {
+        companyName: company?.legalName || company?.name || '',
         asOf,
         year,
         fiscalYearStart: yearStart.toISOString().slice(0, 10),

@@ -9,6 +9,8 @@ import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 interface AccountLine {
   code: string;
@@ -146,13 +148,12 @@ export default function BalanceSheetPage() {
             <ArrowLeft size={18} className="text-[var(--text-muted)]" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">
-              {data.companyName || 'Balance Sheet'}
-            </h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">
-              Balance Sheet · As of {format(new Date(data.asOf), 'MMM d, yyyy')}
-              {data.prior && ` (compared to ${format(new Date(data.prior.asOf), 'MMM d, yyyy')})`}
-            </p>
+            <ReportHeader
+              companyName={data.companyName}
+              statementName="Balance Sheet"
+              periodLabel={formatReportPeriod('point-in-time', data.asOf)}
+              subtitle={data.prior ? `Compared to ${format(new Date(data.prior.asOf), 'MMM d, yyyy')}` : undefined}
+            />
           </div>
         </div>
         <div className="flex items-center gap-3">

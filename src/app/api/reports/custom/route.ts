@@ -9,6 +9,8 @@ export async function GET(req: NextRequest) {
     const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true } });
+
     const { searchParams } = new URL(req.url);
     const accounts = searchParams.get('accounts');
     const groupBy = searchParams.get('groupBy') || 'type';
@@ -28,7 +30,7 @@ export async function GET(req: NextRequest) {
 
       const total = rows.reduce((s, r) => s + r.balance, 0);
 
-      return NextResponse.json({ data: { rows, total } });
+      return NextResponse.json({ data: { companyName: company?.legalName || company?.name || '', rows, total } });
     }
 
     // Otherwise, list saved templates

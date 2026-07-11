@@ -10,6 +10,8 @@ import { money } from '@/lib/money';
 import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
 import { Printer, Loader2, Download, ArrowRight, Calendar } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 export default function ManagementPackagePage() {
   const fy = useFiscalYear();
@@ -75,11 +77,12 @@ export default function ManagementPackagePage() {
     <AppShell>
       <div className="content-head">
         <div>
-          <h1 className="greet">Management Report Package</h1>
-          <p className="sub">
-            Combined financial statements for {format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}
-            {d?.asOf ? <> — as of {format(new Date(d.asOf), 'MMMM d, yyyy')}</> : ''}.
-          </p>
+          <ReportHeader
+            companyName={d?.companyName || ''}
+            statementName="Management Report Package"
+            periodLabel={formatReportPeriod('period-range', endDate, startDate)}
+            subtitle={d?.asOf ? `As of ${format(new Date(d.asOf), 'MMMM d, yyyy')}` : undefined}
+          />
         </div>
         <div className="spacer" />
         <Button variant="secondary" onClick={() => window.print()}>
@@ -112,14 +115,6 @@ export default function ManagementPackagePage() {
           </div>
         )}
       </div>
-
-      {/* print-only header */}
-      {d && (
-        <div className="hidden print:block mb-6 text-center">
-          <h1 className="text-2xl font-bold">Management Report Package</h1>
-          <p className="text-sm text-gray-500">{format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')} — as of {format(new Date(d.asOf), 'MMMM d, yyyy')}</p>
-        </div>
-      )}
 
       {error && <p className="text-[var(--danger)]">{error}</p>}
 

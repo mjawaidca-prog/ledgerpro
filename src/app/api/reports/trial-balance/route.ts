@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     const compare = searchParams.get('compare') === 'true';
     const asOfDate = endOfDay(new Date(asOf));
 
-    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } });
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
 
     const current = await buildTrialBalance(companyId, asOfDate, fyAnchor);
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
       prior = { asOf: priorAsOfDate.toISOString().slice(0, 10), ...priorTB };
     }
 
-    return NextResponse.json({ data: { asOf, ...current, prior } });
+    return NextResponse.json({ data: { asOf, companyName: company?.legalName || company?.name || '', ...current, prior } });
   } catch (error) {
     console.error('GET /api/reports/trial-balance error:', error);
     return NextResponse.json({ error: 'Failed to generate trial balance' }, { status: 500 });

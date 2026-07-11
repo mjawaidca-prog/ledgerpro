@@ -8,6 +8,8 @@ export async function GET(req: NextRequest) {
     const { companyId, userId, error } = await requireCompany(req);
     if (error) return error;
 
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true } });
+
     const { searchParams } = new URL(req.url);
     const code = searchParams.get('code');
     const startDate = searchParams.get('start') ?? '2026-01-01';
@@ -192,6 +194,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       data: {
+        companyName: company?.legalName || company?.name || '',
         account: account ? { code: account.code, name: account.name, type: account.type } : null,
         period: { startDate, endDate },
         balances: {

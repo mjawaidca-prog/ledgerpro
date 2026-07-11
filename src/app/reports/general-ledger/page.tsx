@@ -10,6 +10,8 @@ import { format, startOfMonth, endOfMonth, subMonths, startOfQuarter } from 'dat
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, Receipt, Landmark, Calendar, Download, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { exportGL } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 interface GLRow {
   id: string;
@@ -37,6 +39,7 @@ interface GLGroup {
 }
 
 interface GLData {
+  companyName: string;
   account: { code: string; name: string; type: string } | null;
   period: { startDate: string; endDate: string };
   balances: { opening: number; closing: number };
@@ -146,26 +149,12 @@ function GLContent() {
             <ArrowLeft size={18} className="text-[var(--text-muted)]" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">
-              General Ledger
-            </h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">
-              {data.account ? (
-                <span>
-                  <span className="font-medium text-[var(--text)]">{data.account.code} — {data.account.name}</span>
-                  <span className={cn(
-                    'ml-2 px-1.5 py-0.5 rounded text-xs font-medium',
-                    data.account.type === 'asset' || data.account.type === 'expense'
-                      ? 'bg-[var(--primary-soft)] text-[var(--accent)]'
-                      : 'bg-[var(--success-soft)] text-[var(--success)]'
-                  )}>
-                    {data.account.type}
-                  </span>
-                </span>
-              ) : 'All accounts'}
-              <span className="text-[var(--text-faint)]"> · </span>
-              <span>{format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}</span>
-            </p>
+            <ReportHeader
+              companyName={data.companyName}
+              statementName="General Ledger"
+              periodLabel={formatReportPeriod('period-range', endDate, startDate)}
+              subtitle={data.account ? `${data.account.code} — ${data.account.name} (${data.account.type})` : 'All accounts'}
+            />
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">

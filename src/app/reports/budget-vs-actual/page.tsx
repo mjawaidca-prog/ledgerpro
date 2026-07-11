@@ -11,6 +11,7 @@ import { money } from '@/lib/money';
 import {
   ArrowLeft, Loader2, TrendingDown, TrendingUp, BarChart3,
 } from 'lucide-react';
+import { ReportHeader } from '@/components/reports/ReportHeader';
 import {
   BarChart as ReBarChart, Bar as ReBar, XAxis as ReXAxis, YAxis as ReYAxis,
   CartesianGrid as ReCartesianGrid, Tooltip as ReTooltip, ResponsiveContainer as ReResponsiveContainer,
@@ -62,8 +63,12 @@ function BudgetVsActualContent() {
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => router.push('/budgets')} className="p-2 rounded-lg hover:bg-[var(--surface-3)]"><ArrowLeft size={18} className="text-[var(--text-muted)]" /></button>
         <div>
-          <h1 className="text-2xl font-bold text-[var(--text-strong)]">Budget vs Actual</h1>
-          <p className="text-sm text-[var(--text-muted)]">{data ? `${data.budget.name} — FY ${data.budget.fiscalYear}` : 'Loading...'}</p>
+          <ReportHeader
+            companyName={data?.companyName || ''}
+            statementName="Budget vs Actual"
+            periodLabel={data ? `FY ${data.budget.fiscalYear}` : 'Loading...'}
+            subtitle={data?.budget.name}
+          />
         </div>
       </div>
 

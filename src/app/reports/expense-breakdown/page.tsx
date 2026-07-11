@@ -9,6 +9,8 @@ import { money } from '@/lib/money';
 import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
 import { ArrowLeft, Loader2, Calendar } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 interface CategoryData {
   code: string;
@@ -21,6 +23,7 @@ interface CategoryData {
 }
 
 interface ExpenseData {
+  companyName: string;
   year: string;
   startDate?: string;
   endDate?: string;
@@ -117,8 +120,12 @@ export default function ExpenseBreakdownPage() {
             <ArrowLeft size={18} className="text-[var(--text-muted)]" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">Expense by Category</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">{format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')} · {data.count} categories · {money(data.totalExpenses)} total</p>
+            <ReportHeader
+              companyName={data.companyName}
+              statementName="Expense by Category"
+              periodLabel={formatReportPeriod('period-range', data.endDate || endDate, data.startDate || startDate)}
+              subtitle={`${data.count} categories · ${money(data.totalExpenses)} total`}
+            />
           </div>
         </div>
       </div>

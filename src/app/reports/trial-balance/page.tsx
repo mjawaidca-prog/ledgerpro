@@ -11,6 +11,8 @@ import { ArrowLeft, CheckCircle2, AlertTriangle, Loader2, ExternalLink, Calendar
 import { exportTrialBalance, exportCaseWareTrialBalance } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { format as formatDate, startOfMonth, subMonths, endOfMonth, startOfYear, startOfQuarter } from 'date-fns';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 interface TBRow {
   code: string;
@@ -26,6 +28,7 @@ interface TBRow {
 
 interface TBData {
   asOf: string;
+  companyName: string;
   rows: TBRow[];
   grouped: Record<string, TBRow[]>;
   totalDebits: number;
@@ -116,10 +119,12 @@ export default function TrialBalancePage() {
             <ArrowLeft size={18} className="text-[var(--text-muted)]" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">Trial Balance</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">
-              As of {format(new Date(data.asOf), 'MMM d, yyyy')} · {data.accountCount} accounts · {data.isBalanced ? 'Balanced' : 'Unbalanced'}
-            </p>
+            <ReportHeader
+              companyName={data.companyName}
+              statementName="Trial Balance"
+              periodLabel={formatReportPeriod('point-in-time', data.asOf)}
+              subtitle={`${data.accountCount} accounts · ${data.isBalanced ? 'Balanced' : 'Unbalanced'}`}
+            />
           </div>
         </div>
         <div className="flex items-center gap-3">

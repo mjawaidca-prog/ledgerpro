@@ -9,6 +9,8 @@ import { money } from '@/lib/money';
 import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
 import { ArrowLeft, TrendingUp, TrendingDown, Loader2, Calendar } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 interface PnLSummary {
   totalRevenue: number;
@@ -20,6 +22,7 @@ interface PnLSummary {
 }
 
 interface PnLData {
+  companyName: string;
   period: { year: string; startDate: string; endDate: string };
   summary: PnLSummary;
   revenue: { code: string; name: string; amount: number }[];
@@ -44,10 +47,10 @@ export default function ProfitLossPage() {
   const [endDate, setEndDate] = useState(fy.fiscalYearEnd || today);
   const [activePreset, setActivePreset] = useState(fyLabel);
   const [compare, setCompare] = useState(false);
-  const [companyName, setCompanyName] = useState('');
+  const [companyNameFallback, setCompanyNameFallback] = useState('');
 
   useEffect(() => {
-    fetch('/api/companies').then(r => r.json()).then(json => setCompanyName(json.data?.[0]?.name || '')).catch(() => {});
+    fetch('/api/companies').then(r => r.json()).then(json => setCompanyNameFallback(json.data?.[0]?.name || '')).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -108,10 +111,11 @@ export default function ProfitLossPage() {
           <ArrowLeft size={18} />
         </button>
         <div className="flex-1">
-          <h1 className="t-h1">Profit & Loss</h1>
-          <p className="text-sm text-[var(--text-muted)] mt-1">
-            {companyName || 'Company'} · {format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}
-          </p>
+          <ReportHeader
+            companyName={data?.companyName || companyNameFallback || ''}
+            statementName="Profit & Loss"
+            periodLabel={formatReportPeriod('period-range', endDate, startDate)}
+          />
         </div>
         <label className="flex items-center gap-2 text-sm text-[var(--text-muted)] mr-2">
           <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />

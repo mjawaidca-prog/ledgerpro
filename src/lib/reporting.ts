@@ -92,3 +92,33 @@ export function toDebitCredit(type: GLType, activity: AccountActivity | undefine
   }
   return net >= 0 ? { debit: 0, credit: net } : { debit: -net, credit: 0 };
 }
+
+/**
+ * Format a report period label following accounting convention.
+ *
+ * Point-in-time reports (Balance Sheet, Trial Balance, AR/AP Aging) use
+ * "As at MMMM d, yyyy". Period-range reports (P&L, Cash Flow, GL,
+ * Expense Breakdown) use "For the period ended MMMM d, yyyy" for a
+ * single end date, or "For the period MMMM d, yyyy to MMMM d, yyyy"
+ * when both start and end are provided.
+ */
+export function formatReportPeriod(
+  type: 'point-in-time' | 'period-range',
+  endDate: Date | string,
+  startDate?: Date | string
+): string {
+  const fmt = (d: Date | string): string => {
+    const date = typeof d === 'string' ? new Date(d) : d;
+    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  };
+
+  if (type === 'point-in-time') {
+    return `As at ${fmt(endDate)}`;
+  }
+
+  if (startDate) {
+    return `For the period ${fmt(startDate)} to ${fmt(endDate)}`;
+  }
+
+  return `For the period ended ${fmt(endDate)}`;
+}

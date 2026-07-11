@@ -8,6 +8,8 @@ export async function GET(req: NextRequest) {
     const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true } });
+
     const { searchParams } = new URL(req.url);
     const budgetId = searchParams.get('budgetId');
 
@@ -59,6 +61,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       data: {
+        companyName: company?.legalName || company?.name || '',
         budget: { id: budget.id, name: budget.name, fiscalYear: budget.fiscalYear, period: budget.period },
         rows,
         totals: {

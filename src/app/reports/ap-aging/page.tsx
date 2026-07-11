@@ -9,6 +9,8 @@ import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 interface BillRow {
   id: string;
@@ -26,6 +28,7 @@ interface BillRow {
 
 interface AgingData {
   asOf: string;
+  companyName: string;
   aging: Record<string, { total: number; count: number; bills: BillRow[] }>;
   totalPayable: number;
   totalBills: number;
@@ -99,8 +102,12 @@ export default function APAgingPage() {
             <ArrowLeft size={18} className="text-[var(--text-muted)]" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">Accounts Payable Aging</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">As of {format(new Date(data.asOf), 'MMM d, yyyy')} · {data.totalBills} open bills · {money(data.totalPayable)} payable</p>
+            <ReportHeader
+              companyName={data.companyName}
+              statementName="Accounts Payable Aging"
+              periodLabel={formatReportPeriod('point-in-time', data.asOf)}
+              subtitle={`${data.totalBills} open bills · ${money(data.totalPayable)} payable`}
+            />
           </div>
         </div>
         <input type="text" pattern="\d{4}-\d{2}-\d{2}" placeholder="YYYY-MM-DD" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="text-sm border border-[var(--border)] rounded-lg px-3 py-2 bg-[var(--surface)] text-[var(--text)] font-mono" />

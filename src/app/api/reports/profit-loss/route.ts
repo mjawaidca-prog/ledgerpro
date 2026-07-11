@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
     const endParam = searchParams.get('endDate');
     const compare = searchParams.get('compare') === 'true';
 
-    const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } });
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
 
     let startDate: Date;
@@ -89,6 +89,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       data: {
+        companyName: company?.legalName || company?.name || '',
         period: { year, startDate, endDate },
         ...current,
         prior,

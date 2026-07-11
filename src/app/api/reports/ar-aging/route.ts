@@ -8,6 +8,8 @@ export async function GET(req: NextRequest) {
     const { companyId, userId, error } = await requireCompany(req);
     if (error) return error;
 
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true } });
+
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
     const asOfDate = new Date(asOf);
@@ -65,6 +67,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       data: {
         asOf,
+        companyName: company?.legalName || company?.name || '',
         aging,
         totalOutstanding,
         totalInvoices: invoices.length,

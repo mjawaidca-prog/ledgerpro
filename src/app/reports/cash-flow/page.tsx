@@ -9,8 +9,11 @@ import { money } from '@/lib/money';
 import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'date-fns';
 import { ArrowLeft, TrendingUp, TrendingDown, Loader2, Calendar } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { ReportHeader } from '@/components/reports/ReportHeader';
+import { formatReportPeriod } from '@/lib/reporting';
 
 interface CashFlowData {
+  companyName: string;
   period: { year: string; startDate: string; endDate: string };
   summary: {
     cashFromCustomers: number;
@@ -116,8 +119,11 @@ export default function CashFlowPage() {
             <ArrowLeft size={18} className="text-[var(--text-muted)]" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">Cash Flow Statement</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">{format(new Date(startDate), 'MMM d, yyyy')} – {format(new Date(endDate), 'MMM d, yyyy')}</p>
+            <ReportHeader
+              companyName={data.companyName}
+              statementName="Cash Flow Statement"
+              periodLabel={formatReportPeriod('period-range', endDate, startDate)}
+            />
           </div>
         </div>
       </div>

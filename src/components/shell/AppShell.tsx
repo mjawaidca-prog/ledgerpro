@@ -145,16 +145,19 @@ export function AppShell({
     <div className="app">
       {/* Mobile backdrop */}
       {mobileMenuOpen && <div className="mobile-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.4)' }} onClick={() => setMobileMenuOpen(false)} />}
-      <Rail
-        companyName={companyName}
-        companyPlan={effectivePlan}
-        companyId={companyId}
-        userName={userName}
-        userEmail={userEmail}
-        className={mobileMenuOpen ? 'open' : ''}
-      />
+      <div className="print:hidden">
+        <Rail
+          companyName={companyName}
+          companyPlan={effectivePlan}
+          companyId={companyId}
+          userName={userName}
+          userEmail={userEmail}
+          className={mobileMenuOpen ? 'open' : ''}
+        />
+      </div>
       <div className="main">
-        <Topbar
+        <div className="print:hidden">
+          <Topbar
           theme={theme}
           density={density}
           onToggleTheme={toggleTheme}
@@ -205,6 +208,7 @@ export function AppShell({
             </a>
           </div>
         )}
+        </div>
         <div className="content">{children}</div>
       </div>
 
