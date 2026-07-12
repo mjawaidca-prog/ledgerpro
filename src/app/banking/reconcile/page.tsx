@@ -22,6 +22,65 @@ interface ReconData {
   stats: { unreconciledCount: number; statementBalance: number; glBalance: number };
 }
 
+function AccountPicker() {
+  const router = useRouter();
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/accounts')
+      .then(r => r.json())
+      .then(json => setAccounts(json.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <AppShell>
+      <div className="max-w-lg mx-auto py-12">
+        <div className="text-center mb-8">
+          <Building2 size={40} className="mx-auto text-[var(--text-muted)] mb-4" />
+          <h1 className="text-2xl font-bold text-[var(--text-strong)] mb-2">Reconcile Account</h1>
+          <p className="text-sm text-[var(--text-muted)]">Select a bank account to reconcile.</p>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-8"><Loader2 size={24} className="animate-spin text-[var(--text-muted)]" /></div>
+        ) : accounts.length === 0 ? (
+          <div className="text-center py-8">
+            <AlertTriangle size={32} className="mx-auto text-[var(--warning)] mb-3" />
+            <p className="text-sm text-[var(--text-muted)] mb-4">No bank accounts found. Connect an account first.</p>
+            <Button onClick={() => router.push('/banking')}><ArrowLeft size={14} /> Go to Banking</Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {accounts.map((acct: any) => (
+              <button
+                key={acct.id}
+                onClick={() => router.push(`/banking/reconcile?accountId=${acct.id}`)}
+                className="w-full text-left flex items-center gap-4 p-4 rounded-xl border border-[var(--border)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] transition-colors"
+              >
+                <div className="w-10 h-10 rounded-lg bg-[var(--primary-soft)] grid place-items-center flex-none">
+                  <Building2 size={18} className="text-[var(--primary)]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-[var(--text-strong)]">{acct.name}</div>
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {acct.kind} {acct.mask ? `·••${acct.mask}` : ''}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-mono font-semibold text-[var(--text-strong)]">{money(acct.currentBalance)}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </AppShell>
+  );
+}
+
 function ReconcileContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -113,9 +172,7 @@ function ReconcileContent() {
   }
 
   if (!accountId) {
-    return (
-      <AppShell><div className="max-w-2xl mx-auto py-12 text-center"><AlertTriangle size={40} className="mx-auto text-[var(--warning)] mb-4" /><h2 className="text-lg font-bold text-[var(--text-strong)] mb-2">No Account Selected</h2><p className="text-sm text-[var(--text-muted)] mb-4">Go to Banking and click "Reconcile" on an account.</p><Button onClick={() => router.push('/banking')}><ArrowLeft size={14} /> Back to Banking</Button></div></AppShell>
-    );
+    return <AccountPicker />;
   }
 
   return (
