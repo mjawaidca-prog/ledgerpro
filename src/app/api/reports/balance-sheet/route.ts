@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, normalBalance, endOfDay, fiscalYearStartFor } from '@/lib/reporting';
+import { getGLActivity, normalBalance, endOfDay, fiscalYearStartFor, parseLocalDate } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 type Acct = { code: string; name: string; type: string; subType: string | null; detailType: string | null };
@@ -130,11 +130,11 @@ export async function GET(req: NextRequest) {
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
     const compare = searchParams.get('compare') === 'true';
 
-    const current = await buildBalanceSheet(companyId, new Date(asOf));
+    const current = await buildBalanceSheet(companyId, parseLocalDate(asOf));
 
     let prior = null;
     if (compare) {
-      const priorAsOf = new Date(asOf);
+      const priorAsOf = parseLocalDate(asOf);
       priorAsOf.setFullYear(priorAsOf.getFullYear() - 1);
       prior = { asOf: priorAsOf.toISOString().slice(0, 10), ...(await buildBalanceSheet(companyId, priorAsOf)) };
     }

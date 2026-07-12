@@ -1,6 +1,7 @@
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { parseLocalDate } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
-    const asOfDate = new Date(asOf);
+    const asOfDate = parseLocalDate(asOf);
 
     const bills = await db.bill.findMany({
       where: {

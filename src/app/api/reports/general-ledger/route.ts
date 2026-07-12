@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { parseLocalDate } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -17,8 +18,8 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get('page') ?? '1');
     const limit = parseInt(searchParams.get('limit') ?? '100');
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate);
     end.setHours(23, 59, 59, 999); // end of day
 
     // Get account info

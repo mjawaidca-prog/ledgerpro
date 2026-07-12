@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, normalBalance, toDebitCredit, endOfDay, fiscalYearStartFor, fiscalYearRangeForLabel } from '@/lib/reporting';
+import { getGLActivity, normalBalance, toDebitCredit, endOfDay, fiscalYearStartFor, fiscalYearRangeForLabel, parseLocalDate } from '@/lib/reporting';
 import { getFinancialAccountBalances } from '@/lib/accounts';
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +24,8 @@ export async function GET(req: NextRequest) {
     let asOfDate: Date;
 
     if (startParam && endParam) {
-      yearStart = new Date(startParam);
-      fyEnd = new Date(endParam);
+      yearStart = parseLocalDate(startParam);
+      fyEnd = parseLocalDate(endParam);
       year = yearStart.getFullYear();
       asOfDate = fyEnd < now ? fyEnd : endOfDay(now);
     } else {

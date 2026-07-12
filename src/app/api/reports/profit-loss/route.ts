@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, normalBalance, endOfDay, fiscalYearRangeForLabel } from '@/lib/reporting';
+import { getGLActivity, normalBalance, endOfDay, fiscalYearRangeForLabel, parseLocalDate } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 // ── Types ──
@@ -163,8 +163,8 @@ export async function GET(req: NextRequest) {
     let year: string;
 
     if (startParam && endParam) {
-      startDate = new Date(startParam);
-      endDate = new Date(endParam);
+      startDate = parseLocalDate(startParam);
+      endDate = parseLocalDate(endParam);
       year = `${startParam} – ${endParam}`;
     } else {
       year = searchParams.get('year') ?? new Date().getFullYear().toString();

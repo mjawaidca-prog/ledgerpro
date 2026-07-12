@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, endOfDay, toDebitCredit, fiscalYearStartFor } from '@/lib/reporting';
+import { getGLActivity, endOfDay, toDebitCredit, fiscalYearStartFor, parseLocalDate } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 async function buildTrialBalance(companyId: string, asOfDate: Date, fyAnchor: Date) {
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const asOf = searchParams.get('asOf') ?? new Date().toISOString().slice(0, 10);
     const compare = searchParams.get('compare') === 'true';
-    const asOfDate = endOfDay(new Date(asOf));
+    const asOfDate = endOfDay(parseLocalDate(asOf));
 
     const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } });
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
