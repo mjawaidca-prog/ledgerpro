@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Button } from '@/components/ui/Button';
@@ -13,7 +14,7 @@ import { money } from '@/lib/money';
 import { format } from 'date-fns';
 import {
   Building2, CreditCard, Plus, Upload, Search, Check, X, ArrowRightLeft, FileText,
-  Loader2, ChevronDown, FileUp, AlertTriangle, MoreHorizontal, Trash2,
+  Loader2, ChevronDown, FileUp, AlertTriangle, MoreHorizontal, Trash2, Scale,
 } from 'lucide-react';
 
 // ─── Types ───
@@ -328,6 +329,7 @@ function normalizeParsedStatement(
 }
 
 export default function BankingPage() {
+  const router = useRouter();
   const { data: session } = useSession();
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [chartAccounts, setChartAccounts] = useState<ChartAccount[]>([]);
@@ -1315,6 +1317,9 @@ export default function BankingPage() {
         </div>
         <div className="spacer" />
         <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={() => router.push('/banking/reconcile')}>
+            <Scale size={16} /> Reconcile
+          </Button>
           <Button variant="ghost" onClick={postToGL} disabled={postingGL}>
             {postingGL ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
             Post to GL
@@ -1369,12 +1374,20 @@ export default function BankingPage() {
                 <Badge variant="pending">{acct.pendingReviewCount} to review</Badge>
               </div>
             )}
-            <button
-              onClick={(e) => { e.stopPropagation(); setOpeningAcctId(acct.id); setOpeningAmount(''); }}
-              className="mt-2 text-xs text-[var(--text-muted)] hover:text-[var(--primary)] font-medium"
-            >
-              Set Opening Balance
-            </button>
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                onClick={(e) => { e.stopPropagation(); router.push(`/banking/reconcile?accountId=${acct.id}`); }}
+                className="text-xs text-[var(--text-muted)] hover:text-[var(--primary)] font-medium"
+              >
+                Reconcile
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setOpeningAcctId(acct.id); setOpeningAmount(''); }}
+                className="text-xs text-[var(--text-muted)] hover:text-[var(--primary)] font-medium"
+              >
+                Set Opening Balance
+              </button>
+            </div>
           </button>
         ))}
 
