@@ -126,3 +126,43 @@ export function exportChartOfAccounts(accounts: any[]): void {
   ]);
   downloadCSV(`chart-of-accounts.csv`, headers, rows);
 }
+
+export function exportPandL(data: any, ext: 'csv' | 'xls' = 'csv'): void {
+  const sections = data.sections;
+  const headers = ['Account', 'Amount', 'Prior Amount', '% Change'];
+  const rows: string[][] = [];
+
+  const push = (label: string, amount: number, prior: number, pct: number) => {
+    rows.push([label, fmt(amount), prior ? fmt(prior) : '', pct ? `${pct.toFixed(1)}%` : '']);
+  };
+
+  // Income
+  rows.push(['INCOME', '', '', '']);
+  for (const r of sections.income.rows) push(r.name, r.amount, r.priorAmount, r.changePct);
+  push('Total Income', sections.income.total, sections.income.priorTotal, sections.income.changePct);
+  rows.push(['', '', '', '']);
+
+  // COGS
+  if (sections.cogs.rows.length > 0) {
+    rows.push(['COST OF GOODS SOLD', '', '', '']);
+    for (const r of sections.cogs.rows) push(r.name, r.amount, r.priorAmount, r.changePct);
+    push('Total COGS', sections.cogs.total, sections.cogs.priorTotal, sections.cogs.changePct);
+    rows.push(['', '', '', '']);
+  }
+
+  // Gross profit
+  push('GROSS PROFIT', sections.grossProfit.amount, sections.grossProfit.priorAmount, sections.grossProfit.changePct);
+  rows.push(['', '', '', '']);
+
+  // Operating expenses
+  rows.push(['OPERATING EXPENSES', '', '', '']);
+  for (const r of sections.operatingExpenses.rows) push(r.name, r.amount, r.priorAmount, r.changePct);
+  push('Total Operating Expenses', sections.operatingExpenses.total, sections.operatingExpenses.priorTotal, sections.operatingExpenses.changePct);
+  rows.push(['', '', '', '']);
+
+  // Net income
+  push('NET INCOME', sections.netIncome.amount, sections.netIncome.priorAmount, sections.netIncome.changePct);
+
+  const filename = `profit-loss-${data.period?.startDate || 'report'}.${ext}`;
+  downloadCSV(filename, headers, rows);
+}
