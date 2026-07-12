@@ -9,6 +9,7 @@ import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'dat
 import { ArrowLeft, Loader2, Printer, Download, ChevronDown } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { exportPandL } from '@/lib/export';
+import { parseLocalDate } from '@/lib/reporting';
 
 // ── Types ──
 
@@ -152,9 +153,9 @@ export default function ProfitLossPage() {
         break;
       case 'last_fiscal_year':
         if (fy.fiscalYearStart) {
-          const fyStart = new Date(fy.fiscalYearStart);
+          const fyStart = parseLocalDate(fy.fiscalYearStart);
           fyStart.setFullYear(fyStart.getFullYear() - 1);
-          const fyEnd = new Date(fy.fiscalYearEnd || fy.fiscalYearStart);
+          const fyEnd = parseLocalDate(fy.fiscalYearEnd || fy.fiscalYearStart);
           fyEnd.setFullYear(fyEnd.getFullYear() - 1);
           // Adjust end: FY end = start + 1 year - 1 day
           const adjEnd = new Date(fyStart);

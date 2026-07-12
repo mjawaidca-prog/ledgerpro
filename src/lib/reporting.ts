@@ -53,10 +53,20 @@ export function endOfDay(date: Date): Date {
   return d;
 }
 
+/**
+ * Parse a Prisma DateTime to safe month/day numbers. Prisma Date objects
+ * are constructed as UTC midnight; .getMonth()/.getDate() use local time,
+ * which shifts dates to the previous day in timezones behind UTC (all of
+ * North America). .getUTCMonth()/.getUTCDate() avoid the shift and return
+ * the date as stored in the database.
+ */
+function utcMonthDay(date: Date): { month: number; day: number } {
+  return { month: date.getUTCMonth(), day: date.getUTCDate() };
+}
+
 /** The fiscal-year start that contains `asOfDate`, anchored on the company's configured fiscal year start month/day. */
 export function fiscalYearStartFor(companyFiscalYearStart: Date, asOfDate: Date): Date {
-  const month = companyFiscalYearStart.getMonth();
-  const day = companyFiscalYearStart.getDate();
+  const { month, day } = utcMonthDay(companyFiscalYearStart);
   const year = asOfDate.getFullYear();
   const thisYearStart = new Date(year, month, day);
   const fyStartYear = asOfDate < thisYearStart ? year - 1 : year;
@@ -76,8 +86,7 @@ export function fiscalYearRangeForLabel(
   companyFiscalYearStart: Date,
   yearLabel: number
 ): { start: Date; end: Date } {
-  const month = companyFiscalYearStart.getMonth();
-  const day = companyFiscalYearStart.getDate();
+  const { month, day } = utcMonthDay(companyFiscalYearStart);
   const start = new Date(yearLabel, month, day);
   const end = new Date(yearLabel + 1, month, day);
   end.setDate(end.getDate() - 1);
@@ -133,4 +142,17 @@ export function formatReportPeriod(
   }
 
   return `For the period ended ${fmt(endDate)}`;
+}
+
+/**
+ * Parse a YYYY-MM-DD string as a local-midnight Date.
+ * Safe alternative to new Date(str) which treats the string as UTC and shifts
+ * the date by one day in timezones behind UTC.
+ */
+export function parseLocalDate(dateStr: string): Date {
+  const parts = dateStr.slice(0, 10).split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  return new Date(dateStr);
 }

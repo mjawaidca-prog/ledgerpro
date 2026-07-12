@@ -11,7 +11,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Loader2, FileText, 
 import { exportGL } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { ReportHeader } from '@/components/reports/ReportHeader';
-import { formatReportPeriod } from '@/lib/reporting';
+import { formatReportPeriod, parseLocalDate } from '@/lib/reporting';
 
 interface GLRow {
   id: string;
@@ -72,8 +72,8 @@ function GLContent() {
   // Compute fallback FY dates — handles empty strings from useFiscalYear before it loads
   const defaultFYStart = fy.fiscalYearStart || `${now.getFullYear()}-01-01`;
   const defaultFYEnd = fy.fiscalYearEnd || today;
-  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY';
-  const lastFYLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear() - 1}` : 'Last FY';
+  const fyLabel = fy.defaultYear ? `FY ${fy.defaultYear}` : 'FY';
+  const lastFYLabel = fy.defaultYear ? `FY ${parseInt(fy.defaultYear) - 1}` : 'Last FY';
 
   const [startDate, setStartDate] = useState(urlStart || defaultFYStart);
   const [endDate, setEndDate] = useState(urlEnd || defaultFYEnd);
@@ -92,9 +92,9 @@ function GLContent() {
     { label: 'This quarter', get: () => ({ start: format(startOfQuarter(now), 'yyyy-MM-dd'), end: today }) },
     { label: fyLabel, get: () => ({ start: defaultFYStart, end: defaultFYEnd }) },
     { label: lastFYLabel, get: () => {
-      const s = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
+      const s = fy.fiscalYearStart ? parseLocalDate(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
       s.setFullYear(s.getFullYear() - 1);
-      const e = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
+      const e = fy.fiscalYearEnd ? parseLocalDate(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
       e.setFullYear(e.getFullYear() - 1);
       return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
     }},

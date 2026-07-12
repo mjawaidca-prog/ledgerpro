@@ -10,7 +10,7 @@ import { format, startOfMonth, subMonths, endOfMonth, startOfQuarter } from 'dat
 import { ArrowLeft, Loader2, Calendar, Printer } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { ReportHeader } from '@/components/reports/ReportHeader';
-import { formatReportPeriod } from '@/lib/reporting';
+import { formatReportPeriod, parseLocalDate } from '@/lib/reporting';
 
 interface CategoryData {
   code: string;
@@ -40,8 +40,8 @@ export default function ExpenseBreakdownPage() {
   const fy = useFiscalYear();
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
-  const fyLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear()}` : 'FY';
-  const lastFYLabel = fy.fiscalYearStart ? `FY ${new Date(fy.fiscalYearStart).getFullYear() - 1}` : 'Last FY';
+  const fyLabel = fy.defaultYear ? `FY ${fy.defaultYear}` : 'FY';
+  const lastFYLabel = fy.defaultYear ? `FY ${parseInt(fy.defaultYear) - 1}` : 'Last FY';
 
   const [startDate, setStartDate] = useState(fy.fiscalYearStart || `${now.getFullYear()}-01-01`);
   const [endDate, setEndDate] = useState(fy.fiscalYearEnd || today);
@@ -60,9 +60,9 @@ export default function ExpenseBreakdownPage() {
     { label: 'This quarter', get: () => ({ start: format(startOfQuarter(now), 'yyyy-MM-dd'), end: today }) },
     { label: fyLabel, get: () => ({ start: fy.fiscalYearStart || `${now.getFullYear()}-01-01`, end: fy.fiscalYearEnd || today }) },
     { label: lastFYLabel, get: () => {
-      const s = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
+      const s = fy.fiscalYearStart ? parseLocalDate(fy.fiscalYearStart) : new Date(now.getFullYear() - 1, 0, 1);
       s.setFullYear(s.getFullYear() - 1);
-      const e = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
+      const e = fy.fiscalYearEnd ? parseLocalDate(fy.fiscalYearEnd) : new Date(now.getFullYear() - 1, 11, 31);
       e.setFullYear(e.getFullYear() - 1);
       return { start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) };
     }},

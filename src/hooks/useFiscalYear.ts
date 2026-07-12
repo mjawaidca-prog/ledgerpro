@@ -14,11 +14,15 @@ interface FiscalYearInfo {
   loaded: boolean;
 }
 
-/** Given a fiscal year start date, compute the current fiscal year period */
+/** Given a fiscal year start date string, compute the current fiscal year period.
+ *  Parses the date string by splitting on '-' to avoid timezone shift —
+ *  new Date('2024-12-01') parses as UTC midnight which becomes Nov 30 in
+ *  North American timezones. */
 function computeCurrentFY(storedStart: string): { start: string; end: string; defaultYear: string } {
-  const startDate = new Date(storedStart);
-  const startMonth = startDate.getMonth(); // 0-indexed (11 = December)
-  const startDay = startDate.getDate();
+  // Safe parse: extract Y/M/D directly from the ISO prefix to avoid UTC→local shift
+  const parts = storedStart.slice(0, 10).split('-').map(Number);
+  const startMonth = parts[1] - 1; // 0-indexed (January = 0)
+  const startDay = parts[2];
 
   const today = new Date();
   const thisYear = today.getFullYear();

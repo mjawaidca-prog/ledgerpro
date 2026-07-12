@@ -12,7 +12,7 @@ import { exportTrialBalance, exportCaseWareTrialBalance } from '@/lib/export';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { format as formatDate, startOfMonth, subMonths, endOfMonth, startOfYear, startOfQuarter } from 'date-fns';
 import { ReportHeader } from '@/components/reports/ReportHeader';
-import { formatReportPeriod } from '@/lib/reporting';
+import { formatReportPeriod, parseLocalDate } from '@/lib/reporting';
 
 interface TBRow {
   code: string;
@@ -62,8 +62,8 @@ export default function TrialBalancePage() {
   useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) { setAsOf(fy.fiscalYearEnd); setActivePreset('FY End'); } }, [fy.loaded, fy.fiscalYearEnd]);
 
   // Dynamic presets based on company fiscal year
-  const fyStart = fy.fiscalYearStart ? new Date(fy.fiscalYearStart) : new Date(new Date().getFullYear(), 0, 1);
-  const fyEnd = fy.fiscalYearEnd ? new Date(fy.fiscalYearEnd) : new Date(new Date().getFullYear(), 11, 31);
+  const fyStart = fy.fiscalYearStart ? parseLocalDate(fy.fiscalYearStart) : new Date(new Date().getFullYear(), 0, 1);
+  const fyEnd = fy.fiscalYearEnd ? parseLocalDate(fy.fiscalYearEnd) : new Date(new Date().getFullYear(), 11, 31);
   const fyLabel = fy.fiscalYearStart ? `FY ${fyStart.getFullYear()}` : 'FY';
 
   const presets = [
