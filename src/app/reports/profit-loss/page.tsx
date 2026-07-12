@@ -429,7 +429,7 @@ export default function ProfitLossPage() {
                   </th>
                   <th className="text-right text-[11px] font-semibold uppercase tracking-[0.05em] text-[var(--text-muted)] pb-2 border-b border-[var(--border)] font-mono w-[140px]">
                     {periodLabel.length > 30
-                      ? `${format(new Date(data.period.startDate), 'MMM d')} – ${format(new Date(data.period.endDate), 'MMM d, yyyy')}`
+                      ? `${format(parseLocalDate(data.period.startDate), 'MMM d')} – ${format(parseLocalDate(data.period.endDate), 'MMM d, yyyy')}`
                       : periodLabel}
                   </th>
                   {hasComparison && (
