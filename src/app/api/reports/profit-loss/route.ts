@@ -232,7 +232,6 @@ export async function GET(req: NextRequest) {
 
     const grossProfit: HighlightRow = {
       amount: Math.round(gpAmount * 100) / 100,
-      priorAmount: Math.round(gpPriorAmount * 100) / 100,
       marginPct: income.total > 0 ? Math.round((gpAmount / income.total) * 1000) / 10 : 0,
       ...compareRow(gpAmount, gpPriorAmount, 'profit'),
     };
@@ -243,7 +242,6 @@ export async function GET(req: NextRequest) {
 
     const netIncome: HighlightRow = {
       amount: Math.round(niAmount * 100) / 100,
-      priorAmount: Math.round(niPriorAmount * 100) / 100,
       marginPct: income.total > 0 ? Math.round((niAmount / income.total) * 1000) / 10 : 0,
       ...compareRow(niAmount, niPriorAmount, 'profit'),
     };
