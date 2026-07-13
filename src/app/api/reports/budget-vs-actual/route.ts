@@ -113,7 +113,9 @@ export async function GET(req: NextRequest) {
         rows: sectionRows,
         totalBudget,
         totalActual,
-        ...cmp,
+        totalVariance: cmp.variance,
+        variancePct: cmp.variancePct,
+        direction: cmp.direction,
         favorable: cmp.direction === 'flat' ? null : (isIncome ? cmp.isOverBudget : !cmp.isOverBudget),
       };
     }
