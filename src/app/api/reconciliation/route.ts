@@ -26,19 +26,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
 
-    // Get unreconciled imported transactions for this account
+    // Get unreconciled imported transactions for this account.
+    // Match the same filter as unreconciledCount below so the number
+    // shown in the heading matches what's actually in the list.
     const transactions = await db.transaction.findMany({
       where: {
         companyId,
         financialAccountId: accountId,
-        status: { in: ['toreview', 'categorized'] },
         reconciledAt: null,
+        status: { not: 'excluded' },
       },
       include: {
         category: { select: { code: true, name: true } },
       },
       orderBy: { date: 'desc' },
-      take: 200,
     });
 
     // Get journal lines affecting this account's GL
