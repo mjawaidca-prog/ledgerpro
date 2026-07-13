@@ -7,7 +7,7 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
-  ArrowRight, Receipt, Building2, Scale, BookOpen,
+  ArrowRight, Receipt, Building2, Scale, BookOpen, Target,
 } from 'lucide-react';
 
 const reports = [
@@ -61,6 +61,14 @@ const reports = [
     href: '/reports/ap-aging',
     icon: Receipt,
     color: 'bg-[var(--warning-soft)] text-[var(--warning)]',
+    comingSoon: false,
+  },
+  {
+    title: 'Budget vs Actual',
+    description: 'Compare budgeted amounts against actuals with variance analysis.',
+    href: '/reports/budget-vs-actual',
+    icon: Target,
+    color: 'bg-[var(--primary-soft)] text-[var(--accent)]',
     comingSoon: false,
   },
   {

@@ -19,6 +19,7 @@ import {
   Settings,
   Shield,
   Briefcase,
+  Target,
 } from 'lucide-react';
 
 interface RailProps {
@@ -38,6 +39,7 @@ const mainNavItems = [
   { href: '/journal',       label: 'Journal',            icon: FileText },
   { href: '/chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
   { href: '/reports',       label: 'Reports',            icon: BarChart3 },
+  { href: '/budgets',       label: 'Budgets',            icon: Target },
   { href: '/contacts',      label: 'Contacts',           icon: Users },
 ];
 
