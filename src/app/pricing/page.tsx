@@ -8,6 +8,7 @@ const plans = [
     name: 'Free Trial',
     price: '$0',
     period: '30 days',
+    annualPrice: '', oneTime: '',
     features: ['1 user', '1 company', '100 transactions', 'CSV export', 'Basic reports'],
     cta: 'Start Free Trial',
     href: '/register',
@@ -15,8 +16,9 @@ const plans = [
   },
   {
     name: 'Basic',
-    price: '$29',
+    price: '$19',
     period: '/mo',
+    annualPrice: '$190/yr', oneTime: '$299 one-time',
     features: ['2 users', '1 company', '1,000 transactions', 'CSV and PDF export', 'Full reports', 'Email support'],
     cta: 'Start Free Trial',
     href: '/register',
@@ -24,8 +26,9 @@ const plans = [
   },
   {
     name: 'Pro',
-    price: '$79',
+    price: '$49',
     period: '/mo',
+    annualPrice: '$490/yr', oneTime: '$799 one-time',
     features: ['10 users', '5 companies', '10,000 transactions', 'Bank imports', 'Custom reports', 'Budget vs actual'],
     cta: 'Start Free Trial',
     href: '/register',
@@ -33,8 +36,9 @@ const plans = [
   },
   {
     name: 'Enterprise',
-    price: '$199',
+    price: '$129',
     period: '/mo',
+    annualPrice: '$1,290/yr', oneTime: '$1,999 one-time',
     features: ['50 users', '25 companies', 'Unlimited transactions', 'White label', 'API access', 'Dedicated support'],
     cta: 'Contact Sales',
     href: 'mailto:sales@nexvarlab.com',
@@ -53,9 +57,10 @@ export default function PricingPage() {
             Simple plans for Canadian small businesses
           </h1>
           <p className="mt-4 text-lg text-[var(--text)]">
-            All self-serve plans include a free trial. Upgrade when your books, team, or client list grows.
+            All self-serve plans include a free trial. Upgrade when your books, team, or client list grows. New: prefer to pay once? Get lifetime access with a one-time payment - Lifetime Basic $299 or Lifetime Pro $799 - limited to our first 250 founding customers.
           </p>
         </div>
+        <div className="mx-auto mb-8 max-w-2xl rounded-lg border border-[var(--primary)] bg-[var(--card)] px-4 py-3 text-center text-sm font-semibold text-[var(--primary)]">Limited-time offer: one-time lifetime pricing below is available for a limited period and may be withdrawn at any time.</div>
 
         <div className="grid gap-5 lg:grid-cols-4">
           {plans.map((plan) => (
@@ -74,6 +79,8 @@ export default function PricingPage() {
               <div className="mb-5 mt-4">
                 <span className="text-4xl font-black text-[var(--text-strong)]">{plan.price}</span>
                 <span className="ml-1 text-sm text-[var(--text-muted)]">{plan.period}</span>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">{plan.annualPrice}</p>
+              <p className="mt-1 text-xs font-semibold text-[var(--primary)]">{plan.oneTime}</p>
               </div>
               <ul className="mb-7 grid gap-3 text-sm text-[var(--text)]">
                 {plan.features.map((feature) => (
@@ -105,6 +112,7 @@ export default function PricingPage() {
             </div>
           ))}
         </div>
+        <p className="mx-auto mt-8 max-w-3xl text-center text-xs text-[var(--text-muted)]">One-time (lifetime) purchases include access to the current product tier for the lifetime of that tier or 5 years from purchase, whichever comes first, and are limited to our first 250 founding customers. This one-time offer is available for a limited period only and may be withdrawn at any time. Annual pricing reflects two months free versus paying monthly.</p>
       </section>
       <LandingFooter />
     </main>
