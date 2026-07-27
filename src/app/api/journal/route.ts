@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { postJournalEntry } from '@/lib/journal';
+import { suggestMirror } from '@/lib/intercompany/detect';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
@@ -46,7 +47,10 @@ export async function POST(req: NextRequest) {
       companyId
     );
 
-    return NextResponse.json({ data: entry }, { status: 201 });
+    // Check if this entry hits a control account — suggest a mirror
+    const mirrorSuggestion = await suggestMirror(entry.id).catch(() => null);
+
+    return NextResponse.json({ data: entry, mirrorSuggestion }, { status: 201 });
   } catch (error: any) {
     console.error('POST /api/journal error:', error);
     return NextResponse.json({ error: error.message || 'Failed to post journal entry' }, { status: 500 });
@@ -112,6 +116,19 @@ export async function DELETE(req: NextRequest) {
       where,
       include: { lines: true },
     });
+
+    // Guard: reject bulk deletion of inter-company linked entries
+    const linkedEntries = entries.filter((e) => e.interCompanyId != null);
+    if (linkedEntries.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Some journal entries are part of inter-company pairs. Void them from the Related Parties section instead — both sides must be reversed together.',
+          linkedEntryIds: linkedEntries.map((e) => e.id),
+        },
+        { status: 409 }
+      );
+    }
 
     if (entries.length === 0) {
       return NextResponse.json({ data: { deleted: 0 } });

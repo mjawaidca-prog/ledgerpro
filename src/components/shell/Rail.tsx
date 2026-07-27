@@ -20,6 +20,7 @@ import {
   Shield,
   Briefcase,
   Target,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 interface RailProps {
@@ -41,6 +42,7 @@ const mainNavItems = [
   { href: '/reports',       label: 'Reports',            icon: BarChart3 },
   { href: '/budgets',       label: 'Budgets',            icon: Target },
   { href: '/contacts',      label: 'Contacts',           icon: Users },
+  { href: '/intercompany',  label: 'Related Parties',    icon: ArrowLeftRight },
 ];
 
 const settingsNavItems = [

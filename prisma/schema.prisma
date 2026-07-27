@@ -28,6 +28,7 @@ model User {
   memberships            Membership[]
   auditLogs              AuditLog[]
   notifications          Notification[]
+  interCompanyTransactions InterCompanyTransaction[]
 }
 
 model Company {
@@ -65,6 +66,8 @@ model Company {
   recurringTemplates  RecurringTemplate[]
   categorizationRules CategorizationRule[]
   reportTemplates     ReportTemplate[]
+  relatedPartyLinksA  RelatedPartyLink[]    @relation("RPLinkA")
+  relatedPartyLinksB  RelatedPartyLink[]    @relation("RPLinkB")
 }
 
 enum BusinessType {
@@ -190,6 +193,10 @@ model ChartOfAccount {
   description String?
   balance     Decimal  @default(0) @db.Decimal(14, 2)
   active      Boolean  @default(true)
+
+  // Inter-company control account — set on the 4 auto-provisioned Due from/To accounts
+  isControlAccount       Boolean  @default(false)
+  relatedPartyCompanyId  String?  // counterparty company id for reconciliation lookups
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -591,11 +598,18 @@ model JournalEntry {
   reversalOf      JournalEntry? @relation("EntryReversal", fields: [reversalOfId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   reversedBy      JournalEntry? @relation("EntryReversal")
 
+  // Inter-company linking — set when this entry is part of a related-party pair
+  interCompanyId   String?
+  interCompanyRole InterCompanyRole?
+  icSourceOf       InterCompanyTransaction? @relation("ICSource")
+  icMirrorOf       InterCompanyTransaction? @relation("ICMirror")
+
   createdBy       String?
   createdAt       DateTime      @default(now())
 
   @@index([companyId, entryDate])
   @@index([sourceType, sourceId])
+  @@index([interCompanyId])
 }
 
 enum JournalSource {
@@ -839,6 +853,83 @@ enum RecurringFrequency {
   monthly
   quarterly
   annual
+}
+
+// ─── INTER-COMPANY / RELATED PARTIES ─────────────────────────
+
+enum InterCompanyKind {
+  FUND_TRANSFER
+  EXPENSE_ON_BEHALF
+  RECHARGE
+  JOURNAL
+}
+
+enum InterCompanyStatus {
+  POSTED
+  VOIDED
+  UNMATCHED
+}
+
+enum InterCompanyRole {
+  SOURCE
+  MIRROR
+}
+
+// ─── INTER-COMPANY / RELATED PARTIES ─────────────────────────
+
+model RelatedPartyLink {
+  id                String   @id @default(cuid())
+  companyAId        String
+  companyBId        String
+  companyA          Company  @relation("RPLinkA", fields: [companyAId], references: [id])
+  companyB          Company  @relation("RPLinkB", fields: [companyBId], references: [id])
+
+  // auto-provisioned control accounts (4 total — Due from + Due to in each company)
+  aDueFromAccountId String
+  aDueToAccountId   String
+  bDueFromAccountId String
+  bDueToAccountId   String
+
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  transactions      InterCompanyTransaction[]
+
+  @@unique([companyAId, companyBId])
+  @@index([companyBId])
+}
+
+model InterCompanyTransaction {
+  id              String               @id @default(cuid())
+  reference       String               @unique          // IC-0042
+  link            RelatedPartyLink     @relation(fields: [linkId], references: [id])
+  linkId          String
+
+  sourceCompanyId String
+  targetCompanyId String
+  kind            InterCompanyKind
+  date            DateTime             @db.Date
+  amount          Decimal              @db.Decimal(18, 2)
+  currency        String               @default("CAD")
+  fxRate          Decimal?             @db.Decimal(18, 8)   // target units per source unit
+  memo            String?
+
+  sourceEntryId   String               @unique
+  mirrorEntryId   String?              @unique
+  sourceEntry     JournalEntry         @relation("ICSource", fields: [sourceEntryId], references: [id])
+  mirrorEntry     JournalEntry?        @relation("ICMirror", fields: [mirrorEntryId], references: [id])
+
+  status          InterCompanyStatus   @default(POSTED)
+  createdById     String
+  createdBy       User                 @relation(fields: [createdById], references: [id])
+  voidedAt        DateTime?
+  voidedById      String?
+
+  createdAt       DateTime             @default(now())
+
+  @@index([sourceCompanyId, date])
+  @@index([targetCompanyId, date])
+  @@index([linkId])
 }
 
 // ─── AI CATEGORIZATION RULES ─────────────────────────────────
