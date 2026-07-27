@@ -84,21 +84,22 @@ export default function TransferPage() {
     load();
   }, []);
 
-  // Load account options from COA
+  // Load GL account options from Chart of Accounts
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
 
   useEffect(() => {
     async function loadAccounts() {
       try {
-        const res = await fetch('/api/accounts?limit=200');
+        const res = await fetch('/api/coa');
         const json = await res.json();
+        // /api/coa returns { data: [...], grouped, summary, totalAccounts }
         const list: AccountOption[] = (json.data || []).map((a: any) => ({
           code: a.code,
           label: `${a.code} · ${a.name}`,
         }));
         setAccounts(list);
-      } catch {
-        // Fallback: empty accounts list (form still works with manual codes)
+      } catch (e) {
+        console.error('Failed to load chart of accounts', e);
       }
     }
     loadAccounts();
@@ -112,30 +113,17 @@ export default function TransferPage() {
   const getOffsetOptions = useCallback((): AccountOption[] => {
     if (!accounts.length) return [];
     if (type === 'recharge') {
-      return accounts.filter(a =>
-        a.code.startsWith('43') || a.code.startsWith('42')
-      );
+      return accounts.filter(a => a.code && (a.code.startsWith('43') || a.code.startsWith('42')));
     }
-    return accounts.filter(a =>
-      a.code.startsWith('10') || a.code.startsWith('11') || a.code.startsWith('12')
-    );
+    return accounts.filter(a => a.code && (a.code.startsWith('10') || a.code.startsWith('11') || a.code.startsWith('12')));
   }, [type, accounts]);
 
   const getTargetOptions = useCallback((): AccountOption[] => {
     if (!accounts.length) return [];
-    if (type === 'onbehalf') {
-      return accounts.filter(a =>
-        a.code.startsWith('6') || a.code.startsWith('5')
-      );
+    if (type === 'onbehalf' || type === 'recharge') {
+      return accounts.filter(a => a.code && (a.code.startsWith('6') || a.code.startsWith('5')));
     }
-    if (type === 'recharge') {
-      return accounts.filter(a =>
-        a.code.startsWith('6') || a.code.startsWith('5')
-      );
-    }
-    return accounts.filter(a =>
-      a.code.startsWith('10') || a.code.startsWith('11') || a.code.startsWith('12')
-    );
+    return accounts.filter(a => a.code && (a.code.startsWith('10') || a.code.startsWith('11') || a.code.startsWith('12')));
   }, [type, accounts]);
 
   // Set default offset/target when type or from/to changes
