@@ -269,8 +269,12 @@ export async function GET(req: NextRequest) {
         },
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('GET /api/dashboard error:', error);
-    return NextResponse.json({ error: 'Failed to load dashboard' }, { status: 500 });
+    return NextResponse.json({
+      error: 'Failed to load dashboard',
+      detail: error?.message || String(error),
+      stack: error?.stack?.slice(0, 600),
+    }, { status: 500 });
   }
 }
