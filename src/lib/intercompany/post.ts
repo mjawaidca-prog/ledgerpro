@@ -92,13 +92,14 @@ export async function postInterCompany(
 
   return db.$transaction(async (tx) => {
     // Guard: closed periods in both companies
-    for (const [companyId, entryDate] of [
+    const periodChecks: [string, Date][] = [
       [sourceCompanyId, date],
       [targetCompanyId, date],
-    ]) {
+    ];
+    for (const [cid, entryDate] of periodChecks) {
       const closed = await tx.periodClose.findFirst({
         where: {
-          companyId,
+          companyId: cid,
           status: 'closed',
           periodStart: { lte: entryDate },
           periodEnd: { gte: entryDate },
