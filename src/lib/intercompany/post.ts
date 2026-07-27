@@ -114,12 +114,14 @@ export async function postInterCompany(
 
     const reference = await nextReference(tx, 'IC');
 
+    const zero = new Prisma.Decimal(0);
+
     // --- Source entry ---
     // Dr  Due from (asset)        XXX.XX
     // Cr  sourceOffsetAccount     XXX.XX
     const sourceLines = [
-      { glAccountCode: srcDueFromCode, description: `Due from — ${reference}`, debit: amount, credit: 0 },
-      { glAccountCode: input.sourceOffsetAccountCode, description: memo || `IC ${reference}`, debit: 0, credit: amount },
+      { glAccountCode: srcDueFromCode, description: `Due from — ${reference}`, debit: amount, credit: zero },
+      { glAccountCode: input.sourceOffsetAccountCode, description: memo || `IC ${reference}`, debit: zero, credit: amount },
     ];
     await validateBalanced(sourceLines);
 
@@ -147,8 +149,8 @@ export async function postInterCompany(
     // Dr  targetOffsetAccount     XXX.XX
     // Cr  Due to (liability)      XXX.XX
     const mirrorLines = [
-      { glAccountCode: input.targetOffsetAccountCode, description: memo || `IC ${reference}`, debit: mirrorAmount, credit: 0 },
-      { glAccountCode: tgtDueToCode, description: `Due to — ${reference}`, debit: 0, credit: mirrorAmount },
+      { glAccountCode: input.targetOffsetAccountCode, description: memo || `IC ${reference}`, debit: mirrorAmount, credit: zero },
+      { glAccountCode: tgtDueToCode, description: `Due to — ${reference}`, debit: zero, credit: mirrorAmount },
     ];
     await validateBalanced(mirrorLines);
 
@@ -198,13 +200,14 @@ export async function postInterCompany(
     });
 
     // Update GL account balances for both entries
-    for (const [companyId, lines] of [
+    const balanceUpdates: [string, { glAccountCode: string; debit: Prisma.Decimal; credit: Prisma.Decimal }[]][] = [
       [sourceCompanyId, sourceLines],
       [targetCompanyId, mirrorLines],
-    ] as const) {
+    ];
+    for (const [cid, lines] of balanceUpdates) {
       for (const line of lines) {
         const account = await tx.chartOfAccount.findFirst({
-          where: { code: line.glAccountCode, companyId },
+          where: { code: line.glAccountCode, companyId: cid },
         });
         if (!account) continue;
 
@@ -221,7 +224,7 @@ export async function postInterCompany(
 
         if (account.parentCode) {
           await tx.chartOfAccount.updateMany({
-            where: { code: account.parentCode, companyId },
+            where: { code: account.parentCode, companyId: cid },
             data: { balance: { increment: new Prisma.Decimal(balanceChange) } },
           });
         }
