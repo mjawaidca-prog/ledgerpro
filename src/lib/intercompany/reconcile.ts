@@ -78,13 +78,12 @@ export async function reconcile(asOf: Date): Promise<ReconciliationRow[]> {
       ]);
 
       // Due to accounts have a natural credit balance (negative in our
-      // debit-minus-credit convention), so adding them to Due from should
-      // give us the net — but for reconciliation between companies, the
-      // invariant is: what A says B owes = what B says it owes to A.
-      // A.dueFrom should equal B.dueTo, and B.dueFrom should equal A.dueTo.
-      // Net: (A.dueFrom - B.dueTo) + (B.dueFrom - A.dueTo) should = 0.
-      const diff1 = aFrom.minus(bTo);   // A's Due from B  vs  B's Due to A
-      const diff2 = bFrom.minus(aTo);   // B's Due from A  vs  A's Due to B
+      // debit-minus-credit convention). Due from accounts are positive.
+      // They mirror each other: if A posts Dr Due from B 2,000, then B
+      // posts Cr Due to A 2,000 → aFrom = +2,000, bTo = -2,000.
+      // The invariant: aFrom + bTo = 0 (they cancel when ADDED).
+      const diff1 = aFrom.plus(bTo);   // A's Due from B  vs  B's Due to A
+      const diff2 = bFrom.plus(aTo);   // B's Due from A  vs  A's Due to B
       const difference = diff1.plus(diff2);
 
       const isMatched = difference.abs().lt(0.005);
