@@ -70,32 +70,63 @@ export default function OnboardingPage() {
     }
   }
 
+  async function saveCompanyDetails(onboardingComplete = false) {
+    const fyStart = `${fyStartYear}-${fyStartMonth.padStart(2, '0')}-${fyStartDay.padStart(2, '0')}`;
+    const res = await fetch('/api/companies', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: companyName || undefined,
+        legalName: legalName || null,
+        businessType: businessType,
+        businessNumber: businessNumber || null,
+        gstNumber: gstNumber || null,
+        province: province,
+        fiscalYearStart: fyStart,
+        fiscalYearEnd: fyEndDate || undefined,
+        locale: 'en-CA',
+        currency: 'CAD',
+        onboardingComplete,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as any).error || 'Failed to save');
+    }
+    return res;
+  }
+
+  async function handleNext() {
+    if (step === 0) {
+      // Validate and save company details before advancing
+      if (!companyName.trim()) {
+        setError('Company name is required to continue.');
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        await saveCompanyDetails(false);
+        setStep(step + 1);
+      } catch (e: any) {
+        setError(e.message || 'Failed to save company details.');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setStep(step + 1);
+    }
+  }
+
   async function handleComplete() {
     setLoading(true);
     setError(null);
     try {
-      const fyStart = `${fyStartYear}-${fyStartMonth.padStart(2, '0')}-${fyStartDay.padStart(2, '0')}`;
-      await fetch('/api/companies', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: companyName || undefined,
-          legalName: legalName || null,
-          businessType: businessType,
-          businessNumber: businessNumber || null,
-          gstNumber: gstNumber || null,
-          province: province,
-          fiscalYearStart: fyStart,
-          fiscalYearEnd: fyEndDate || undefined,
-          locale: 'en-CA',
-          currency: 'CAD',
-          onboardingComplete: true,
-        }),
-      });
+      await saveCompanyDetails(true);
       router.push('/dashboard');
       router.refresh();
-    } catch {
-      setError('Failed to complete setup. You can skip and finish later from Settings.');
+    } catch (e: any) {
+      setError(e.message || 'Failed to complete setup. You can skip and finish later from Settings.');
     } finally {
       setLoading(false);
     }
@@ -352,7 +383,8 @@ export default function OnboardingPage() {
               Skip for now
             </Button>
             {step < STEPS.length - 1 ? (
-              <Button onClick={() => setStep(step + 1)}>
+              <Button onClick={handleNext} disabled={loading}>
+                {loading ? <Loader2 size={16} className="animate-spin" /> : null}
                 Next <ArrowRight size={16} />
               </Button>
             ) : (
