@@ -125,3 +125,32 @@ describe('Phase 4 Features', () => {
     expect(status).toBe(200);
   });
 });
+
+describe('Consolidated Reports', () => {
+  // Unauthenticated requests are blocked either by a 401/403 JSON response or
+  // by the middleware redirecting to /login (307) — never allowed through.
+  async function blocked(path: string) {
+    const res = await fetch(`${BASE}${path}`, { redirect: 'manual' });
+    expect([307, 401, 403]).toContain(res.status);
+  }
+
+  test('GET /api/reports/consolidated without auth is blocked', async () => {
+    await blocked('/api/reports/consolidated?statement=balance-sheet&companyIds=a,b&asOf=2026-06-26');
+  });
+
+  test('GET /api/reports/consolidated with unknown statement is blocked', async () => {
+    await blocked('/api/reports/consolidated?statement=nonsense&companyIds=a,b');
+  });
+
+  test('GET /api/reports/consolidated/drilldown without auth is blocked', async () => {
+    await blocked('/api/reports/consolidated/drilldown?code=1000&companyIds=a,b');
+  });
+
+  test('GET /api/reports/packages without auth is blocked', async () => {
+    await blocked('/api/reports/packages');
+  });
+
+  test('GET /api/settings/exchange-rates without auth is blocked', async () => {
+    await blocked('/api/settings/exchange-rates');
+  });
+});
