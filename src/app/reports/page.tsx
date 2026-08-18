@@ -7,7 +7,7 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
-  ArrowRight, Receipt, Building2, Scale, BookOpen, Target,
+  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers,
 } from 'lucide-react';
 
 const reports = [
@@ -85,6 +85,14 @@ const reports = [
     href: '/reports/management-package',
     icon: FileText,
     color: 'bg-gradient-to-br from-[#1f6feb]/15 to-[#7c3aed]/15 text-[var(--primary)]',
+    comingSoon: false,
+  },
+  {
+    title: 'Consolidated Reports',
+    description: 'Combine several companies into one statement. Intercompany balances are eliminated.',
+    href: '/reports/consolidated',
+    icon: Layers,
+    color: 'bg-[var(--neutral-soft)] text-[var(--text)]',
     comingSoon: false,
   },
 ];

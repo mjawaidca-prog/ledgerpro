@@ -174,6 +174,9 @@ export default function SettingsPage() {
                 <Button variant="ghost" onClick={() => router.push('/settings/import-trial-balance')} className="text-sm">
                   Import Opening Trial Balance (from QBO or another system)
                 </Button>
+                <Button variant="ghost" onClick={() => router.push('/settings/exchange-rates')} className="text-sm">
+                  Manage FX Rates (for consolidated reports)
+                </Button>
               </div>
               <p className="text-xs text-[var(--text-faint)] mt-3">
                 Restoring always creates a brand-new company — it never overwrites an existing one. Bank feed connections, audit

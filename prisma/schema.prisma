@@ -890,6 +890,10 @@ model RelatedPartyLink {
   bDueFromAccountId String
   bDueToAccountId   String
 
+  // ownership percentages — "company A holds X% of B" (default 100 = wholly owned)
+  aOwnershipOfB     Decimal? @default(100) @db.Decimal(5, 2)
+  bOwnershipOfA     Decimal? @default(100) @db.Decimal(5, 2)
+
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
 
@@ -979,4 +983,36 @@ model ReportTemplate {
   createdBy     String?
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+}
+
+// ─── CONSOLIDATED REPORTS — FX RATES & SAVED PACKAGES ──────────
+
+enum ExchangeRateType {
+  closing
+  average
+}
+
+model ExchangeRate {
+  id        String           @id @default(cuid())
+  date      DateTime         @db.Date
+  from      String           // "USD"
+  to        String           // "CAD"
+  rate      Decimal          @db.Decimal(18, 8)  // 1 unit of `from` = `rate` units of `to`
+  type      ExchangeRateType
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([date, from, to, type])
+  @@index([from, to, type, date])
+}
+
+model ReportPackage {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  setup     Json     // full ConsolidatedSetup object
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }

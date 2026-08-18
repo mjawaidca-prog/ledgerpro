@@ -24,6 +24,8 @@ export default function RelationshipsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [linkX, setLinkX] = useState('');
+  const [ownX, setOwnX] = useState(100); // Company A holds % of B
+  const [ownY, setOwnY] = useState(0); // Company B holds % of A
   const [linkY, setLinkY] = useState('');
   const [toast, setToast] = useState<string | null>(null);
 
@@ -70,7 +72,11 @@ export default function RelationshipsPage() {
       const res = await fetch('/api/related-parties', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyX: linkX, companyY: linkY }),
+        body: JSON.stringify({
+          companyX: linkX,
+          companyY: linkY,
+          ownership: { xOwnsY: ownX, yOwnsX: ownY },
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -151,6 +157,34 @@ export default function RelationshipsPage() {
                 }}>
                 {companies.filter(c => c.id !== linkX).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                Company A holds % of Company B
+              </label>
+              <input type="number" min={0} max={100} step={1} value={ownX}
+                onChange={e => setOwnX(parseFloat(e.target.value) || 0)}
+                style={{
+                  background: 'var(--surface-2)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-md)', color: 'var(--text-strong)',
+                  fontFamily: 'var(--font-mono)', fontSize: 'var(--text-base)',
+                  padding: '10px 12px', width: '100%', outline: 'none',
+                }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                Company B holds % of Company A
+              </label>
+              <input type="number" min={0} max={100} step={1} value={ownY}
+                onChange={e => setOwnY(parseFloat(e.target.value) || 0)}
+                style={{
+                  background: 'var(--surface-2)', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-md)', color: 'var(--text-strong)',
+                  fontFamily: 'var(--font-mono)', fontSize: 'var(--text-base)',
+                  padding: '10px 12px', width: '100%', outline: 'none',
+                }} />
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>

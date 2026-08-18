@@ -109,6 +109,60 @@ export async function requireCompany(
 }
 
 /**
+ * Verify the authenticated user has access to EVERY company in the list.
+ * Used by multi-company routes (consolidated reports) where the single
+ * active-company boundary isn't enough. Never echoes which company failed —
+ * a generic 403 so tenant names don't leak.
+ */
+export async function requireCompanies(
+  req: NextRequest,
+  companyIds: string[]
+): Promise<{ userId: string | null; error: NextResponse | null }> {
+  const ids = [...new Set(companyIds.filter((id) => id && id !== 'undefined'))];
+
+  let userId: string | undefined;
+  const headerUserId = req.headers.get('x-user-id');
+  if (headerUserId && headerUserId !== 'undefined') {
+    userId = headerUserId;
+  }
+  if (!userId) {
+    const session = await getServerSession();
+    const user = session?.user as any;
+    userId = user?.id || undefined;
+  }
+  if (!userId) {
+    return {
+      userId: null,
+      error: NextResponse.json({ error: 'Unauthorized — please log out and back in.' }, { status: 401 }),
+    };
+  }
+
+  if (!ids.length) {
+    return {
+      userId,
+      error: NextResponse.json({ error: 'No companies selected.' }, { status: 400 }),
+    };
+  }
+
+  const memberships = await db.membership.findMany({
+    where: { userId, companyId: { in: ids } },
+    select: { companyId: true },
+  });
+
+  if (memberships.length !== ids.length) {
+    return {
+      userId,
+      error: NextResponse.json(
+        { error: 'You do not have access to one or more of the selected companies.' },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { userId, error: null };
+}
+
+/**
  * Fetch the full company record for the authenticated user.
  */
 export async function getCompany(req: NextRequest) {

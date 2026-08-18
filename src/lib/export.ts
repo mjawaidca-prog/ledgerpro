@@ -166,3 +166,46 @@ export function exportPandL(data: any, ext: 'csv' | 'xls' = 'csv'): void {
   const filename = `profit-loss-${data.period?.startDate || 'report'}.${ext}`;
   downloadCSV(filename, headers, rows);
 }
+
+/**
+ * Export a consolidated (multi-company) report — one column per entity,
+ * plus Eliminations and Consolidated. Same figures as the screen.
+ */
+export function exportConsolidatedReport(data: any, ext: 'csv' | 'xls' = 'csv'): void {
+  const entities = data.entities || [];
+  const headers = ['Code', 'Account', ...entities.map((e: any) => e.code), 'Eliminations', 'Consolidated'];
+
+  const rows: string[][] = [];
+
+  for (const section of data.sections || []) {
+    rows.push([section.label, '', ...entities.map(() => ''), '', '']);
+    for (const line of section.lines) {
+      rows.push([
+        line.code,
+        line.name,
+        ...entities.map((e: any) => fmt(line.byEntity?.[e.companyId] ?? 0)),
+        fmt(line.elimination),
+        fmt(line.consolidated),
+      ]);
+    }
+    rows.push([
+      `Total ${section.label}`,
+      '',
+      ...entities.map((e: any) => fmt(section.totals?.byEntity?.[e.companyId] ?? 0)),
+      fmt(section.totals?.elimination ?? 0),
+      fmt(section.totals?.consolidated ?? 0),
+    ]);
+    rows.push([]);
+  }
+
+  rows.push([
+    'Totals',
+    '',
+    ...entities.map((e: any) => fmt(data.grandTotal?.byEntity?.[e.companyId] ?? 0)),
+    fmt(data.grandTotal?.elimination ?? 0),
+    fmt(data.grandTotal?.consolidated ?? 0),
+  ]);
+
+  const filename = `consolidated-${data.statement || 'report'}-${data.period?.asOf || ''}.${ext}`;
+  downloadCSV(filename, headers, rows);
+}

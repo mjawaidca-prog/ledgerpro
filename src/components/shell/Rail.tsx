@@ -49,6 +49,7 @@ const settingsNavItems = [
   { href: '/recurring',                label: 'Recurring',          icon: FileText },
   { href: '/settings/categorization',  label: 'Categorization',     icon: Shield },
   { href: '/settings',                 label: 'Company Settings',    icon: Settings },
+  { href: '/settings/exchange-rates',  label: 'FX Rates',           icon: ArrowLeftRight },
   { href: '/settings/period-close',    label: 'Period Close',       icon: Shield },
   { href: '/settings/audit-log',       label: 'Audit Log',          icon: FileText },
 ];

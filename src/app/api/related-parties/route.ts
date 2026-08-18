@@ -34,9 +34,10 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const body = await req.json();
-    const { companyX, companyY } = body as {
+    const { companyX, companyY, ownership } = body as {
       companyX: string;
       companyY: string;
+      ownership?: { xOwnsY?: number; yOwnsX?: number };
     };
 
     if (!companyX || !companyY) {
@@ -53,7 +54,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const link = await createRelatedPartyLink(userId!, companyX, companyY);
+    for (const pct of [ownership?.xOwnsY, ownership?.yOwnsX]) {
+      if (pct !== undefined && (Number.isNaN(Number(pct)) || Number(pct) < 0 || Number(pct) > 100)) {
+        return NextResponse.json(
+          { error: 'Ownership percentages must be between 0 and 100.' },
+          { status: 400 }
+        );
+      }
+    }
+
+    const link = await createRelatedPartyLink(userId!, companyX, companyY, ownership);
 
     await auditLog(companyId, userId, 'related_party.create', 'RelatedPartyLink', link.id, {
       companyA: companyX,

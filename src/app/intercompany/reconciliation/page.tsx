@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertTriangle, Wand2 } from 'lucide-react';
 
 interface ReconRow {
@@ -16,6 +17,7 @@ interface ReconRow {
 }
 
 export default function ReconciliationPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<ReconRow[]>([]);
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(true);
@@ -69,6 +71,18 @@ export default function ReconciliationPage() {
             fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)',
             padding: '8px 12px', outline: 'none',
           }} />
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => router.push('/reports/consolidated')}
+          style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-md)', color: 'var(--primary)',
+            fontSize: 'var(--text-sm)', fontWeight: 500,
+            padding: '8px 14px', cursor: 'pointer',
+          }}
+        >
+          Consolidated view →
+        </button>
       </div>
 
       {loading ? (

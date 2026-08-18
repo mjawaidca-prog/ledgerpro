@@ -92,13 +92,26 @@ async function provisionControlAccounts(
 
 // ─── Create link ───
 
+/**
+ * Create a related-party link with optional ownership percentages.
+ * `ownership` is expressed in terms of the CALLER's companyX/companyY order:
+ * xOwnsY = % company X holds of Y, yOwnsX = % company Y holds of X.
+ * Defaults to 100/0 (X wholly owns Y) — matching the consolidation v1 scope.
+ */
 export async function createRelatedPartyLink(
   userId: string,
   companyX: string,
-  companyY: string
+  companyY: string,
+  ownership?: { xOwnsY?: number; yOwnsX?: number }
 ) {
   // Canonical ordering — the pair is always stored ordered by id
   const [companyAId, companyBId] = [companyX, companyY].sort();
+
+  const xIsA = companyAId === companyX;
+  const xOwnsY = Number(ownership?.xOwnsY ?? 100);
+  const yOwnsX = Number(ownership?.yOwnsX ?? 0);
+  const aOwnershipOfB = xIsA ? xOwnsY : yOwnsX; // company A holds X% of B
+  const bOwnershipOfA = xIsA ? yOwnsX : xOwnsY; // company B holds X% of A
 
   await assertMemberOfBoth(userId, companyAId, companyBId);
 
@@ -127,6 +140,8 @@ export async function createRelatedPartyLink(
         aDueToAccountId: aAcc.dueTo.id,
         bDueFromAccountId: bAcc.dueFrom.id,
         bDueToAccountId: bAcc.dueTo.id,
+        aOwnershipOfB,
+        bOwnershipOfA,
       },
       include: {
         companyA: { select: { id: true, name: true } },
