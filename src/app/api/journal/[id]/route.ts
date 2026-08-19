@@ -200,7 +200,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     // transaction, invoice, bill, or transfer) so that document's own status
     // stays in sync with the ledger — voiding it here would desync the two.
     if (existing.sourceType !== 'manual') {
-      const sourceLabel = { payment: 'the transaction', invoice: 'the invoice', bill: 'the bill', transfer: 'the transfer' }[existing.sourceType] || 'its source document';
+      const sourceLabel = { payment: 'the transaction', invoice: 'the invoice', bill: 'the bill', transfer: 'the transfer', revaluation: 'the revaluation run' }[existing.sourceType] || 'its source document';
       return NextResponse.json(
         { error: `This entry was auto-generated. Void ${sourceLabel} instead.` },
         { status: 400 }

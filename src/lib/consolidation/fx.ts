@@ -8,18 +8,19 @@
 
 import { db } from '@/lib/db';
 import { convertCurrency } from '@/lib/currencies';
+import { chooseRateRow } from '@/lib/fx/rate';
 
 export interface RateResult {
   rate: number;
   source: 'dated' | 'fallback' | 'none';
 }
 
-/** Latest dated rate of `type` on or before `asOf` for from→to. */
+/** Latest dated rate of `type` on or before `asOf` for from→to (manual preferred over feed). */
 export async function getDatedRate(
   from: string,
   to: string,
   asOf: Date,
-  type: 'closing' | 'average'
+  type: 'closing' | 'average' | 'daily'
 ): Promise<RateResult> {
   if (from === to) return { rate: 1, source: 'none' };
 
@@ -27,12 +28,23 @@ export async function getDatedRate(
   // string slice, never on full Date objects.
   const asOfStr = asOf.toISOString().slice(0, 10);
 
-  const row = await db.exchangeRate.findFirst({
-    where: { from, to, type, date: { lte: new Date(asOfStr) } },
-    orderBy: { date: 'desc' },
-  });
+  const [manual, feed] = await Promise.all([
+    db.exchangeRate.findFirst({
+      where: { from, to, type, source: 'manual', date: { lte: new Date(asOfStr) } },
+      orderBy: { date: 'desc' },
+    }),
+    db.exchangeRate.findFirst({
+      where: { from, to, type, source: 'feed', date: { lte: new Date(asOfStr) } },
+      orderBy: { date: 'desc' },
+    }),
+  ]);
 
-  if (row) return { rate: Number(row.rate), source: 'dated' };
+  const row = chooseRateRow([
+    ...(manual ? [{ id: manual.id, date: manual.date, rate: Number(manual.rate), source: 'manual' as const }] : []),
+    ...(feed ? [{ id: feed.id, date: feed.date, rate: Number(feed.rate), source: 'feed' as const }] : []),
+  ]);
+
+  if (row) return { rate: row.rate, source: 'dated' };
 
   return { rate: convertCurrency(1, from, to), source: 'fallback' };
 }
@@ -53,12 +65,26 @@ export async function getHistoricalRate(
 
   const refStr = referenceDate.toISOString().slice(0, 10);
 
-  const row = await db.exchangeRate.findFirst({
-    where: { from, to, type: 'closing', date: { gte: new Date(refStr) } },
-    orderBy: { date: 'asc' },
-  });
+  const [manual, feed] = await Promise.all([
+    db.exchangeRate.findFirst({
+      where: { from, to, type: 'closing', source: 'manual', date: { gte: new Date(refStr) } },
+      orderBy: { date: 'asc' },
+    }),
+    db.exchangeRate.findFirst({
+      where: { from, to, type: 'closing', source: 'feed', date: { gte: new Date(refStr) } },
+      orderBy: { date: 'asc' },
+    }),
+  ]);
 
-  if (row) return { rate: Number(row.rate), source: 'dated' };
+  const earliest = [manual, feed]
+    .filter((r): r is NonNullable<typeof r> => Boolean(r))
+    .sort((a, b) => {
+      const d = a.date.getTime() - b.date.getTime();
+      if (d !== 0) return d;
+      return a.source === 'manual' ? -1 : 1; // manual preferred on ties
+    })[0];
+
+  if (earliest) return { rate: Number(earliest.rate), source: 'dated' };
 
   return { rate: closingFallback.rate, source: 'fallback' };
 }

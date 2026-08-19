@@ -142,6 +142,9 @@ async function main() {
     { code: '4000', name: 'Product Sales', type: 'income' as const, detailType: 'Product sales' },
     { code: '4100', name: 'Service Revenue', type: 'income' as const, detailType: 'Service revenue' },
     { code: '4908', name: 'Other Income', type: 'income' as const, detailType: 'Other income' },
+    { code: '4310', name: 'FX Gain (Realized)', type: 'income' as const, detailType: 'Other income' },
+    { code: '4320', name: 'FX Gain/Loss (Unrealized)', type: 'income' as const, detailType: 'Other income' },
+    { code: '4390', name: 'FX Rounding', type: 'income' as const, detailType: 'Other income' },
     // Expenses
     { code: '5000', name: 'Cost of Goods Sold', type: 'expense' as const, detailType: 'COGS' },
     { code: '6100', name: 'Software & Subscriptions', type: 'expense' as const, detailType: 'Dues & subscriptions' },

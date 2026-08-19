@@ -50,6 +50,7 @@ export default function EditInvoicePage() {
   const [lines, setLines] = useState<LineItem[]>([]);
   const [taxRate, setTaxRate] = useState(8.5);
   const [paidAmount, setPaidAmount] = useState(0);
+  const [paidAt, setPaidAt] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
 
   // Fetch categories & company tax rate
@@ -89,6 +90,7 @@ export default function EditInvoicePage() {
         setStatus(inv.status);
         setTaxRate(Number(inv.taxRate ?? 0));
         setPaidAmount(Number(inv.paidAmount ?? 0));
+        setPaidAt(inv.paidAt ? String(inv.paidAt) : null);
         setLines(
           inv.lineItems.map((li: any) => ({
             key: `line-${lineKey++}`,
@@ -234,7 +236,7 @@ export default function EditInvoicePage() {
         <Badge variant={statusVariant}>{status === 'void' ? 'Void' : status.charAt(0).toUpperCase() + status.slice(1)}</Badge>
         {status === 'paid' && (
           <span className="text-sm text-[var(--success)] font-medium">
-            Paid {money(paidAmount)} on {format(new Date(), 'MMM d, yyyy')}
+            Paid {money(paidAmount)}{paidAt ? ` on ${format(new Date(paidAt), 'MMM d, yyyy')}` : ''}
           </span>
         )}
         {!isLocked && (

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Segmented } from '@/components/ui/Segmented';
+import FxAccountView from '@/components/fx/FxAccountView';
 import { cn } from '@/lib/cn';
 import { money } from '@/lib/money';
 import { format } from 'date-fns';
@@ -24,6 +25,7 @@ interface FinancialAccount {
   name: string;
   mask: string | null;
   kind: 'checking' | 'savings' | 'creditcard' | 'payoutclearing';
+  currency?: string;
   currentBalance: number;
   glAccountCode: string | null;
   syncStatus: string;
@@ -47,6 +49,9 @@ interface Transaction {
   description: string;
   merchant: string | null;
   amount: number;
+  currency?: string;
+  fxRate?: string | number | null;
+  amountHome?: string | number | null;
   status: 'toreview' | 'categorized' | 'excluded' | 'transfer' | 'reconciled';
   account: { id: string; name: string; mask: string | null; kind: string };
   category: { id: string; code: string; name: string } | null;
@@ -342,6 +347,7 @@ export default function BankingPage() {
 
   // Filters
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
+  const [homeCurrency, setHomeCurrency] = useState('CAD');
   const [statusFilter, setStatusFilter] = useState('needsreview');
   const [search, setSearch] = useState('');
 
@@ -512,11 +518,31 @@ export default function BankingPage() {
         return;
       }
       setError(null);
-      setAccounts(Array.isArray(json.data) ? json.data : []);
+      const list = Array.isArray(json.data) ? json.data : [];
+      setAccounts(list);
+      // Deep-link: /banking?account=1015 resolves by GL code OR account id.
+      const qAccount = new URLSearchParams(window.location.search).get('account');
+      if (qAccount) {
+        const match = list.find((a: any) => a.id === qAccount || a.glAccountCode === qAccount);
+        if (match) setSelectedAccountId(match.id);
+      }
     } catch {
       setError('Failed to fetch accounts');
       setAccounts([]);
     }
+  }, [activeCompanyId, activeUserId]);
+
+  // Home currency for the FX account view.
+  useEffect(() => {
+    fetchWithTenantHeaders('/api/companies')
+      .then((r) => r.json())
+      .then((json) => {
+        const companies = json.data || [];
+        const activeId = document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
+        const active = companies.find((c: any) => c.id === activeId) || companies[0];
+        if (active?.currency) setHomeCurrency(active.currency);
+      })
+      .catch(() => {});
   }, [activeCompanyId, activeUserId]);
 
   const fetchChartAccounts = useCallback(async () => {
@@ -1444,6 +1470,23 @@ export default function BankingPage() {
         </Alert>
       )}
 
+      {/* FX account view */}
+      {selectedAccountId !== 'all' && (() => {
+        const fxAcct = accounts.find((a) => a.id === selectedAccountId);
+        if (fxAcct && fxAcct.currency && fxAcct.currency !== homeCurrency) {
+          return (
+            <FxAccountView
+              accountId={fxAcct.id}
+              accountCurrency={fxAcct.currency}
+              accountName={fxAcct.name}
+              accountCode={fxAcct.glAccountCode ?? null}
+              homeCurrency={homeCurrency}
+            />
+          );
+        }
+        return null;
+      })()}
+
       {/* Filters */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-[360px]">
@@ -1482,7 +1525,8 @@ export default function BankingPage() {
         </span>
       </div>
 
-      {/* Transaction list */}
+      {/* Transaction list — replaced by the FX account view for foreign-currency accounts */}
+      {!(selectedAccountId !== 'all' && (() => { const fxAcct = accounts.find((a) => a.id === selectedAccountId); return fxAcct && fxAcct.currency && fxAcct.currency !== homeCurrency; })()) && (
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] overflow-hidden">
         {/* Header row */}
         <div className="flex items-center gap-4 px-5 py-3 border-b border-[var(--border)] font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)]">
@@ -1619,6 +1663,7 @@ export default function BankingPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* ─── Transfer suggestions section ─── */}
       {transfers.length > 0 && (

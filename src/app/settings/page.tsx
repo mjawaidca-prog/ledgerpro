@@ -177,6 +177,9 @@ export default function SettingsPage() {
                 <Button variant="ghost" onClick={() => router.push('/settings/exchange-rates')} className="text-sm">
                   Manage FX Rates (for consolidated reports)
                 </Button>
+                <Button variant="ghost" onClick={() => router.push('/settings/currencies')} className="text-sm">
+                  Currency Setup (home currency, rate source, FX accounts)
+                </Button>
               </div>
               <p className="text-xs text-[var(--text-faint)] mt-3">
                 Restoring always creates a brand-new company — it never overwrites an existing one. Bank feed connections, audit

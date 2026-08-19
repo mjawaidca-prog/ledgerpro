@@ -45,6 +45,14 @@ model Company {
   locale           String   @default("en-CA")
   timezone         String   @default("America/Edmonton")
   onboardingComplete Boolean @default(false)
+
+  // ── Foreign currency ──
+  enabledCurrencies       String[] @default(["CAD"])
+  rateSource              String   @default("bank_of_canada") // bank_of_canada | exchangerate_host | manual_only
+  realizedFxAccountCode   String?  // defaults to 4310 at read time
+  unrealizedFxAccountCode String?  // defaults to 4320 at read time
+  fxRoundingAccountCode   String?  // defaults to 4390 at read time
+
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -68,6 +76,8 @@ model Company {
   reportTemplates     ReportTemplate[]
   relatedPartyLinksA  RelatedPartyLink[]    @relation("RPLinkA")
   relatedPartyLinksB  RelatedPartyLink[]    @relation("RPLinkB")
+  fxRevaluations      FxRevaluation[]
+  fxFeedStatus        FxFeedStatus?
 }
 
 enum BusinessType {
@@ -241,6 +251,7 @@ model FinancialAccount {
   name           String
   mask           String?
   kind           AccountKind
+  currency       String       @default("CAD") // a USD bank account keeps USD
   currentBalance Decimal      @default(0) @db.Decimal(14, 2)
   glAccountCode  String?      // e.g. "1010" — manual reference to ChartOfAccount.code
 
@@ -332,6 +343,8 @@ model Transaction {
   rawStatementText   String?
   amount             Decimal       @db.Decimal(14, 2)
   currency           String        @default("CAD")
+  fxRate             Decimal?      @db.Decimal(18, 8) // frozen per-row rate (home per 1 foreign)
+  amountHome         Decimal?      @db.Decimal(14, 2) // frozen home-currency value
 
   categoryId         String?
   category           ChartOfAccount? @relation("TransactionCategory", fields: [categoryId], references: [id])
@@ -420,6 +433,7 @@ model Contact {
   email             String?
   phone             String?
   address           String?
+  currency          String         @default("CAD") // drives the invoice/bill currency
   outstandingBalance Decimal      @default(0) @db.Decimal(14, 2)
   status            ContactStatus @default(active)
   notes             String?
@@ -463,6 +477,13 @@ model Invoice {
   taxRate         Decimal?    @default(0) @db.Decimal(5, 3)
   taxAmount       Decimal     @default(0) @db.Decimal(14, 2)
   total           Decimal     @db.Decimal(14, 2)
+
+  // FX — frozen at post, never recomputed
+  fxRate          Decimal?    @db.Decimal(18, 8) // home units per 1 foreign unit
+  fxRateSource    RateSource?
+  fxRateDate      DateTime?                      // the date the rate belongs to
+  totalHome       Decimal?    @db.Decimal(14, 2)
+  paidAmountHome  Decimal     @default(0) @db.Decimal(14, 2)
 
   status          InvoiceStatus @default(draft)
   sentAt          DateTime?
@@ -527,6 +548,16 @@ model Bill {
   taxAmount       Decimal     @default(0) @db.Decimal(14, 2)
   total           Decimal     @db.Decimal(14, 2)
   currency        String      @default("CAD")
+
+  // FX — frozen at post, never recomputed
+  fxRate          Decimal?    @db.Decimal(18, 8)
+  fxRateSource    RateSource?
+  fxRateDate      DateTime?
+  totalHome       Decimal?    @db.Decimal(14, 2)
+  paidAmountHome  Decimal     @default(0) @db.Decimal(14, 2)
+  // Import GST/HST is assessed by CBSA in CAD on its own valuation — never
+  // derived from the foreign amount.
+  importTaxAmount Decimal?    @db.Decimal(14, 2)
 
   status          BillStatus  @default(draft)
 
@@ -603,6 +634,8 @@ model JournalEntry {
   interCompanyRole InterCompanyRole?
   icSourceOf       InterCompanyTransaction? @relation("ICSource")
   icMirrorOf       InterCompanyTransaction? @relation("ICMirror")
+  fxRevaluation    FxRevaluation? @relation("RevalEntry")
+  fxReversal       FxRevaluation? @relation("RevalReversal")
 
   createdBy       String?
   createdAt       DateTime      @default(now())
@@ -618,6 +651,7 @@ enum JournalSource {
   payment
   transfer
   manual
+  revaluation
 }
 
 model JournalLine {
@@ -629,6 +663,13 @@ model JournalLine {
   description     String?
   debit           Decimal       @default(0) @db.Decimal(14, 2)
   credit          Decimal       @default(0) @db.Decimal(14, 2)
+
+  // Foreign-currency detail — debit/credit stay in the HOME currency always;
+  // these columns are additive detail (transaction currency + amounts).
+  currency       String?  @default("CAD")
+  fxRate         Decimal? @db.Decimal(18, 8)
+  debitForeign   Decimal? @db.Decimal(14, 2)
+  creditForeign  Decimal? @db.Decimal(14, 2)
 
   @@index([glAccountCode])
 }
@@ -988,8 +1029,14 @@ model ReportTemplate {
 // ─── CONSOLIDATED REPORTS — FX RATES & SAVED PACKAGES ──────────
 
 enum ExchangeRateType {
-  closing
-  average
+  daily    // per-day spot rate for transactions
+  closing  // reporting-only
+  average  // reporting-only
+}
+
+enum RateSource {
+  feed
+  manual
 }
 
 model ExchangeRate {
@@ -999,10 +1046,15 @@ model ExchangeRate {
   to        String           // "CAD"
   rate      Decimal          @db.Decimal(18, 8)  // 1 unit of `from` = `rate` units of `to`
   type      ExchangeRateType
+  source    RateSource       @default(manual)
+  fetchedAt DateTime?        // when the feed returned it
+  enteredBy String?          // userId for manual entries
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
-  @@unique([date, from, to, type])
+  // source is part of the key so a manual override coexists with the feed row
+  // (manual always wins at read time; "reset to feed rate" deletes the manual row).
+  @@unique([date, from, to, type, source])
   @@index([from, to, type, date])
 }
 
@@ -1015,4 +1067,38 @@ model ReportPackage {
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+// ─── DAY-TO-DAY FOREIGN CURRENCY ──────────────────────────────
+
+model FxRevaluation {
+  id              String           @id @default(cuid())
+  companyId       String
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  asOf            DateTime         @db.Date
+  rateType        ExchangeRateType
+  netAmount       Decimal          @db.Decimal(14, 2)
+  journalEntryId  String           @unique
+  journalEntry    JournalEntry     @relation("RevalEntry", fields: [journalEntryId], references: [id])
+  reversalEntryId String?          @unique
+  reversalEntry   JournalEntry?    @relation("RevalReversal", fields: [reversalEntryId], references: [id])
+  lines           Json             // the preview table, frozen as the working paper
+  postedById      String
+  postedAt        DateTime         @default(now())
+  voidedAt        DateTime?
+
+  @@unique([companyId, asOf])   // idempotency per company-month
+}
+
+model FxFeedStatus {
+  id                  String    @id @default(cuid())
+  companyId           String    @unique
+  company             Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lastSuccessAt       DateTime?
+  lastAttemptAt       DateTime?
+  consecutiveFailures Int       @default(0)
+  lastError           String?
+  lastResults         Json?     // { pairsPulled, missingPairs } — drives the partial-set copy
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 }

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     const where: any = {};
     if (from) where.from = from;
     if (to) where.to = to;
-    if (type === 'closing' || type === 'average') where.type = type;
+    if (type === 'closing' || type === 'average' || type === 'daily') where.type = type;
 
     const rows = await db.exchangeRate.findMany({
       where,
@@ -64,16 +64,16 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(rate) || rate <= 0) {
       return NextResponse.json({ error: 'Rate must be a positive number.' }, { status: 400 });
     }
-    if (type !== 'closing' && type !== 'average') {
-      return NextResponse.json({ error: 'Type must be closing or average.' }, { status: 400 });
+    if (type !== 'closing' && type !== 'average' && type !== 'daily') {
+      return NextResponse.json({ error: 'Type must be daily, closing or average.' }, { status: 400 });
     }
 
     const row = await db.exchangeRate.upsert({
       where: {
-        date_from_to_type: { date: new Date(date), from, to, type },
+        date_from_to_type_source: { date: new Date(date), from, to, type, source: 'manual' },
       },
-      update: { rate },
-      create: { date: new Date(date), from, to, rate, type },
+      update: { rate, enteredBy: userId },
+      create: { date: new Date(date), from, to, rate, type, source: 'manual', enteredBy: userId },
     });
 
     await auditLog(companyId, userId, 'exchange_rate.upsert', 'ExchangeRate', row.id, {

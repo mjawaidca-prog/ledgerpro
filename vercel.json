@@ -3,6 +3,18 @@
     "src/app/api/import/parse/route.ts": {
       "memory": 512,
       "maxDuration": 30
+    },
+    "src/app/api/reports/consolidated/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/fx/sync-cron/route.ts": {
+      "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/fx/sync-cron",
+      "schedule": "0 13 * * 1-5"
+    }
+  ]
 }

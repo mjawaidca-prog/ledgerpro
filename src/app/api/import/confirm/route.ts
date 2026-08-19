@@ -148,6 +148,7 @@ export async function POST(req: NextRequest) {
         description: row.description,
         rawStatementText: row.description,
         amount: row.amount,
+        currency: account?.currency ?? 'CAD',
         status: 'toreview',
         source: importFileType,
         importBatchId: batch.id,

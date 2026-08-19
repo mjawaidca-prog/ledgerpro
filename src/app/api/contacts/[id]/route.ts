@@ -67,6 +67,20 @@ export async function PUT(
       return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
     }
 
+    // A contact's currency can change only while no posted foreign documents
+    // exist — existing documents keep their currency and rate.
+    if (parsed.data.currency && parsed.data.currency !== existing.currency) {
+      const openDocs =
+        (await db.invoice.count({ where: { companyId, customerId: existing.id, currency: { not: 'CAD' } } })) +
+        (await db.bill.count({ where: { companyId, vendorId: existing.id, currency: { not: 'CAD' } } }));
+      if (openDocs > 0) {
+        return NextResponse.json(
+          { error: `${openDocs} existing document${openDocs === 1 ? '' : 's'} use ${existing.currency}. The currency change would apply to new documents only — void or finish those first.` },
+          { status: 409 }
+        );
+      }
+    }
+
     const contact = await db.contact.update({
       where: { id: params.id },
       data: parsed.data,

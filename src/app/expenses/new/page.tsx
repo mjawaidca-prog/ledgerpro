@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
+import RateChip, { type RateChipData } from '@/components/fx/RateChip';
+import CurrencyPill from '@/components/fx/CurrencyPill';
+import { N } from '@/lib/fx-format';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
@@ -14,6 +17,7 @@ import { getTaxRate, type Province } from '@/lib/taxes';
 
 interface VendorOption {
   id: string; name: string; companyName: string | null; email: string | null;
+  currency?: string;
 }
 
 interface AccountOption {
@@ -65,9 +69,22 @@ function NewBillContent() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'danger' } | null>(null);
 
+  // FX state
+  const [homeCurrency, setHomeCurrency] = useState('CAD');
+  const [fxResolved, setFxResolved] = useState<RateChipData | null>(null);
+  const [fxOverride, setFxOverride] = useState<number | null>(null);
+  const [fxConfirmed, setFxConfirmed] = useState(false);
+  const [importTax, setImportTax] = useState<number>(0);
+
   const subtotal = lines.reduce((s, l) => s + l.amount, 0);
   const taxAmount = subtotal * (taxRate / 100);
   const total = subtotal + taxAmount;
+
+  const billCcy = selectedVendor?.currency ?? 'CAD';
+  const isFx = billCcy !== homeCurrency;
+  const effectiveRate = fxOverride ?? fxResolved?.rate ?? null;
+  const homeTotal = isFx && effectiveRate ? Math.round(total * effectiveRate * 100) / 100 : null;
+  const fxMissing = isFx && !effectiveRate;
 
   // Load vendors, bank accounts, expense categories & company tax rate
   useEffect(() => {
@@ -87,6 +104,7 @@ function NewBillContent() {
         if (active?.province) {
           setTaxRate(getTaxRate(active.province as Province).totalRate);
         }
+        if (active?.currency) setHomeCurrency(active.currency);
       })
       .catch(() => {});
   }, []);
@@ -145,7 +163,9 @@ function NewBillContent() {
 
     setSaving(true); setError(null);
     const payload = {
-      kind, vendorId: selectedVendor.id, billDate, dueDate: kind === 'bill' ? dueDate : null,
+      kind, vendorId: selectedVendor.id, currency: billCcy, fxRate: fxOverride, fxRateConfirmed: fxConfirmed,
+      importTaxAmount: importTax > 0 ? importTax : null,
+      billDate, dueDate: kind === 'bill' ? dueDate : null,
       terms: kind === 'bill' ? terms : null, referenceNo: referenceNo.trim() || null,
       subtotal, taxRate, taxAmount, total, status: newStatus,
       notes: notes.trim() || null,
@@ -187,7 +207,7 @@ function NewBillContent() {
         <Button variant="secondary" onClick={() => handleSave('draft')} disabled={saving}>
           <Save size={16} /> Save Draft
         </Button>
-        <Button onClick={() => handleSave('open')} disabled={saving}>
+        <Button onClick={() => handleSave('open')} disabled={saving || fxMissing} className={fxMissing ? 'opacity-50' : ''}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           {kind === 'bill' ? 'Save Bill' : 'Save Expense'}
         </Button>
@@ -224,8 +244,11 @@ function NewBillContent() {
                   {selectedVendor.name.charAt(0)}
                 </div>
                 <div className="flex-1">
-                  <div className="text-sm font-semibold text-[var(--text-strong)]">
-                    {selectedVendor.companyName || selectedVendor.name}
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-[var(--text-strong)]">
+                      {selectedVendor.companyName || selectedVendor.name}
+                    </div>
+                    <CurrencyPill currency={billCcy} />
                   </div>
                   {selectedVendor.companyName && (
                     <div className="text-xs text-[var(--text-muted)]">{selectedVendor.name}</div>
@@ -349,7 +372,7 @@ function NewBillContent() {
             <div className="px-5 py-3 border-b border-[var(--border)] font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] flex items-center gap-4">
               <span className="flex-1">Description</span>
               <span className="w-[160px]">Category</span>
-              <span className="w-[120px] text-right">Amount</span>
+              <span className="w-[120px] text-right">Amount {billCcy}</span>
               <span className="w-[40px]" />
             </div>
             <div className="divide-y divide-[var(--border)]">
@@ -394,6 +417,60 @@ function NewBillContent() {
 
         {/* Right column */}
         <div className="space-y-4">
+          {/* Currency & rate */}
+          {isFx && (
+            <div className="bg-[var(--surface)] border-[1.5px] border-[var(--primary-soft-border)] rounded-2xl shadow-[var(--shadow-sm)] p-5 space-y-3">
+              <label className="font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] block">
+                Currency &amp; rate
+              </label>
+              <RateChip
+                from={billCcy}
+                to={homeCurrency}
+                resolved={fxResolved ?? { rate: null, source: 'none', rateDate: null, stale: false, staleDays: 0, feedRate: null }}
+                onEditRate={(rate) => {
+                  setFxOverride(rate);
+                  if (fxResolved?.feedRate && Math.abs(rate - fxResolved.feedRate) / fxResolved.feedRate > 0.1) {
+                    if (!window.confirm(`The rate you entered (${rate}) is more than 10% away from the Bank of Canada rate (${fxResolved.feedRate.toFixed(4)}). Confirm the rate before saving.`)) return;
+                    setFxConfirmed(true);
+                  }
+                }}
+                onResetToFeed={() => { setFxOverride(null); setFxConfirmed(false); }}
+              />
+              {fxMissing && (
+                <div className="rounded-[var(--r-lg)] bg-[var(--danger-soft)] border border-[var(--danger-soft-border)] px-3.5 py-2.5">
+                  <div className="text-[13px] font-semibold text-[var(--danger)]">No {billCcy} → {homeCurrency} rate for {billDate}</div>
+                  <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                    Enter a rate to continue. The bill cannot be posted without one — the home-currency amount would be a guess.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Import tax */}
+          {kind === 'bill' && (
+            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] p-5 space-y-3">
+              <label className="font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] block">
+                Import tax
+              </label>
+              <div className="field">
+                <label>GST paid at the border (CAD, not {billCcy})</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={importTax || ''}
+                  onChange={(e) => setImportTax(parseFloat(e.target.value) || 0)}
+                  placeholder="0.00"
+                  className="input"
+                />
+              </div>
+              <div className="text-xs text-[var(--text-muted)]">
+                Import GST is assessed by CBSA in Canadian dollars on its own valuation, so it is entered in CAD and never converted from the invoice amount. It is claimed as an input tax credit in full.
+              </div>
+            </div>
+          )}
+
           {/* Dates + Details */}
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] p-5 space-y-4">
             <div className="field">
@@ -441,7 +518,10 @@ function NewBillContent() {
           {/* Totals */}
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] overflow-hidden">
             <div className="px-5 py-3 border-b border-[var(--border)]">
-              <h3 className="font-semibold text-[var(--text-strong)] text-sm">Bill Total</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-[var(--text-strong)] text-sm">Bill Total</h3>
+                <span className="font-mono text-xs text-[var(--text-faint)]">{billCcy}</span>
+              </div>
             </div>
             <div className="px-5 py-4 space-y-3">
               <div className="flex justify-between text-sm">
@@ -462,9 +542,21 @@ function NewBillContent() {
                 <span className="text-[var(--text-muted)]">Tax ({taxRate}%)</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(taxAmount)}</span>
               </div>
-              <div className="flex justify-between pt-3 border-t border-[var(--border)]">
-                <span className="text-sm font-semibold text-[var(--text-strong)]">Total (USD)</span>
-                <span className="font-mono tabular-nums text-lg font-semibold text-[var(--text-strong)]">{money(total)}</span>
+              <div className="flex justify-between items-center pt-3 border-t border-[var(--border)]">
+                <span className="text-sm font-semibold text-[var(--text-strong)]">Total ({billCcy})</span>
+                <div className="flex flex-col items-end">
+                  <span className="font-mono tabular-nums text-2xl font-bold text-[var(--text-strong)]">{money(total)}</span>
+                  {isFx && (
+                    <>
+                      <span className="font-mono text-sm tabular-nums text-[var(--text-muted)]">
+                        {homeTotal !== null ? N(homeTotal, { suffix: homeCurrency }) : '— CAD'}
+                      </span>
+                      <span className="font-mono text-[11px] tabular-nums text-[var(--text-faint)]">
+                        {effectiveRate && fxResolved?.rateDate ? `at ${effectiveRate.toFixed(4)} on ${fxResolved.rateDate}` : 'enter a rate to calculate'}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
               {kind === 'bill' && dueDate && (
                 <div className="text-xs text-[var(--text-muted)] pt-1">Due {format(new Date(dueDate), 'MMM d, yyyy')}</div>

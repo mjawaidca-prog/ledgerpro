@@ -36,6 +36,7 @@ export async function exportCompanyBundle(companyId: string) {
     recurringTemplates,
     categorizationRules,
     periodCloses,
+    fxRevaluations,
   ] = await Promise.all([
     db.chartOfAccount.findMany({ where: { companyId } }),
     db.financialAccount.findMany({ where: { companyId } }),
@@ -48,6 +49,7 @@ export async function exportCompanyBundle(companyId: string) {
     db.recurringTemplate.findMany({ where: { companyId }, include: { lines: true } }),
     db.categorizationRule.findMany({ where: { companyId } }),
     db.periodClose.findMany({ where: { companyId } }),
+    db.fxRevaluation.findMany({ where: { companyId } }),
   ]);
 
   return {
@@ -65,6 +67,11 @@ export async function exportCompanyBundle(companyId: string) {
       currency: company.currency,
       locale: company.locale,
       timezone: company.timezone,
+      enabledCurrencies: company.enabledCurrencies,
+      rateSource: company.rateSource,
+      realizedFxAccountCode: company.realizedFxAccountCode,
+      unrealizedFxAccountCode: company.unrealizedFxAccountCode,
+      fxRoundingAccountCode: company.fxRoundingAccountCode,
     },
     chartOfAccounts,
     financialAccounts,
@@ -77,6 +84,7 @@ export async function exportCompanyBundle(companyId: string) {
     recurringTemplates,
     categorizationRules,
     periodCloses,
+    fxRevaluations,
   };
 }
 
@@ -138,6 +146,7 @@ export async function restoreCompanyBundle(
           name: fa.name,
           mask: fa.mask,
           kind: fa.kind,
+          currency: fa.currency,
           currentBalance: fa.currentBalance,
           glAccountCode: fa.glAccountCode,
           syncStatus: 'manual', // bank feed connections don't carry over — reconnect manually
@@ -158,6 +167,7 @@ export async function restoreCompanyBundle(
           companyName: c.companyName,
           type: c.type,
           email: c.email,
+          currency: c.currency,
           phone: c.phone,
           address: c.address,
           outstandingBalance: c.outstandingBalance,
@@ -180,6 +190,8 @@ export async function restoreCompanyBundle(
           rawStatementText: t.rawStatementText,
           amount: t.amount,
           currency: t.currency,
+          fxRate: t.fxRate,
+          amountHome: t.amountHome,
           categoryId: t.categoryId ? coaIdMap.get(t.categoryId) ?? null : null,
           suggestedCategoryId: null,
           status: t.status,
@@ -214,6 +226,11 @@ export async function restoreCompanyBundle(
           sentAt: inv.sentAt,
           paidAt: inv.paidAt,
           paidAmount: inv.paidAmount,
+          fxRate: inv.fxRate,
+          fxRateSource: inv.fxRateSource,
+          fxRateDate: inv.fxRateDate,
+          totalHome: inv.totalHome,
+          paidAmountHome: inv.paidAmountHome,
           notes: inv.notes,
           paymentAccountId: inv.paymentAccountId ? finAcctIdMap.get(inv.paymentAccountId) ?? null : null,
           lineItems: {
@@ -248,6 +265,12 @@ export async function restoreCompanyBundle(
           taxAmount: bill.taxAmount,
           total: bill.total,
           currency: bill.currency,
+          fxRate: bill.fxRate,
+          fxRateSource: bill.fxRateSource,
+          fxRateDate: bill.fxRateDate,
+          totalHome: bill.totalHome,
+          paidAmountHome: bill.paidAmountHome,
+          importTaxAmount: bill.importTaxAmount,
           status: bill.status,
           paymentAccountId: bill.paymentAccountId ? finAcctIdMap.get(bill.paymentAccountId) ?? null : null,
           paidAt: bill.paidAt,
@@ -273,7 +296,8 @@ export async function restoreCompanyBundle(
       switch (sourceType) {
         case 'invoice': return invoiceIdMap.get(sourceId) ?? null;
         case 'bill': return billIdMap.get(sourceId) ?? null;
-        case 'payment': return txIdMap.get(sourceId) ?? null;
+        case 'payment': return invoiceIdMap.get(sourceId) ?? billIdMap.get(sourceId) ?? txIdMap.get(sourceId) ?? null;
+        case 'revaluation': return null; // remapped after FxRevaluation restore via journalIdMap
         default: return null; // 'transfer' link is dropped (TransferMatch isn't restored); 'manual' has no sourceId
       }
     }
@@ -294,6 +318,10 @@ export async function restoreCompanyBundle(
             create: entry.lines.map((l) => ({
               glAccountCode: l.glAccountCode,
               description: l.description,
+              currency: l.currency,
+              fxRate: l.fxRate,
+              debitForeign: l.debitForeign,
+              creditForeign: l.creditForeign,
               debit: l.debit,
               credit: l.credit,
             })),
@@ -301,6 +329,32 @@ export async function restoreCompanyBundle(
         },
       });
       journalIdMap.set(entry.id, created.id);
+    }
+
+    // FxRevaluation — restore after journal entries so entry ids can be remapped.
+    for (const reval of bundle.fxRevaluations ?? []) {
+      const entryId = journalIdMap.get(reval.journalEntryId);
+      if (!entryId) continue;
+      const reversalId = reval.reversalEntryId ? journalIdMap.get(reval.reversalEntryId) ?? null : null;
+      const created = await tx.fxRevaluation.create({
+        data: {
+          companyId: company.id,
+          asOf: reval.asOf,
+          rateType: reval.rateType,
+          netAmount: reval.netAmount,
+          journalEntryId: entryId,
+          reversalEntryId: reversalId,
+          lines: reval.lines as any, // JsonValue (read) → InputJsonValue (write)
+          postedById: reval.postedById,
+          postedAt: reval.postedAt,
+          voidedAt: reval.voidedAt,
+        },
+      });
+      // Point the two entries' sourceId at the restored revaluation id.
+      await tx.journalEntry.updateMany({
+        where: { id: { in: [entryId, reversalId].filter(Boolean) as string[] } },
+        data: { sourceId: created.id },
+      });
     }
 
     // Second pass: fix up cross-references that could only be resolved once

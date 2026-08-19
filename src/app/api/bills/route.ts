@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
 import { billSchema } from '@/lib/validators/bill';
 import { postBillToLedger } from '@/lib/journal';
+import { resolveDocumentFx, FxValidationError } from '@/lib/fx/document';
 export const dynamic = 'force-dynamic';
 
 function generateBillId(kind: 'bill' | 'expense'): string {
@@ -89,7 +90,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { lineItems, ...billData } = parsed.data;
+    const { lineItems, fxRate, fxRateConfirmed, importTaxAmount, ...billData } = parsed.data;
 
     if (billData.status !== 'draft' && lineItems.some((item) => !item.categoryId)) {
       return NextResponse.json(
@@ -98,10 +99,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // The bill currency comes from the vendor — never from the payload.
+    const [vendor, company] = await Promise.all([
+      db.contact.findUnique({
+        where: { id: billData.vendorId, companyId },
+        select: { name: true, currency: true },
+      }),
+      db.company.findUnique({ where: { id: companyId }, select: { currency: true } }),
+    ]);
+
+    const currency = vendor?.currency ?? 'CAD';
+    const homeCurrency = company?.currency ?? 'CAD';
+    if (billData.currency && billData.currency !== currency) {
+      return NextResponse.json(
+        { error: `This vendor is set to ${currency}, so the bill is raised in ${currency}. Change it on the contact, not here.` },
+        { status: 400 }
+      );
+    }
+
+    // FX block — resolved and frozen only when posting (drafts carry no rate).
+    let fx: { fxRate: number; fxRateSource: 'feed' | 'manual'; fxRateDate: Date; totalHome: number } | null = null;
+    if (billData.status !== 'draft') {
+      fx = await resolveDocumentFx({
+        currency,
+        homeCurrency,
+        documentDate: billData.billDate,
+        subtotal: Number(billData.subtotal),
+        taxAmount: Number(billData.taxAmount),
+        suppliedRate: fxRate,
+        confirmed: fxRateConfirmed,
+      });
+    }
+
     const bill = await db.bill.create({
       data: {
         id: generateBillId(billData.kind),
         ...billData,
+        currency,
+        fxRate: fx?.fxRate ?? null,
+        fxRateSource: fx?.fxRateSource ?? null,
+        fxRateDate: fx?.fxRateDate ?? null,
+        totalHome: fx?.totalHome ?? null,
+        importTaxAmount: importTaxAmount ?? null,
         companyId,
         billDate: new Date(billData.billDate),
         dueDate: billData.dueDate ? new Date(billData.dueDate) : null,
@@ -128,7 +167,10 @@ export async function POST(req: NextRequest) {
         bill.lineItems.map((li) => ({ categoryId: li.categoryId, amount: Number(li.amount) })),
         Number(bill.taxAmount),
         Number(bill.total),
-        companyId
+        companyId,
+        undefined,
+        fx ? { currency, fxRate: fx.fxRate } : undefined,
+        Number(importTaxAmount ?? 0) > 0 ? Number(importTaxAmount) : undefined
       );
     }
 
@@ -136,6 +178,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data: bill }, { status: 201 });
   } catch (error: any) {
+    if (error instanceof FxValidationError) {
+      return NextResponse.json({ error: error.message, code: 'fx_validation' }, { status: 400 });
+    }
     console.error('POST /api/bills error:', error);
     return NextResponse.json({ error: error.message || 'Failed to create bill' }, { status: 500 });
   }

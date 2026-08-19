@@ -19,10 +19,15 @@ export const billSchema = z.object({
   taxRate: z.coerce.number().min(0).max(100).nullable().optional(),
   taxAmount: z.coerce.number().min(0).default(0),
   total: z.coerce.number().min(0),
-  currency: z.string().default('CAD'),
+  currency: z.string().optional(), // set by the server from the vendor — payload is informational
   status: z.enum(['draft', 'open', 'paid', 'overdue', 'void']).default('draft'),
   notes: z.string().max(2000).nullable().optional(),
   paymentAccountId: z.string().nullable().optional(),
+  // FX — same freeze rules as invoices.
+  fxRate: z.coerce.number().positive('Enter a positive rate.').nullable().optional(),
+  fxRateConfirmed: z.boolean().optional(),
+  // Import GST/HST assessed by CBSA in CAD on its own valuation.
+  importTaxAmount: z.coerce.number().min(0).nullable().optional(),
   lineItems: z.array(billLineItemSchema).min(1, 'At least one line item is required'),
 });
 

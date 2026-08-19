@@ -21,12 +21,16 @@ import {
   Loader2,
 } from 'lucide-react';
 import { getTaxRate, type Province } from '@/lib/taxes';
+import RateChip, { type RateChipData } from '@/components/fx/RateChip';
+import CurrencyPill from '@/components/fx/CurrencyPill';
+import { N } from '@/lib/fx-format';
 
 interface CustomerOption {
   id: string;
   name: string;
   companyName: string | null;
   email: string | null;
+  currency?: string;
 }
 
 interface CategoryOption {
@@ -86,10 +90,22 @@ export default function NewInvoicePage() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'danger' } | null>(null);
 
+  // FX state
+  const [homeCurrency, setHomeCurrency] = useState('CAD');
+  const [fxResolved, setFxResolved] = useState<RateChipData | null>(null);
+  const [fxOverride, setFxOverride] = useState<number | null>(null);
+  const [fxConfirmed, setFxConfirmed] = useState(false);
+
   // Computed
   const subtotal = lines.reduce((sum, l) => sum + l.amount, 0);
   const taxAmount = subtotal * (taxRate / 100);
   const total = subtotal + taxAmount;
+
+  const invoiceCcy = selectedCustomer?.currency ?? 'CAD';
+  const isFx = invoiceCcy !== homeCurrency;
+  const effectiveRate = fxOverride ?? fxResolved?.rate ?? null;
+  const homeTotal = isFx && effectiveRate ? Math.round(total * effectiveRate * 100) / 100 : null;
+  const fxMissing = isFx && !effectiveRate;
 
   // Fetch customers, revenue categories, and company tax rate
   useEffect(() => {
@@ -111,9 +127,28 @@ export default function NewInvoicePage() {
         if (active?.province) {
           setTaxRate(getTaxRate(active.province as Province).totalRate);
         }
+        if (active?.currency) setHomeCurrency(active.currency);
       })
       .catch(() => {});
   }, []);
+
+  // Resolve the FX rate whenever the customer currency or issue date changes.
+  useEffect(() => {
+    if (!isFx) {
+      setFxResolved(null);
+      return;
+    }
+    let active = true;
+    fetch(`/api/fx/rate?from=${invoiceCcy}&to=${homeCurrency}&date=${issueDate}&type=daily`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (active) setFxResolved(json.data ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [invoiceCcy, homeCurrency, issueDate]);
 
   const filteredCustomers = customers.filter(
     (c) =>
@@ -208,6 +243,9 @@ export default function NewInvoicePage() {
 
     const payload = {
       customerId: selectedCustomer.id,
+      currency: invoiceCcy,
+      fxRate: fxOverride,
+      fxRateConfirmed: fxConfirmed,
       issueDate,
       dueDate,
       terms,
@@ -271,7 +309,7 @@ export default function NewInvoicePage() {
         <Button variant="secondary" onClick={() => handleSave('draft')} disabled={saving}>
           <Save size={16} /> Save Draft
         </Button>
-        <Button onClick={() => handleSave('sent')} disabled={saving}>
+        <Button onClick={() => handleSave('sent')} disabled={saving || fxMissing} className={fxMissing ? 'opacity-50' : ''}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           Send Invoice
         </Button>
@@ -293,14 +331,22 @@ export default function NewInvoicePage() {
                   {selectedCustomer.name.charAt(0)}
                 </div>
                 <div className="flex-1">
-                  <div className="text-sm font-semibold text-[var(--text-strong)]">
-                    {selectedCustomer.companyName || selectedCustomer.name}
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-[var(--text-strong)]">
+                      {selectedCustomer.companyName || selectedCustomer.name}
+                    </div>
+                    <CurrencyPill currency={invoiceCcy} label={isFx ? 'customer currency' : undefined} />
                   </div>
                   {selectedCustomer.companyName && (
                     <div className="text-xs text-[var(--text-muted)]">{selectedCustomer.name}</div>
                   )}
                   {selectedCustomer.email && (
                     <div className="text-xs text-[var(--text-muted)]">{selectedCustomer.email}</div>
+                  )}
+                  {isFx && (
+                    <div className="text-xs text-[var(--text-muted)] mt-1">
+                      This customer is set to {invoiceCcy}, so the invoice is raised in {invoiceCcy}. Change it on the contact, not here.
+                    </div>
                   )}
                 </div>
                 <button
@@ -437,8 +483,8 @@ export default function NewInvoicePage() {
               <span className="flex-1">Item</span>
               <span className="w-[160px]">Category</span>
               <span className="w-[80px] text-right">Qty</span>
-              <span className="w-[120px] text-right">Price</span>
-              <span className="w-[120px] text-right">Amount</span>
+              <span className="w-[120px] text-right">Price {invoiceCcy}</span>
+              <span className="w-[120px] text-right">Amount {invoiceCcy}</span>
               <span className="w-[40px]" />
             </div>
 
@@ -478,9 +524,16 @@ export default function NewInvoicePage() {
                     onChange={(e) => updateLine(line.key, 'unitPrice', parseFloat(e.target.value) || 0)}
                     className="w-[120px] h-[34px] px-2 text-right rounded-md border border-transparent bg-transparent font-mono text-sm text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
-                  <span className="w-[120px] text-right font-mono tabular-nums text-sm font-medium text-[var(--text-strong)]">
-                    {money(line.amount)}
-                  </span>
+                  <div className="w-[120px] flex flex-col items-end">
+                    <span className="font-mono tabular-nums text-sm font-medium text-[var(--text-strong)]">
+                      {money(line.amount)}
+                    </span>
+                    {isFx && effectiveRate && (
+                      <span className="font-mono text-[10.5px] tabular-nums text-[var(--text-faint)]">
+                        {N(Math.round(line.amount * effectiveRate * 100) / 100, { suffix: homeCurrency })}
+                      </span>
+                    )}
+                  </div>
                   <button
                     onClick={() => removeLine(line.key)}
                     className="w-[34px] h-[34px] grid place-items-center rounded-md text-[var(--text-faint)] hover:text-[var(--danger)] hover:bg-[var(--danger-soft)] transition-colors"
@@ -515,6 +568,49 @@ export default function NewInvoicePage() {
 
         {/* Right column — Summary */}
         <div className="space-y-4">
+          {/* Currency & rate */}
+          {isFx && (
+            <div className="bg-[var(--surface)] border-[1.5px] border-[var(--primary-soft-border)] rounded-2xl shadow-[var(--shadow-sm)] p-5 space-y-3">
+              <label className="font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] block">
+                Currency &amp; rate
+              </label>
+              <RateChip
+                from={invoiceCcy}
+                to={homeCurrency}
+                resolved={fxResolved ?? { rate: null, source: 'none', rateDate: null, stale: false, staleDays: 0, feedRate: null }}
+                onEditRate={(rate) => {
+                  setFxOverride(rate);
+                  if (fxResolved?.feedRate && Math.abs(rate - fxResolved.feedRate) / fxResolved.feedRate > 0.1) {
+                    if (!window.confirm(`The rate you entered (${rate}) is more than 10% away from the Bank of Canada rate (${fxResolved.feedRate.toFixed(4)}). Confirm the rate before saving.`)) return;
+                    setFxConfirmed(true);
+                  }
+                }}
+                onResetToFeed={() => { setFxOverride(null); setFxConfirmed(false); }}
+              />
+              {fxOverride && fxResolved?.feedRate && (
+                <div className="text-xs text-[var(--primary)]">
+                  You set this rate by hand. It overrides the Bank of Canada rate of {fxResolved.feedRate.toFixed(4)} for this invoice only, and is recorded against your name.
+                </div>
+              )}
+              {fxResolved?.stale && (
+                <div className="rounded-[var(--r-lg)] bg-[var(--warning-soft)] border border-[var(--warning-soft-border)] px-3.5 py-2.5">
+                  <div className="text-[13px] font-semibold text-[var(--warning)]">Rate is {fxResolved.staleDays} days old</div>
+                  <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                    The last {invoiceCcy} → {homeCurrency} rate on file is from {fxResolved.rateDate}. The feed has not returned since. Check the rate before you send this invoice.
+                  </div>
+                </div>
+              )}
+              {fxMissing && (
+                <div className="rounded-[var(--r-lg)] bg-[var(--danger-soft)] border border-[var(--danger-soft-border)] px-3.5 py-2.5">
+                  <div className="text-[13px] font-semibold text-[var(--danger)]">No {invoiceCcy} → {homeCurrency} rate for {issueDate}</div>
+                  <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                    Enter a rate to continue. The invoice cannot be sent without one — the home-currency amount would be a guess.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Dates & Terms */}
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] p-5 space-y-4">
             <div className="field">
@@ -560,7 +656,10 @@ export default function NewInvoicePage() {
           {/* Totals */}
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] overflow-hidden">
             <div className="px-5 py-3 border-b border-[var(--border)]">
-              <h3 className="font-semibold text-[var(--text-strong)] text-sm">Invoice Total</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-[var(--text-strong)] text-sm">Invoice Total</h3>
+                <span className="font-mono text-xs text-[var(--text-faint)]">{invoiceCcy}</span>
+              </div>
             </div>
             <div className="px-5 py-4 space-y-3">
               <div className="flex justify-between text-sm">
@@ -586,11 +685,23 @@ export default function NewInvoicePage() {
                 <span className="text-[var(--text-muted)]">Tax ({taxRate}%)</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(taxAmount)}</span>
               </div>
-              <div className="flex justify-between pt-3 border-t border-[var(--border)]">
-                <span className="text-sm font-semibold text-[var(--text-strong)]">Total (USD)</span>
-                <span className="font-mono tabular-nums text-lg font-semibold text-[var(--text-strong)]">
-                  {money(total)}
-                </span>
+              <div className="flex justify-between items-center pt-3 border-t border-[var(--border)]">
+                <span className="text-sm font-semibold text-[var(--text-strong)]">Total ({invoiceCcy})</span>
+                <div className="flex flex-col items-end">
+                  <span className="font-mono tabular-nums text-2xl font-bold text-[var(--text-strong)]">
+                    {money(total)}
+                  </span>
+                  {isFx && (
+                    <>
+                      <span className="font-mono text-sm tabular-nums text-[var(--text-muted)]">
+                        {homeTotal !== null ? `${N(homeTotal, { suffix: homeCurrency })}` : '— CAD'}
+                      </span>
+                      <span className="font-mono text-[11px] tabular-nums text-[var(--text-faint)]">
+                        {effectiveRate && fxResolved?.rateDate ? `at ${effectiveRate.toFixed(4)} on ${fxResolved.rateDate}` : 'enter a rate to calculate'}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>

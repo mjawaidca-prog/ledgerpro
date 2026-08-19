@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { invoiceUpdateSchema } from '@/lib/validators/invoice';
 import { voidJournalEntry, postInvoiceToLedger } from '@/lib/journal';
+import { resolveDocumentFx, FxValidationError } from '@/lib/fx/document';
 export const dynamic = 'force-dynamic';
 
 export async function GET(
@@ -149,6 +150,45 @@ export async function PUT(
       },
     });
 
+    // FX on repost: an already-posted invoice keeps its frozen rate forever;
+    // a draft being posted for the first time resolves and freezes now.
+    let repostFx: { currency: string; fxRate: number } | undefined;
+    if (willPost && updated) {
+      const home =
+        (await db.company.findUnique({ where: { id: companyId }, select: { currency: true } }))?.currency ?? 'CAD';
+      if (updated.currency !== home) {
+        let rate = existing.fxRate ? Number(existing.fxRate) : null;
+        if (!rate) {
+          const fx = await resolveDocumentFx({
+            currency: updated.currency,
+            homeCurrency: home,
+            documentDate: (updated.issueDate ?? new Date()).toISOString().slice(0, 10),
+            subtotal: Number(updated.subtotal),
+            taxAmount: Number(updated.taxAmount),
+          });
+          rate = fx?.fxRate ?? null;
+          await db.invoice.update({
+            where: { id: params.id },
+            data: {
+              fxRate: rate,
+              fxRateDate: fx?.fxRateDate ?? null,
+              fxRateSource: fx?.fxRateSource ?? null,
+              totalHome: fx?.totalHome ?? null,
+            },
+          });
+        } else if (totalChanged) {
+          // Repost at the FROZEN rate — recompute totalHome from line homes.
+          const r2 = (n: number) => Math.round(n * 100) / 100;
+          const totalHome = r2(
+            updated.lineItems.reduce((sum, li) => sum + r2(Number(li.amount) * rate!), 0) +
+              (newTaxAmount > 0 ? r2(newTaxAmount * rate!) : 0)
+          );
+          await db.invoice.update({ where: { id: params.id }, data: { totalHome } });
+        }
+        if (rate) repostFx = { currency: updated.currency, fxRate: rate };
+      }
+    }
+
     if (willPost && updated) {
       await postInvoiceToLedger(
         params.id,
@@ -156,7 +196,9 @@ export async function PUT(
         updated.lineItems.map((li) => ({ categoryId: li.categoryId, amount: Number(li.amount) })),
         newTaxAmount,
         newTotal,
-        companyId
+        companyId,
+        undefined,
+        repostFx
       );
     }
 
@@ -164,6 +206,9 @@ export async function PUT(
 
     return NextResponse.json({ data: updated });
   } catch (error: any) {
+    if (error instanceof FxValidationError) {
+      return NextResponse.json({ error: error.message, code: 'fx_validation' }, { status: 400 });
+    }
     console.error('PUT /api/invoices/[id] error:', error);
     return NextResponse.json({ error: error.message || 'Failed to update invoice' }, { status: 500 });
   }

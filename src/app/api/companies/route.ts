@@ -107,6 +107,47 @@ export async function PUT(req: NextRequest) {
       }
     }
 
+    // ── FX settings — guarded mutations ──
+    if (body.enabledCurrencies !== undefined) {
+      if (!Array.isArray(body.enabledCurrencies) || !body.enabledCurrencies.length) {
+        return NextResponse.json({ error: 'enabledCurrencies must be a non-empty array.' }, { status: 400 });
+      }
+      // Disabling a currency while foreign balances exist is blocked.
+      const current = await db.company.findUnique({ where: { id: companyId }, select: { enabledCurrencies: true } });
+      const removed = (current?.enabledCurrencies ?? []).filter((c: string) => !body.enabledCurrencies.includes(c));
+      for (const ccy of removed) {
+        const openDocs = await db.invoice.count({ where: { companyId, currency: ccy, status: { in: ['sent', 'overdue'] } } })
+          + await db.bill.count({ where: { companyId, currency: ccy, status: { in: ['open', 'overdue'] } } });
+        if (openDocs > 0) {
+          return NextResponse.json(
+            { error: `${ccy} cannot be turned off while ${openDocs} open document${openDocs === 1 ? '' : 's'} still use it.` },
+            { status: 409 }
+          );
+        }
+      }
+      data.enabledCurrencies = body.enabledCurrencies;
+    }
+    if (body.rateSource !== undefined) {
+      if (!['bank_of_canada', 'exchangerate_host', 'manual_only'].includes(body.rateSource)) {
+        return NextResponse.json({ error: 'Unknown rate source.' }, { status: 400 });
+      }
+      data.rateSource = body.rateSource;
+    }
+    for (const key of ['realizedFxAccountCode', 'unrealizedFxAccountCode', 'fxRoundingAccountCode']) {
+      if (body[key] !== undefined) data[key] = body[key] || null;
+    }
+
+    // The home currency can only change on an empty set of books.
+    if (body.currency !== undefined && body.currency !== (await db.company.findUnique({ where: { id: companyId }, select: { currency: true } }))?.currency) {
+      const entryCount = await db.journalEntry.count({ where: { companyId } });
+      if (entryCount > 0) {
+        return NextResponse.json(
+          { error: `${entryCount} entries are posted in the current currency. Changing the home currency would restate every one of them, so it can only be done on an empty set of books.` },
+          { status: 409 }
+        );
+      }
+    }
+
     // Convert date strings
     if (data.fiscalYearStart && typeof data.fiscalYearStart === 'string') {
       data.fiscalYearStart = new Date(data.fiscalYearStart);

@@ -4,12 +4,16 @@ import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { invoiceSchema } from '@/lib/validators/invoice';
 import { postInvoiceToLedger } from '@/lib/journal';
 import { notifyBillDue } from '@/lib/notifications';
+import { resolveDocumentFx, FxValidationError } from '@/lib/fx/document';
+
 export const dynamic = 'force-dynamic';
 
 function generateInvoiceId(): string {
   const seq = Math.floor(Math.random() * 9000) + 1000;
   return `INV-${seq}`;
 }
+
+
 
 export async function GET(req: NextRequest) {
   try {
@@ -99,7 +103,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { lineItems, ...invoiceData } = parsed.data;
+    const { lineItems, fxRate, fxRateConfirmed, ...invoiceData } = parsed.data;
 
     if (invoiceData.status !== 'draft' && lineItems.some((item) => !item.categoryId)) {
       return NextResponse.json(
@@ -108,16 +112,47 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Look up customer name for journal description
-    const customer = await db.contact.findUnique({
-      where: { id: invoiceData.customerId, companyId },
-      select: { name: true },
-    });
+    // The invoice currency comes from the contact — never from the payload.
+    const [customer, company] = await Promise.all([
+      db.contact.findUnique({
+        where: { id: invoiceData.customerId, companyId },
+        select: { name: true, currency: true },
+      }),
+      db.company.findUnique({ where: { id: companyId }, select: { currency: true } }),
+    ]);
+
+    const currency = customer?.currency ?? 'CAD';
+    const homeCurrency = company?.currency ?? 'CAD';
+    if (invoiceData.currency && invoiceData.currency !== currency) {
+      return NextResponse.json(
+        { error: `This customer is set to ${currency}, so the invoice is raised in ${currency}. Change it on the contact, not here.` },
+        { status: 400 }
+      );
+    }
+
+    // FX block — resolved and frozen only when posting (drafts carry no rate).
+    let fx: { fxRate: number; fxRateSource: 'feed' | 'manual'; fxRateDate: Date; totalHome: number } | null = null;
+    if (invoiceData.status !== 'draft') {
+      fx = await resolveDocumentFx({
+        currency,
+        homeCurrency,
+        documentDate: invoiceData.issueDate,
+        subtotal: Number(invoiceData.subtotal),
+        taxAmount: Number(invoiceData.taxAmount),
+        suppliedRate: fxRate,
+        confirmed: fxRateConfirmed,
+      });
+    }
 
     const invoice = await db.invoice.create({
       data: {
         id: generateInvoiceId(),
         ...invoiceData,
+        currency,
+        fxRate: fx?.fxRate ?? null,
+        fxRateSource: fx?.fxRateSource ?? null,
+        fxRateDate: fx?.fxRateDate ?? null,
+        totalHome: fx?.totalHome ?? null,
         companyId,
         issueDate: new Date(invoiceData.issueDate),
         dueDate: new Date(invoiceData.dueDate),
@@ -147,6 +182,8 @@ export async function POST(req: NextRequest) {
         Number(invoice.taxAmount),
         Number(invoice.total),
         companyId,
+        undefined,
+        fx ? { currency, fxRate: fx.fxRate } : undefined,
       );
     }
 
@@ -157,6 +194,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data: invoice }, { status: 201 });
   } catch (error: any) {
+    if (error instanceof FxValidationError) {
+      return NextResponse.json({ error: error.message, code: 'fx_validation' }, { status: 400 });
+    }
     console.error('POST /api/invoices error:', error);
     return NextResponse.json({ error: error.message || 'Failed to create invoice' }, { status: 500 });
   }

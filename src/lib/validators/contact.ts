@@ -8,6 +8,7 @@ export const contactSchema = z.object({
   phone: z.string().max(30).nullable().optional(),
   address: z.string().max(500).nullable().optional(),
   status: z.enum(['active', 'inactive']).default('active'),
+  currency: z.string().default('CAD'),
   notes: z.string().max(2000).nullable().optional(),
 });
 

@@ -13,6 +13,7 @@
  */
 
 import { db } from '@/lib/db';
+import { computeSettlement, journalLinesForPayment } from '@/lib/fx/settlement';
 import { Prisma } from '@prisma/client';
 
 // ─── Types ───
@@ -22,12 +23,19 @@ interface JournalLineInput {
   description?: string;
   debit: number;
   credit: number;
+  // Foreign-currency detail — debit/credit stay in the HOME currency always.
+  currency?: string;
+  fxRate?: number;
+  debitForeign?: number;
+  creditForeign?: number;
 }
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 interface JournalEntryInput {
   entryDate: Date;
   description: string;
-  sourceType: 'invoice' | 'bill' | 'payment' | 'transfer' | 'manual';
+  sourceType: 'invoice' | 'bill' | 'payment' | 'transfer' | 'manual' | 'revaluation';
   sourceId?: string;
   createdBy?: string;
   lines: JournalLineInput[];
@@ -91,6 +99,10 @@ export async function postJournalEntry(
           description: line.description,
           debit: line.debit,
           credit: line.credit,
+          currency: line.currency,
+          fxRate: line.fxRate,
+          debitForeign: line.debitForeign,
+          creditForeign: line.creditForeign,
         })),
       },
     },
@@ -154,7 +166,8 @@ export async function postInvoiceToLedger(
   taxAmount: number,
   total: number,
   companyId: string,
-  tx?: Prisma.TransactionClient
+  tx?: Prisma.TransactionClient,
+  fx?: { currency: string; fxRate: number }
 ) {
   const client = tx ?? db;
 
@@ -177,11 +190,18 @@ export async function postInvoiceToLedger(
     amountByCode.set(code, (amountByCode.get(code) ?? 0) + li.amount);
   }
 
+  // FX: home amount = Σ of per-line rounded conversions, so the entry
+  // balances to the cent by construction. CAD posting is unchanged.
+  const toHome = (foreign: number) => (fx ? round2(foreign * fx.fxRate) : foreign);
+  const foreignCols = (foreign: number) =>
+    fx ? { currency: fx.currency, fxRate: fx.fxRate, creditForeign: foreign } : {};
+
   const creditLines = [...amountByCode.entries()].map(([code, amount]) => ({
     glAccountCode: code,
     description: `Revenue for ${invoiceId}`,
     debit: 0,
-    credit: amount,
+    credit: toHome(amount),
+    ...foreignCols(amount),
   }));
 
   if (taxAmount > 0) {
@@ -189,9 +209,12 @@ export async function postInvoiceToLedger(
       glAccountCode: '2300', // Sales Tax Payable — GST/HST/PST collected on sales
       description: `Tax collected for ${invoiceId}`,
       debit: 0,
-      credit: taxAmount,
+      credit: toHome(taxAmount),
+      ...foreignCols(taxAmount),
     });
   }
+
+  const arDebit = fx ? round2(creditLines.reduce((s, l) => s + l.credit, 0)) : total;
 
   return postJournalEntry(
     {
@@ -203,8 +226,9 @@ export async function postInvoiceToLedger(
         {
           glAccountCode: '1100', // Accounts Receivable
           description: `AR for ${invoiceId}`,
-          debit: total,
+          debit: arDebit,
           credit: 0,
+          ...(fx ? { currency: fx.currency, fxRate: fx.fxRate, debitForeign: total } : {}),
         },
         ...creditLines,
       ],
@@ -214,42 +238,128 @@ export async function postInvoiceToLedger(
   );
 }
 
+export interface PaymentPostingOptions {
+  documentId: string;
+  counterpartyName: string;
+  companyId: string;
+  /** Amount received in the DOCUMENT currency. */
+  amountForeign: number;
+  currency: string;
+  /** The rate frozen on the document (home per 1 foreign). */
+  invoiceRate: number;
+  settlementRate: number;
+  paymentDate: Date;
+  paymentAccountCode: string;
+  paymentAccountCurrency: string;
+  fxAccountCode: string;
+  roundingAccountCode: string;
+  userId?: string;
+  paymentAccountId?: string;
+}
+
 /**
- * Post a payment received against an invoice.
- * Payment: Debit Cash (asset), Credit AR (asset — reducing the receivable).
+ * Post a payment received against an invoice (FX-aware).
+ * Receivable: DR cash / CR AR (relieved at the invoice rate) / FX difference
+ * to the realized FX account — the gain/loss posts in the period of the
+ * PAYMENT. Updates the document and the financial account in one transaction.
+ * Overpayment posts the excess as a foreign-denominated customer credit on AR.
  */
-export async function postInvoicePayment(
-  invoiceId: string,
-  customerName: string,
-  amount: number,
-  paymentAccountCode: string,
-  companyId: string,
-  tx?: Prisma.TransactionClient
-) {
-  return postJournalEntry(
-    {
-      entryDate: new Date(),
-      description: `Payment for ${invoiceId} — ${customerName}`,
-      sourceType: 'payment',
-      sourceId: invoiceId,
-      lines: [
-        {
-          glAccountCode: paymentAccountCode, // e.g. 1010 = Chase Checking
-          description: `Cash received for ${invoiceId}`,
-          debit: amount,
-          credit: 0,
-        },
-        {
-          glAccountCode: '1100', // Accounts Receivable
-          description: `AR reduction for ${invoiceId}`,
-          debit: 0,
-          credit: amount,
-        },
-      ],
-    },
-    companyId,
-    tx
-  );
+export async function postInvoicePayment(opts: PaymentPostingOptions) {
+  return db.$transaction(async (tx) => {
+    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } });
+    if (invoice.status === 'void') throw new Error('Cannot pay a voided invoice.');
+    if (!invoice.fxRate) throw new Error('The invoice has no frozen FX rate to settle against.');
+
+    const remainingForeign = round2(Number(invoice.total) - Number(invoice.paidAmount));
+    const remainingHome = round2(Number(invoice.totalHome ?? invoice.total) - Number(invoice.paidAmountHome ?? invoice.paidAmount));
+    if (remainingForeign <= 0) throw new Error('This invoice is already fully paid.');
+
+    const reliefForeign = Math.min(opts.amountForeign, remainingForeign);
+    const excessForeign = round2(opts.amountForeign - reliefForeign);
+
+    const c = computeSettlement({
+      amountForeign: reliefForeign,
+      invoiceRate: Number(invoice.fxRate),
+      settlementRate: opts.settlementRate,
+      remainingForeign,
+      remainingHome,
+    });
+
+    const lines = journalLinesForPayment(c, {
+      cashAccountCode: opts.paymentAccountCode,
+      receivableAccountCode: '1100',
+      fxAccountCode: opts.fxAccountCode,
+      roundingAccountCode: opts.roundingAccountCode,
+      documentId: opts.documentId,
+      counterpartyName: opts.counterpartyName,
+      currency: opts.currency,
+    });
+
+    if (excessForeign >= 0.005) {
+      // Overpayment → foreign-denominated customer credit on AR.
+      const excessHome = round2(excessForeign * opts.settlementRate);
+      lines.push({
+        glAccountCode: '1100',
+        description: `Customer credit (overpayment) for ${opts.documentId}`,
+        debit: 0,
+        credit: excessHome,
+        currency: opts.currency,
+        fxRate: opts.settlementRate,
+        creditForeign: excessForeign,
+      });
+      // Absorb any cent-level drift from splitting the cash.
+      const drift = round2(round2(opts.amountForeign * opts.settlementRate) - lines.reduce((s, l) => s + l.debit - l.credit, 0));
+      if (Math.abs(drift) >= 0.005) {
+        lines.push({
+          glAccountCode: opts.roundingAccountCode,
+          description: `FX rounding for ${opts.documentId}`,
+          debit: drift > 0 ? drift : 0,
+          credit: drift < 0 ? -drift : 0,
+        });
+      }
+    }
+
+    const entry = await postJournalEntry(
+      {
+        entryDate: opts.paymentDate,
+        description: `Payment for ${opts.documentId} — ${opts.counterpartyName}`,
+        sourceType: 'payment',
+        sourceId: opts.documentId,
+        createdBy: opts.userId,
+        lines,
+      },
+      opts.companyId,
+      tx
+    );
+
+    const fullyPaid = reliefForeign >= remainingForeign - 0.005;
+    const cashHome = round2(opts.amountForeign * opts.settlementRate);
+    await tx.invoice.update({
+      where: { id: opts.documentId },
+      data: {
+        paidAmount: { increment: new Prisma.Decimal(opts.amountForeign) },
+        paidAmountHome: { increment: new Prisma.Decimal(cashHome) },
+        paidAt: opts.paymentDate,
+        paymentAccountId: opts.paymentAccountId ?? invoice.paymentAccountId,
+        status: fullyPaid ? 'paid' : invoice.status,
+      },
+    });
+
+    // Financial account: same-currency deposit keeps its own currency; a
+    // different-currency deposit records the converted home amount.
+    const finAcct = await tx.financialAccount.findFirst({
+      where: { glAccountCode: opts.paymentAccountCode, companyId: opts.companyId },
+    });
+    if (finAcct) {
+      const increment = finAcct.currency === opts.currency ? opts.amountForeign : cashHome;
+      await tx.financialAccount.update({
+        where: { id: finAcct.id },
+        data: { currentBalance: { increment: new Prisma.Decimal(increment) } },
+      });
+    }
+
+    return entry;
+  });
 }
 
 /**
@@ -267,7 +377,9 @@ export async function postBillToLedger(
   taxAmount: number,
   total: number,
   companyId: string,
-  tx?: Prisma.TransactionClient
+  tx?: Prisma.TransactionClient,
+  fx?: { currency: string; fxRate: number },
+  importTaxAmount?: number
 ) {
   const client = tx ?? db;
 
@@ -290,21 +402,45 @@ export async function postBillToLedger(
     amountByCode.set(code, (amountByCode.get(code) ?? 0) + li.amount);
   }
 
+  // FX: home amounts = Σ of per-line rounded conversions; import GST/HST is
+  // entered in CAD on CBSA's own valuation and is NEVER derived from the
+  // foreign amount — it posts as a separate CAD line on 2300.
+  const isFx = Boolean(fx && fx.fxRate);
+  const toHome = (foreign: number) => (isFx ? round2(foreign * fx!.fxRate) : foreign);
+  const foreignCols = (foreign: number) =>
+    isFx ? { currency: fx!.currency, fxRate: fx!.fxRate, debitForeign: foreign } : {};
+
   const debitLines = [...amountByCode.entries()].map(([code, amount]) => ({
     glAccountCode: code,
     description: `Expense for ${billId}`,
-    debit: amount,
+    debit: toHome(amount),
     credit: 0,
+    ...foreignCols(amount),
   }));
 
   if (taxAmount > 0) {
     debitLines.push({
       glAccountCode: '2300', // Sales Tax Payable — net GST/HST/PST position (input tax credit reduces what's owed)
       description: `Tax paid for ${billId}`,
-      debit: taxAmount,
+      debit: toHome(taxAmount),
+      credit: 0,
+      ...foreignCols(taxAmount),
+    });
+  }
+
+  const importTax = importTaxAmount ?? 0;
+  if (importTax > 0) {
+    debitLines.push({
+      glAccountCode: '2300',
+      description: `Import GST/HST assessed by CBSA in CAD for ${billId}`,
+      debit: importTax,
       credit: 0,
     });
   }
+
+  const apCredit = isFx
+    ? round2(debitLines.reduce((s, l) => s + l.debit, 0))
+    : total;
 
   return postJournalEntry(
     {
@@ -318,7 +454,8 @@ export async function postBillToLedger(
           glAccountCode: '2200', // Accounts Payable
           description: `AP for ${billId}`,
           debit: 0,
-          credit: total,
+          credit: apCredit,
+          ...(isFx ? { currency: fx!.currency, fxRate: fx!.fxRate, creditForeign: total } : {}),
         },
       ],
     },
@@ -328,41 +465,103 @@ export async function postBillToLedger(
 }
 
 /**
- * Post a bill payment.
- * Bill Payment: Debit AP (liability — reducing), Credit Cash (asset — reducing).
+ * Post a bill payment (FX-aware). Payable: DR AP (relieved at the bill's
+ * frozen rate) / CR cash at the settlement rate / FX difference to the
+ * realized FX account — the payable sign flips in computeSettlement.
  */
-export async function postBillPayment(
-  billId: string,
-  vendorName: string,
-  amount: number,
-  paymentAccountCode: string,
-  companyId: string,
-  tx?: Prisma.TransactionClient
-) {
-  return postJournalEntry(
-    {
-      entryDate: new Date(),
-      description: `Payment for ${billId} — ${vendorName}`,
-      sourceType: 'payment',
-      sourceId: billId,
-      lines: [
-        {
-          glAccountCode: '2200', // Accounts Payable
-          description: `AP reduction for ${billId}`,
-          debit: amount,
-          credit: 0,
-        },
-        {
-          glAccountCode: paymentAccountCode, // e.g. 1010 = Chase Checking
-          description: `Cash paid for ${billId}`,
-          debit: 0,
-          credit: amount,
-        },
-      ],
-    },
-    companyId,
-    tx
-  );
+export async function postBillPayment(opts: PaymentPostingOptions) {
+  return db.$transaction(async (tx) => {
+    const bill = await tx.bill.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } });
+    if (bill.status === 'void') throw new Error('Cannot pay a voided bill.');
+    if (!bill.fxRate) throw new Error('The bill has no frozen FX rate to settle against.');
+
+    const remainingForeign = round2(Number(bill.total) - Number(bill.paidAmount));
+    const remainingHome = round2(Number(bill.totalHome ?? bill.total) - Number(bill.paidAmountHome ?? bill.paidAmount));
+    if (remainingForeign <= 0) throw new Error('This bill is already fully paid.');
+
+    const reliefForeign = Math.min(opts.amountForeign, remainingForeign);
+    const excessForeign = round2(opts.amountForeign - reliefForeign);
+
+    const c = computeSettlement({
+      amountForeign: reliefForeign,
+      invoiceRate: Number(bill.fxRate),
+      settlementRate: opts.settlementRate,
+      remainingForeign,
+      remainingHome,
+      isPayable: true,
+    });
+
+    const lines = journalLinesForPayment(c, {
+      cashAccountCode: opts.paymentAccountCode,
+      receivableAccountCode: '2200',
+      fxAccountCode: opts.fxAccountCode,
+      roundingAccountCode: opts.roundingAccountCode,
+      documentId: opts.documentId,
+      counterpartyName: opts.counterpartyName,
+      currency: opts.currency,
+    });
+
+    if (excessForeign >= 0.005) {
+      const excessHome = round2(excessForeign * opts.settlementRate);
+      lines.push({
+        glAccountCode: '2200',
+        description: `Vendor credit (overpayment) for ${opts.documentId}`,
+        debit: excessHome,
+        credit: 0,
+        currency: opts.currency,
+        fxRate: opts.settlementRate,
+        debitForeign: excessForeign,
+      });
+      const drift = round2(round2(opts.amountForeign * opts.settlementRate) - lines.reduce((s, l) => s + l.credit - l.debit, 0));
+      if (Math.abs(drift) >= 0.005) {
+        lines.push({
+          glAccountCode: opts.roundingAccountCode,
+          description: `FX rounding for ${opts.documentId}`,
+          debit: drift > 0 ? drift : 0,
+          credit: drift < 0 ? -drift : 0,
+        });
+      }
+    }
+
+    const entry = await postJournalEntry(
+      {
+        entryDate: opts.paymentDate,
+        description: `Payment for ${opts.documentId} — ${opts.counterpartyName}`,
+        sourceType: 'payment',
+        sourceId: opts.documentId,
+        createdBy: opts.userId,
+        lines,
+      },
+      opts.companyId,
+      tx
+    );
+
+    const fullyPaid = reliefForeign >= remainingForeign - 0.005;
+    const cashHome = round2(opts.amountForeign * opts.settlementRate);
+    await tx.bill.update({
+      where: { id: opts.documentId },
+      data: {
+        paidAmount: { increment: new Prisma.Decimal(opts.amountForeign) },
+        paidAmountHome: { increment: new Prisma.Decimal(cashHome) },
+        paidAt: opts.paymentDate,
+        paymentAccountId: opts.paymentAccountId ?? bill.paymentAccountId,
+        status: fullyPaid ? 'paid' : bill.status,
+      },
+    });
+
+    const finAcct = await tx.financialAccount.findFirst({
+      where: { glAccountCode: opts.paymentAccountCode, companyId: opts.companyId },
+    });
+    if (finAcct) {
+      const increment = finAcct.currency === opts.currency ? -opts.amountForeign : -cashHome;
+      await tx.financialAccount.update({
+        where: { id: finAcct.id },
+        data: { currentBalance: { increment: new Prisma.Decimal(increment) } },
+      });
+    }
+
+    return entry;
+  });
 }
 
 /**
@@ -412,7 +611,16 @@ export async function postTransfer(
  * Shared by both the initial post-gl action and reclassification (void + repost).
  */
 export async function postTransactionToLedger(
-  transaction: { id: string; date: Date; description: string; amount: number },
+  transaction: {
+    id: string;
+    date: Date;
+    description: string;
+    amount: number;
+    // FX: frozen per-row rate + home amount (home per 1 foreign unit).
+    currency?: string;
+    fxRate?: number;
+    amountHome?: number;
+  },
   bankAccountCode: string | undefined,
   categoryCode: string,
   companyId: string,
@@ -430,14 +638,27 @@ export async function postTransactionToLedger(
   const isInflow = transaction.amount > 0;
   const bankCode = bankAccountCode;
 
+  // FX: the journal posts HOME amounts (debit/credit invariant); the foreign
+  // columns carry the row's own currency and rate.
+  const homeAmount = transaction.amountHome !== undefined ? Math.abs(transaction.amountHome) : amount;
+  const fxCols =
+    transaction.currency && transaction.fxRate
+      ? {
+          currency: transaction.currency,
+          fxRate: transaction.fxRate,
+          debitForeign: isInflow ? amount : undefined,
+          creditForeign: isInflow ? undefined : amount,
+        }
+      : {};
+
   const lines = isInflow
     ? [
-        { glAccountCode: bankCode, description: transaction.description, debit: amount, credit: 0 },
-        { glAccountCode: categoryCode, description: `Revenue — ${transaction.description}`, debit: 0, credit: amount },
+        { glAccountCode: bankCode, description: transaction.description, debit: homeAmount, credit: 0, ...fxCols },
+        { glAccountCode: categoryCode, description: `Revenue — ${transaction.description}`, debit: 0, credit: homeAmount },
       ]
     : [
-        { glAccountCode: categoryCode, description: transaction.description, debit: amount, credit: 0 },
-        { glAccountCode: bankCode, description: `Payment — ${transaction.description}`, debit: 0, credit: amount },
+        { glAccountCode: categoryCode, description: transaction.description, debit: homeAmount, credit: 0 },
+        { glAccountCode: bankCode, description: `Payment — ${transaction.description}`, debit: 0, credit: homeAmount, ...fxCols },
       ];
 
   return postJournalEntry(
@@ -499,6 +720,11 @@ export async function voidJournalEntry(
           description: l.description ?? undefined,
           debit: Number(l.credit),
           credit: Number(l.debit),
+          // Swap the foreign columns too, or per-currency balances drift on any void.
+          currency: l.currency ?? undefined,
+          fxRate: l.fxRate ? Number(l.fxRate) : undefined,
+          debitForeign: l.creditForeign ? Number(l.creditForeign) : undefined,
+          creditForeign: l.debitForeign ? Number(l.debitForeign) : undefined,
         })),
       },
       companyId,

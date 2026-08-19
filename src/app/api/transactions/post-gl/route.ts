@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
 import { postTransactionToLedger } from '@/lib/journal';
+import { resolveRate } from '@/lib/fx/rate';
 export const dynamic = 'force-dynamic';
 
 // POST — post categorized bank transactions to the General Ledger
@@ -19,8 +20,14 @@ export async function POST(req: NextRequest) {
 
     const transactions = await db.transaction.findMany({
       where: { id: { in: transactionIds }, companyId, status: 'categorized' },
-      include: { account: { select: { glAccountCode: true } }, category: { select: { code: true, name: true } } },
+      include: {
+        account: { select: { glAccountCode: true, currency: true } },
+        category: { select: { code: true, name: true } },
+      },
     });
+
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { currency: true } });
+    const homeCurrency = company?.currency ?? 'CAD';
 
     if (transactions.length === 0) {
       return NextResponse.json({ error: 'No categorized transactions found' }, { status: 400 });
@@ -45,18 +52,48 @@ export async function POST(req: NextRequest) {
       }
 
       const glCode = tx.account?.glAccountCode;
+
+      // FX: rows in a foreign-currency account need the rate for THEIR OWN
+      // date (never the import date), frozen per row at posting.
+      const rowCurrency = tx.currency || tx.account?.currency || 'CAD';
+      let fxRate: number | null = null;
+      let amountHome: number | undefined;
+      if (rowCurrency !== homeCurrency) {
+        const resolved = await resolveRate(rowCurrency, homeCurrency, tx.date, 'daily');
+        fxRate = resolved.rate;
+        if (!fxRate) {
+          failed.push({ id: tx.id, error: `No ${rowCurrency} → ${homeCurrency} rate for ${tx.date.toISOString().slice(0, 10)}. Add one in Settings › FX Rates, then post again.` });
+          continue;
+        }
+        amountHome = Math.round(Math.abs(Number(tx.amount)) * fxRate * 100) / 100;
+      }
+
       try {
         const entry = await postTransactionToLedger(
-          { id: tx.id, date: tx.date, description: tx.description, amount: Number(tx.amount) },
+          {
+            id: tx.id,
+            date: tx.date,
+            description: tx.description,
+            amount: Number(tx.amount),
+            currency: rowCurrency,
+            fxRate: fxRate ?? undefined,
+            amountHome,
+          },
           glCode ?? undefined,
           tx.category.code,
           companyId
         );
 
-        // Mark transaction as reconciled
+        // Mark transaction as reconciled — freezing the per-row rate.
         await db.transaction.update({
           where: { id: tx.id },
-          data: { status: 'reconciled', matchRef: entry.id },
+          data: {
+            status: 'reconciled',
+            matchRef: entry.id,
+            currency: rowCurrency,
+            fxRate: fxRate,
+            amountHome: amountHome,
+          },
         });
 
         // Update financial account balance
