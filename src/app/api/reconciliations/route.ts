@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { db } from '@/lib/db';
-import { reconcileVerdict, nextLockedThrough } from '@/lib/banking/reconcile-math';
+import { reconcileVerdict } from '@/lib/banking/reconcile-math';
 
 export const dynamic = 'force-dynamic';
 
@@ -148,6 +148,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to open the reconciliation' }, { status: 500 });
   }
 }
-
-// Re-exported helpers used by the close route.
-export { reconcileVerdict, nextLockedThrough };
