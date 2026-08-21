@@ -29,6 +29,7 @@ const typeIcons: Record<string, React.ElementType> = {
   subscription_expiring: CreditCard,
   member_joined: Users,
   system: Bell,
+  import_reminder: Clock,
 };
 
 const typeColors: Record<string, string> = {
@@ -41,6 +42,7 @@ const typeColors: Record<string, string> = {
   subscription_expiring: 'text-[var(--danger)]',
   member_joined: 'text-[var(--success)]',
   system: 'text-[var(--text-muted)]',
+  import_reminder: 'text-[var(--primary)]',
 };
 
 export function NotificationsPanel({

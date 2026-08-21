@@ -216,6 +216,31 @@ export async function auditLog(
 }
 
 /**
+ * Guards bank-row mutations against rows inside a LOCKED reconciliation.
+ * `date <= account.lockedThrough` → 409. Reopening the reconciliation is the
+ * only way to touch locked rows, and it is audit-logged.
+ */
+export async function accountLockedGuard(
+  companyId: string,
+  accountId: string,
+  date: Date
+): Promise<NextResponse | null> {
+  const account = await db.financialAccount.findUnique({
+    where: { id: accountId, companyId },
+    select: { lockedThrough: true },
+  });
+  if (account?.lockedThrough && date <= account.lockedThrough) {
+    return NextResponse.json(
+      {
+        error: `This row falls inside a locked reconciliation (on or before ${account.lockedThrough.toISOString().slice(0, 10)}). Reopen the reconciliation to change it.`,
+      },
+      { status: 409 }
+    );
+  }
+  return null;
+}
+
+/**
  * Guards mutation APIs against edits to closed periods.
  * If the given date falls within any closed period, returns a 409 Conflict response.
  * Returns null if the date is in an open period (mutation allowed).

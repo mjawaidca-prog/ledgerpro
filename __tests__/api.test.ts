@@ -154,3 +154,31 @@ describe('Consolidated Reports', () => {
     await blocked('/api/settings/exchange-rates');
   });
 });
+
+describe('Banking Overhaul', () => {
+  async function blocked(path: string) {
+    const res = await fetch(`${BASE}${path}`, { redirect: 'manual' });
+    expect([307, 401, 403]).toContain(res.status);
+  }
+
+  test('GET /api/import-presets without auth is blocked', async () => {
+    await blocked('/api/import-presets');
+  });
+
+  test('GET /api/bank-rules without auth is blocked', async () => {
+    await blocked('/api/bank-rules');
+  });
+
+  test('GET /api/reconciliations without auth is blocked', async () => {
+    await blocked('/api/reconciliations?accountId=x');
+  });
+
+  test('GET /api/import-reminders/check without CRON_SECRET returns 401', async () => {
+    const res = await fetch(`${BASE}/api/import-reminders/check`, { redirect: 'manual' });
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /api/imports without auth is blocked', async () => {
+    await blocked('/api/imports');
+  });
+});

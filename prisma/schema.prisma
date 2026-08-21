@@ -78,6 +78,11 @@ model Company {
   relatedPartyLinksB  RelatedPartyLink[]    @relation("RPLinkB")
   fxRevaluations      FxRevaluation[]
   fxFeedStatus        FxFeedStatus?
+  importPresets       ImportPreset[]
+  statementImports    StatementImport[]
+  bankRules           BankRule[]
+  reconciliations     Reconciliation[]
+  importReminder      ImportReminder?
 }
 
 enum BusinessType {
@@ -251,7 +256,10 @@ model FinancialAccount {
   name           String
   mask           String?
   kind           AccountKind
+  institution     BankInstitution @default(OTHER)
   currency       String       @default("CAD") // a USD bank account keeps USD
+  lastImportAt   DateTime?    // drives "Import overdue" and the step-1 overlap note
+  lockedThrough  DateTime?    // monotonic per-account reconciliation lock
   currentBalance Decimal      @default(0) @db.Decimal(14, 2)
   glAccountCode  String?      // e.g. "1010" — manual reference to ChartOfAccount.code
 
@@ -269,6 +277,8 @@ model FinancialAccount {
 
   transactions   Transaction[]  @relation("TxAccount")
   imports        ImportBatch[]
+  statementImports StatementImport[]
+  reconciliations  Reconciliation[]
   bills          Bill[]         @relation("BillPaymentAccount")
   columnMappings ColumnMapping[]
   invoicePayments Invoice[]     @relation("InvoicePaymentAccount")
@@ -346,6 +356,26 @@ model Transaction {
   fxRate             Decimal?      @db.Decimal(18, 8) // frozen per-row rate (home per 1 foreign)
   amountHome         Decimal?      @db.Decimal(14, 2) // frozen home-currency value
 
+  // ── Banking overhaul: statement rows, matching, reconciliation ──
+  statementImportId String?       // new import log
+  statementImport    StatementImport? @relation(fields: [statementImportId], references: [id])
+  dedupeHash         String?       // sha1(date|amount|normalized description) — OFX FITID wins
+  payeeGuess         String?
+  contactId          String?       // matched contact
+  contact            Contact?      @relation(fields: [contactId], references: [id])
+  memo               String?
+  reference          String?       // cheque no / OFX FITID
+  statementBalance   Decimal?      @db.Decimal(14, 2)
+  taxCode            String?
+  taxRate            Decimal?      @db.Decimal(5, 3)
+  taxAmount          Decimal?      @db.Decimal(14, 2)
+  splits             Json?         // [{ categoryCode, amount, taxCode, taxRate, taxAmount, memo }]
+  matchedDocs        Json?         // [{ type: 'invoice'|'bill', id, amount }]
+  appliedRuleId      String?       // BankRule that categorized this row
+  appliedRule        BankRule?     @relation(fields: [appliedRuleId], references: [id])
+  reconciledInId     String?       // reconciliation membership (tick state)
+  reconciliation     Reconciliation? @relation(fields: [reconciledInId], references: [id])
+
   categoryId         String?
   category           ChartOfAccount? @relation("TransactionCategory", fields: [categoryId], references: [id])
   suggestedCategoryId String?
@@ -373,6 +403,7 @@ model Transaction {
   @@index([status])
   @@index([categoryId])
   @@index([importBatchId])
+  @@index([financialAccountId, dedupeHash])
 }
 
 enum TxStatus {
@@ -446,6 +477,8 @@ model Contact {
 
   @@index([companyId, type])
   @@index([companyId, status])
+  bankTransactions Transaction[]
+  bankRules        BankRule[]
 }
 
 enum ContactType {
@@ -834,6 +867,7 @@ enum NotificationType {
   subscription_expiring
   member_joined
   system
+  import_reminder
 }
 
 // ─── CANADIAN TAX RATES ──────────────────────────────────────
@@ -1101,4 +1135,170 @@ model FxFeedStatus {
   lastResults         Json?     // { pairsPulled, missingPairs } — drives the partial-set copy
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+}
+
+
+// ─── BANKING OVERHAUL — PRESETS, IMPORTS, RULES, RECONCILIATION ──
+
+enum BankInstitution {
+  RBC
+  TD
+  BMO
+  SCOTIA
+  CIBC
+  DESJARDINS
+  NBC
+  TANGERINE
+  EQ
+  OTHER
+}
+
+enum PresetDateFormat {
+  MDY
+  MM_DD_YYYY
+  YYYY_MM_DD
+  YYYYMMDD
+  DD_MM_YYYY
+}
+
+enum PresetAmountMode {
+  signed
+  debit_credit
+}
+
+model ImportPreset {
+  id              String            @id @default(cuid())
+  companyId       String?           // null = system seed
+  company         Company?          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  institution     BankInstitution
+  label           String            // "RBC Royal Bank"
+  fileTypes       String[]          // ["csv"] | ["ofx","qfx"]
+  hasHeader       Boolean           @default(true)   // CIBC ships headerless CSV
+  dateFormat      PresetDateFormat
+  amountMode      PresetAmountMode
+  columnMap       Json              // { "Transaction Date": "date", ... } — "Column N" keys for headerless
+  headerSignature String?
+  isSystem        Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  imports         StatementImport[]
+
+  @@index([institution, isSystem])
+}
+
+enum StatementImportStatus {
+  imported
+  partial
+  all_duplicates
+  failed
+}
+
+model StatementImport {
+  id                   String   @id @default(cuid())
+  companyId            String
+  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  financialAccountId   String
+  account              FinancialAccount @relation(fields: [financialAccountId], references: [id])
+  fileName             String
+  fileSize             Int
+  fileType             TxSource
+  presetId             String?
+  preset               ImportPreset? @relation(fields: [presetId], references: [id])
+  mappingJson          Json?
+  dateRangeStart       DateTime?
+  dateRangeEnd         DateTime?
+  rowsTotal            Int
+  rowsImported         Int
+  rowsSkippedDuplicate Int      @default(0)
+  rowsSkippedLocked    Int      @default(0)
+  rulesApplied         Int      @default(0)
+  status               StatementImportStatus
+  createdById          String?
+  reversibleUntil      DateTime
+  reversedAt           DateTime?
+  reversedBy           String?
+  createdAt            DateTime @default(now())
+  transactions         Transaction[]
+
+  @@index([companyId, financialAccountId, createdAt])
+}
+
+enum RuleOp {
+  contains
+  is
+  starts_with
+}
+
+model BankRule {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name            String
+  order           Int      @default(0)     // ascending, first-match-wins
+  op              RuleOp
+  value           String
+  anyOf           String[] @default([])    // OR values
+  scope           Json                     // { accountIds: string[] | "all", direction: "in"|"out"|"both" }
+  setCategoryCode String?                  // null = "Leave for matching"
+  setTaxCode      String?
+  setTaxRate      Decimal? @db.Decimal(5, 3)
+  setTaxInclusive Boolean  @default(true)
+  setContactId    String?
+  contact         Contact? @relation(fields: [setContactId], references: [id])
+  autoPost        Boolean  @default(false)
+  appliedCount    Int      @default(0)
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  transactions    Transaction[]
+
+  @@index([companyId, order])
+}
+
+enum ReconciliationState {
+  open
+  locked
+  closed_with_variance
+}
+
+model Reconciliation {
+  id                     String   @id @default(cuid())
+  companyId              String
+  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  financialAccountId     String
+  account                FinancialAccount @relation(fields: [financialAccountId], references: [id])
+  periodStart            DateTime
+  periodEnd              DateTime
+  statementClosingBalance Decimal @db.Decimal(14, 2)
+  ledgerBalance          Decimal? @db.Decimal(14, 2)  // frozen at close
+  difference             Decimal? @db.Decimal(14, 2)
+  unrecordedItems        Json?                         // [{ description, amount }]
+  state                  ReconciliationState @default(open)
+  closedBy               String?
+  closedAt               DateTime?
+  varianceReason         String?
+  transactions           Transaction[]
+  createdAt              DateTime @default(now())
+
+  @@index([companyId, financialAccountId, state])
+}
+
+enum ReminderCadence {
+  monthly
+  semimonthly
+  weekly
+}
+
+model ImportReminder {
+  id         String   @id @default(cuid())
+  companyId  String   @unique
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  accountIds String[] @default([])      // empty = all accounts
+  cadence    ReminderCadence @default(monthly)
+  dayOfMonth Int?
+  dayOfWeek  Int?
+  nextRunAt  DateTime
+  channel    String[] @default(["in_app"])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }

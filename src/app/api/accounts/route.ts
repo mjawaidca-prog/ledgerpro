@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const body = await req.json();
-    const { name, kind, mask, glAccountCode, displayColor, logoInitials } = body;
+    const { name, kind, mask, glAccountCode, displayColor, logoInitials, currency, institution } = body;
 
     if (!name || !kind) {
       return NextResponse.json({ error: 'Name and kind are required' }, { status: 400 });
@@ -75,6 +75,8 @@ export async function POST(req: NextRequest) {
         name,
         kind,
         mask: mask || null,
+        currency: currency || 'CAD',
+        institution: institution || 'OTHER',
         glAccountCode: resolvedGlAccountCode || null,
         displayColor: displayColor || '#1f6feb',
         logoInitials: logoInitials || name.slice(0, 2).toUpperCase(),

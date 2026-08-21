@@ -16,6 +16,7 @@ import { format } from 'date-fns';
 import {
   Building2, CreditCard, Plus, Upload, Search, Check, X, ArrowRightLeft, FileText,
   Loader2, ChevronDown, FileUp, AlertTriangle, MoreHorizontal, Trash2, Scale,
+  Settings2, Clock,
 } from 'lucide-react';
 
 // ─── Types ───
@@ -26,12 +27,16 @@ interface FinancialAccount {
   mask: string | null;
   kind: 'checking' | 'savings' | 'creditcard' | 'payoutclearing';
   currency?: string;
+  institution?: string;
   currentBalance: number;
   glAccountCode: string | null;
   syncStatus: string;
   displayColor: string | null;
   logoInitials: string | null;
   pendingReviewCount: number;
+  lastImportAt?: string | null;
+  lockedThrough?: string | null;
+  overdue?: boolean;
 }
 
 interface ChartAccount {
@@ -344,6 +349,13 @@ export default function BankingPage() {
   const [txLoading, setTxLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'danger' } | null>(null);
+  // Banking-overhaul state
+  const [recentImports, setRecentImports] = useState<{ id: string; date: string; fileName: string; accountName: string; rows: number; skipped: number; status: string }[]>([]);
+  const [reminder, setReminder] = useState<{ cadence: string; dayOfMonth: number | null; dayOfWeek: number | null; accountIds: string[]; nextRunAt: string } | null>(null);
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [newAcct, setNewAcct] = useState({ name: '', kind: 'checking', currency: 'CAD', institution: 'OTHER' });
+  const [addingAccount, setAddingAccount] = useState(false);
 
   // Filters
   const [selectedAccountId, setSelectedAccountId] = useState<string>('all');
@@ -520,6 +532,16 @@ export default function BankingPage() {
       setError(null);
       const list = Array.isArray(json.data) ? json.data : [];
       setAccounts(list);
+
+      // Recent imports + reminder for the overhaul surfaces.
+      fetchWithTenantHeaders('/api/imports?limit=5')
+        .then((r) => r.json())
+        .then((j) => setRecentImports(j.data ?? []))
+        .catch(() => {});
+      fetchWithTenantHeaders('/api/import-reminders')
+        .then((r) => r.json())
+        .then((j) => setReminder(j.data ?? null))
+        .catch(() => {});
       // Deep-link: /banking?account=1015 resolves by GL code OR account id.
       const qAccount = new URLSearchParams(window.location.search).get('account');
       if (qAccount) {
@@ -1333,6 +1355,8 @@ export default function BankingPage() {
     );
   }
 
+  const reminderText = reminder?.nextRunAt ? format(new Date(reminder.nextRunAt), 'MMM d, yyyy') : '';
+
   return (
     <AppShell>
       {/* Header */}
@@ -1343,15 +1367,21 @@ export default function BankingPage() {
         </div>
         <div className="spacer" />
         <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => router.push('/banking/reconcile')}>
-            <Scale size={16} /> Reconcile
+          <Button variant="ghost" onClick={() => router.push('/banking/rules')}>
+            <Settings2 size={16} /> Manage rules
           </Button>
           <Button variant="ghost" onClick={postToGL} disabled={postingGL}>
             {postingGL ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
             Post to GL
           </Button>
-          <Button onClick={openWizard}>
-            <Upload size={16} /> Import Statement
+          <Button
+            onClick={() => {
+              const target = selectedAccountId !== 'all' ? selectedAccountId : accounts[0]?.id;
+              if (target) router.push(`/banking/${target}/import`);
+            }}
+            disabled={accounts.length === 0}
+          >
+            <Upload size={16} /> Import a statement
           </Button>
         </div>
       </div>
@@ -1362,47 +1392,78 @@ export default function BankingPage() {
         </Alert>
       )}
 
+      {/* No-feed notice */}
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5 mb-5 max-w-[900px]">
+        <div className="flex items-start gap-3">
+          <span className="w-[7px] h-[7px] rounded-full bg-[var(--warning)] flex-none mt-1.5" />
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-[var(--text-strong)]">There is no live feed from Canadian banks</div>
+            <div className="text-[13px] text-[var(--text-muted)] mt-1 leading-relaxed">
+              Banking here is import-driven: download a statement from online banking and bring it in as CSV, OFX or QFX. Two things make that painless — a saved preset per bank, so the columns are never mapped twice, and rules that categorize known payees the moment rows land.
+            </div>
+          </div>
+        </div>
+        {reminder && (
+          <div className="mt-3 flex items-center gap-2 text-[12.5px] text-[var(--primary)] border-t border-[var(--border)] pt-3">
+            <Clock size={13} className="flex-none" />
+            <span>
+              Next import reminder: {reminderText} —{' '}
+              {reminder.cadence === 'monthly' ? 'monthly, on the 1st' : reminder.cadence === 'semimonthly' ? 'on the 1st and the 15th' : 'every Monday'}
+              , for {reminder.accountIds.length === 0 ? 'all accounts' : 'selected accounts'}.
+            </span>
+            <button onClick={() => setReminderOpen(true)} className="underline hover:text-[var(--primary-hover)] transition-colors">Edit schedule</button>
+          </div>
+        )}
+      </div>
+
       {/* Account cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-6 max-[900px]:grid-cols-1">
         {accounts.map((acct) => (
-          <button
+          <div
             key={acct.id}
             onClick={() => setSelectedAccountId(acct.id)}
             className={cn(
-              'text-left bg-[var(--surface)] border rounded-2xl p-5 shadow-[var(--shadow-sm)] transition-all',
+              'text-left bg-[var(--surface)] border rounded-2xl p-5 shadow-[var(--shadow-sm)] transition-all cursor-pointer',
               'hover:shadow-[var(--shadow-md)] hover:border-[var(--border-strong)]',
-              selectedAccountId === acct.id
-                ? 'border-[var(--border-focus)] ring-1 ring-[var(--ring)]'
-                : 'border-[var(--border)]'
+              selectedAccountId === acct.id ? 'border-[var(--border-focus)]' : 'border-[var(--border)]'
             )}
           >
             <div className="flex items-center gap-3 mb-3">
               <div
-                className="w-[36px] h-[36px] rounded-lg grid place-items-center text-white"
+                className="w-[34px] h-[34px] rounded-lg grid place-items-center text-white font-mono text-[11px] font-bold"
                 style={{ background: accountColor(acct.kind, acct.displayColor) }}
               >
-                {accountIcon(acct.kind)}
+                {acct.institution && acct.institution !== 'OTHER' ? acct.institution.slice(0, 3) : acct.logoInitials || acct.name.slice(0, 2)}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-[var(--text-strong)] truncate">
-                  {acct.name}
-                </div>
+                <div className="text-sm font-semibold text-[var(--text-strong)] truncate">{acct.name}</div>
                 <div className="text-xs text-[var(--text-muted)] font-mono">
-                  {acct.kind.replace('_', ' ')} {acct.mask && `· ••${acct.mask}`}
+                  {acct.glAccountCode} · {acct.mask ? `••${acct.mask} · ` : ''}{acct.currency ?? 'CAD'}
                 </div>
               </div>
-            </div>
-            <div className="font-mono tabular-nums text-xl font-semibold text-[var(--text-strong)]">
-              {money(acct.currentBalance)}
-            </div>
-            {acct.pendingReviewCount > 0 && (
-              <div className="mt-2">
-                <Badge variant="pending">{acct.pendingReviewCount} to review</Badge>
+              <div className="text-right">
+                <div className="font-mono tabular-nums text-base font-semibold text-[var(--text-strong)]">
+                  {money(acct.currentBalance)}
+                </div>
+                {acct.currency && acct.currency !== homeCurrency && (
+                  <div className="font-mono text-[10.5px] text-[var(--text-faint)]">{acct.currency} · fx</div>
+                )}
               </div>
-            )}
-            <div className="mt-2 flex items-center gap-3">
+            </div>
+            <div className="flex items-center gap-3 mt-2">
+              {acct.overdue ? (
+                <Badge variant="overdue">Import overdue</Badge>
+              ) : acct.pendingReviewCount > 0 ? (
+                <Badge variant="pending">{acct.pendingReviewCount} to review</Badge>
+              ) : (
+                <Badge variant="paid">Up to date</Badge>
+              )}
+              <span className="text-xs text-[var(--text-muted)] font-mono">
+                {acct.lastImportAt ? `Imported ${format(new Date(acct.lastImportAt), 'MMM d')}` : 'No imports yet'}
+              </span>
+              <div className="flex-1" />
               <button
-                onClick={(e) => { e.stopPropagation(); router.push(`/banking/reconcile?accountId=${acct.id}`); }}
+                onClick={(e) => { e.stopPropagation(); router.push(`/banking/${acct.id}/reconcile`); }}
                 className="text-xs text-[var(--text-muted)] hover:text-[var(--primary)] font-medium"
               >
                 Reconcile
@@ -1411,21 +1472,58 @@ export default function BankingPage() {
                 onClick={(e) => { e.stopPropagation(); setOpeningAcctId(acct.id); setOpeningAmount(''); }}
                 className="text-xs text-[var(--text-muted)] hover:text-[var(--primary)] font-medium"
               >
-                Set Opening Balance
+                Opening balance
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); router.push(`/banking/${acct.id}/import`); }}
+                className="text-xs text-[var(--primary)] font-medium hover:text-[var(--primary-hover)]"
+              >
+                Import
               </button>
             </div>
-          </button>
+          </div>
         ))}
 
-        {/* Connect account card */}
+        {/* Add account card */}
         <button
-          onClick={openWizard}
-          className="text-left bg-[var(--surface)] border border-dashed border-[var(--border-strong)] rounded-2xl p-5 flex flex-col items-center justify-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:border-[var(--text-faint)] transition-colors min-h-[140px]"
+          onClick={() => setAddAccountOpen(true)}
+          className="text-left bg-[var(--surface)] border border-dashed border-[var(--border-strong)] rounded-2xl p-5 flex flex-col items-center justify-center gap-2 text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:border-[var(--text-faint)] transition-colors min-h-[110px]"
         >
           <Plus size={24} />
-          <span className="text-sm font-medium">Connect Account</span>
-          <span className="text-xs">or import a statement</span>
+          <span className="text-sm font-medium">Add bank account</span>
         </button>
+      </div>
+
+      {/* Recent imports */}
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] overflow-hidden mb-6">
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]">
+          <h3 className="text-sm font-semibold text-[var(--text-strong)]">Recent imports</h3>
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-[var(--text-faint)]">last 30 days</span>
+        </div>
+        {recentImports.length === 0 ? (
+          <div className="px-5 py-6 text-center text-sm text-[var(--text-muted)]">No imports yet — download a statement and bring it in.</div>
+        ) : (
+          <div className="divide-y divide-[var(--border)]">
+            {recentImports.map((imp) => (
+              <div key={imp.id} className="flex items-center gap-3 px-5 py-2.5 text-[13px]">
+                <span className="font-mono text-[var(--text)] w-[96px]">{imp.date}</span>
+                <span className="flex-1 font-mono text-[12.5px] text-[var(--text-strong)] truncate">{imp.fileName}</span>
+                <span className="w-[160px] text-[var(--text-muted)] truncate">{imp.accountName}</span>
+                <span className="w-[64px] text-right font-mono tabular-nums text-[var(--text)]">{imp.rows}</span>
+                <span className={cn('w-[78px] text-right font-mono tabular-nums', imp.skipped > 0 ? 'text-[var(--warning)]' : 'text-[var(--text-faint)]')}>
+                  {imp.skipped > 0 ? imp.skipped : '—'}
+                </span>
+                <span className="w-[120px] text-right">
+                  {imp.status === 'all_duplicates' ? (
+                    <Badge variant="overdue">All duplicates</Badge>
+                  ) : (
+                    <Badge variant="paid">Imported</Badge>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Opening Balance Form */}
@@ -1712,709 +1810,113 @@ export default function BankingPage() {
         </div>
       )}
 
-      {/* ─── Import Wizard Modal ─── */}
-      {wizardOpen && (
-        <>
-          <div className="fixed inset-0 z-90 bg-black/40 backdrop-blur-sm" onClick={closeWizard} />
-
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-100 w-full max-w-[800px] max-h-[85vh] overflow-y-auto bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)]">
-            {/* Header */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-[var(--surface)] z-10">
-              <h2 className="t-h3 flex-1">Import Statement</h2>
-              <div className="flex items-center gap-2">
-                <span className={cn(
-                  'w-8 h-8 rounded-full grid place-items-center text-xs font-bold',
-                  wizardStep === 'account' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
-                )}>1</span>
-                <span className="w-4 h-px bg-[var(--border)]" />
-                <span className={cn(
-                  'w-8 h-8 rounded-full grid place-items-center text-xs font-bold',
-                  wizardStep === 'upload' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
-                )}>2</span>
-                <span className="w-4 h-px bg-[var(--border)]" />
-                <span className={cn(
-                  'w-8 h-8 rounded-full grid place-items-center text-xs font-bold',
-                  (wizardStep === 'map' || wizardStep === 'review') ? 'bg-[var(--primary)] text-white' : 'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
-                )}>3</span>
-              </div>
-              <button onClick={closeWizard}
-                className="w-8 h-8 grid place-items-center rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-strong)]">
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Step 1 — Select Account from Chart of Accounts */}
-            {wizardStep === 'account' && (
-              <div className="p-5 space-y-4">
-                {!hasSelectedCompany && (
-                  <Alert variant="danger">
-                    Select a company first. The importer cannot create bank accounts or save transactions until the app has an active company.
-                  </Alert>
-                )}
-
-                <div className="text-sm text-[var(--text-muted)]">
-                  Choose the account this statement belongs to.
-                </div>
-
-                {/* Importable Chart of Accounts */}
-                <div className="field">
-                  <label className="text-sm font-medium text-[var(--text-strong)]">
-                    Select account from Chart of Accounts
-                  </label>
-                  {importableCoaAccounts.length === 0 ? (
-                    <div className="text-sm text-[var(--text-muted)] mt-2">
-                      No bank or credit card accounts found in your Chart of Accounts.
-                      Set up accounts in Chart of Accounts first (e.g. 1010 - Business Checking, 2110 - Business Credit Card).
-                    </div>
-                  ) : (
-                    <div className="mt-2 space-y-1 max-h-[240px] overflow-y-auto border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
-                      {importableCoaAccounts.map((coa) => {
-                        const isSelected = wizardCoaAccountId === coa.id;
-                        const linked = accounts.find((a) => a.glAccountCode === coa.code);
-                        return (
-                          <button
-                            key={coa.id}
-                            onClick={() => handleCoaAccountSelect(coa.id)}
-                            className={cn(
-                              'w-full text-left px-4 py-3 transition-colors hover:bg-[var(--surface-2)]',
-                              isSelected && 'bg-[var(--primary-soft)] border-l-2 border-l-[var(--primary)]'
-                            )}
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className={cn(
-                                'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0',
-                                isSelected ? 'border-[var(--primary)]' : 'border-[var(--border-strong)]'
-                              )}>
-                                {isSelected && <span className="w-2.5 h-2.5 rounded-full bg-[var(--primary)]" />}
-                              </span>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-semibold text-[var(--text-strong)]">
-                                  {coa.code} — {coa.name}
-                                </div>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <Badge variant={coa.type === 'asset' ? 'info' : 'pending'}>
-                                    {coa.type === 'asset' ? 'Bank / Cash' : 'Credit Card'}
-                                  </Badge>
-                                  <span className="text-xs text-[var(--text-muted)] font-mono">
-                                    {money(coa.balance ?? 0)}
-                                  </span>
-                                  {linked && (
-                                    <span className="text-xs text-[var(--success)]">
-                                      ✓ Linked to {linked.name}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              <ChevronDown size={16} className={cn(
-                                'text-[var(--text-faint)] transition-transform',
-                                isSelected && 'rotate-180'
-                              )} />
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* If a COA account is selected and linked, show it */}
-                {wizardCoaAccountId && linkedFinancialAccount && (
-                  <div className="bg-[var(--success-soft)] border border-[var(--success)]/20 rounded-lg p-3 text-sm">
-                    <span className="font-medium">Linked account:</span> {linkedFinancialAccount.name}
-                    {' '}({linkedFinancialAccount.kind}) · Balance: {money(linkedFinancialAccount.currentBalance)}
-                  </div>
-                )}
-
-                {/* If COA selected but NOT linked, offer to create one */}
-                {wizardCoaAccountId && !linkedFinancialAccount && !wizardFinancialAccountId && (
-                  <Alert variant="warning">
-                    <div className="space-y-3">
-                      <div className="text-sm">
-                        No bank account is linked to {selectedCoaAccount?.code} — {selectedCoaAccount?.name}.
-                        Create one now.
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="field">
-                          <label>Account name</label>
-                          <input
-                            className="input"
-                            value={wizardNewAccountName}
-                            onChange={(e) => setWizardNewAccountName(e.target.value)}
-                            placeholder={selectedCoaAccount?.name || 'Account name'}
-                          />
-                        </div>
-                        <div className="field">
-                          <label>Account type</label>
-                          <select
-                            className="select"
-                            value={wizardNewAccountKind}
-                            onChange={(e) => setWizardNewAccountKind(e.target.value as FinancialAccount['kind'])}
-                          >
-                            {wizardImportType === 'credit_card' ? (
-                              <option value="creditcard">Credit card</option>
-                            ) : (
-                              <>
-                                <option value="checking">Checking</option>
-                                <option value="savings">Savings</option>
-                              </>
-                            )}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="flex justify-end">
-                        <Button onClick={createWizardFinancialAccount} disabled={wizardCreatingAccount || !hasSelectedCompany}>
-                          {wizardCreatingAccount ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                          Create account
-                        </Button>
-                      </div>
-                    </div>
-                  </Alert>
-                )}
-
-                <div className="flex gap-3 pt-4 border-t border-[var(--border)]">
-                  <Button variant="secondary" onClick={closeWizard}>
-                    Cancel
-                  </Button>
-                  <div className="flex-1" />
-                  <Button onClick={handleContinueToUpload} disabled={!wizardCoaAccountId}>
-                    Continue
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2 — Upload Statement */}
-            {wizardStep === 'upload' && (
-              <div className="p-5 space-y-4">
-                {/* Selected account info */}
-                {selectedCoaAccount && (
-                  <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3 text-sm">
-                    <span className="text-[var(--text-muted)]">Importing into:</span>{' '}
-                    <span className="font-semibold text-[var(--text-strong)]">
-                      {selectedCoaAccount.code} — {selectedCoaAccount.name}
-                    </span>
-                    <Badge variant={wizardImportType === 'credit_card' ? 'pending' : 'info'} className="ml-2">
-                      {wizardImportType === 'credit_card' ? 'Credit Card' : 'Bank'}
-                    </Badge>
-                  </div>
-                )}
-
-                <div className="text-sm text-[var(--text-muted)]">
-                  Upload your statement file. Supported formats: CSV, OFX, QFX, PDF.
-                </div>
-
-                {/* Drop zone */}
-                <div
-                  className={cn(
-                    'border-2 border-dashed border-[var(--border-strong)] rounded-xl p-10 text-center transition-colors',
-                    hasSelectedCompany
-                      ? 'hover:border-[var(--border-focus)] hover:bg-[var(--surface-2)] cursor-pointer'
-                      : 'opacity-60 cursor-not-allowed'
-                  )}
-                  onDragOver={(e) => { e.preventDefault(); }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    if (!hasSelectedCompany) {
-                      setToast({ message: 'Select a company before uploading.', type: 'danger' });
-                      return;
-                    }
-                    if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
-                  }}
-                  onClick={() => {
-                    if (!hasSelectedCompany) {
-                      setToast({ message: 'Select a company before uploading.', type: 'danger' });
-                      return;
-                    }
-                    const input = document.getElementById('wizard-file-input') as HTMLInputElement;
-                    input?.click();
-                  }}
-                >
-                  <FileUp size={40} className="mx-auto text-[var(--text-faint)] mb-3" />
-                  <div className="text-sm font-semibold text-[var(--text-strong)] mb-1">
-                    Drop statement files here
-                  </div>
-                  <div className="text-xs text-[var(--text-muted)]">
-                    CSV, OFX, QFX, or PDF — up to 12 files, 10 MB each
-                  </div>
-                  {wizardFiles.length > 0 && (
-                    <div className="text-xs text-[var(--primary)] mt-2 font-medium">
-                      {wizardFiles.length} file{wizardFiles.length !== 1 ? 's' : ''} selected
-                    </div>
-                  )}
-                  <input
-                    id="wizard-file-input"
-                    type="file"
-                    accept=".csv,.ofx,.qfx,.txt,.pdf"
-                    className="hidden"
-                    multiple
-                    disabled={!hasSelectedCompany}
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) handleFiles(e.target.files);
-                    }}
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-4 border-t border-[var(--border)]">
-                  <Button variant="secondary" onClick={() => setWizardStep('account')}>
-                    Back
-                  </Button>
-                  <div className="flex-1" />
-                </div>
-              </div>
-            )}
-
-            {/* Step 3 — Map Columns & Preview */}
-            {wizardStep === 'map' && wizardParsed && (
-              <div className="p-5 space-y-4">
-                {/* File info bar */}
-                <div className="flex items-center gap-3 text-sm flex-wrap">
-                  <Badge variant="info">{wizardParsed.fileType?.toUpperCase()}</Badge>
-                  <span className="text-[var(--text-muted)]">
-                    {wizardParsed.totalRows} rows · {wizardParsed.headers.length} columns
-                  </span>
-                  {wizardFiles.length > 0 && (
-                    <span className="text-[var(--text-muted)] text-xs truncate max-w-[250px]">
-                      {wizardFiles.map(f => f.name).join(', ')}
-                    </span>
-                  )}
-                </div>
-
-                {/* Saved mapping banner */}
-                {wizardSavedMapping && (
-                  <Alert variant="info">
-                    <div className="flex items-center gap-2">
-                      <Check size={16} />
-                      <span>
-                        Saved mapping applied from {wizardSavedMapping.profileName || 'previous import'}.
-                        You can adjust the mapping below before importing.
-                      </span>
-                    </div>
-                  </Alert>
-                )}
-
-                {wizardPdfAmbiguousSign && (
-                  <Alert variant="warning">
-                    This file's amounts don't have distinguishing signs or separate debit/credit columns —
-                    LedgerPro can't reliably tell debits from credits for it. Check the column mapping below
-                    against the sample values, and carefully verify each transaction in the review step before importing.
-                  </Alert>
-                )}
-
-                <div className="text-sm text-[var(--text-muted)]">
-                  Select how each statement column should be used.
-                </div>
-
-                {/* A. Original Statement Preview with "Treat as" dropdowns above each column */}
-                <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg overflow-hidden">
-                  <div className="px-4 py-2 border-b border-[var(--border)] flex items-center gap-2">
-                    <FileText size={14} className="text-[var(--text-muted)]" />
-                    <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                      Original Statement Preview
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-[var(--border)]">
-                          {wizardParsed.headers.map((header: string) => (
-                            <th key={header} className="px-2 py-1 align-top">
-                              <div className="text-[var(--text-faint)] text-[10px] mb-1 truncate max-w-[140px]" title={header}>
-                                {header}
-                              </div>
-                              <select
-                                className="w-full h-[28px] px-1 text-[11px] rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)]"
-                                value={wizardMappings[header] || 'ignore'}
-                                onChange={(e) =>
-                                  setWizardMappings({ ...wizardMappings, [header]: e.target.value })
-                                }
-                              >
-                                {availableRoles.map((role) => (
-                                  <option key={role.value} value={role.value} title={role.help}>
-                                    {role.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {wizardParsed.rows.slice(0, 5).map((row: any, ri: number) => (
-                          <tr key={ri} className="border-b border-[var(--border)] last:border-0">
-                            {wizardParsed.headers.map((header: string) => (
-                              <td key={header} className="px-2 py-1.5 text-[var(--text)] whitespace-nowrap max-w-[140px] truncate font-mono text-[11px]">
-                                {row.raw?.[header] ?? row[header] ?? ''}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* B. Normalized Import Preview */}
-                {(() => {
-                  const dateCol = Object.entries(wizardMappings).find(([, r]) => r === 'date')?.[0];
-                  const descCol = Object.entries(wizardMappings).find(([, r]) => r === 'description')?.[0];
-                  const moneyOutCol = Object.entries(wizardMappings).find(([, r]) => r === 'money_out')?.[0];
-                  const moneyInCol = Object.entries(wizardMappings).find(([, r]) => r === 'money_in')?.[0];
-                  const chargeCol = Object.entries(wizardMappings).find(([, r]) => r === 'card_charge')?.[0];
-                  const paymentCol = Object.entries(wizardMappings).find(([, r]) => r === 'card_payment')?.[0];
-                  const signedAmtCol = Object.entries(wizardMappings).find(([, r]) => r === 'signed_amount')?.[0];
-                  const balCol = Object.entries(wizardMappings).find(([, r]) => r === 'balance')?.[0];
-                  const refCol = Object.entries(wizardMappings).find(([, r]) => r === 'reference')?.[0];
-                  const isCC = wizardImportType === 'credit_card';
-                  const normCols = normalizedPreviewColumns(wizardImportType);
-
-                  const previewRows = wizardParsed.rows.slice(0, 5).map((row: any) => {
-                    let amt = 0;
-                    let rawMoneyOut: number | undefined;
-                    let rawMoneyIn: number | undefined;
-                    let rawCharge: number | undefined;
-                    let rawPayment: number | undefined;
-
-                    // Parse individual column values first
-                    if (moneyOutCol && row.raw[moneyOutCol] !== undefined) {
-                      rawMoneyOut = parseFloat(String(row.raw[moneyOutCol]).replace(/[$,]/g, '')) || 0;
-                    }
-                    if (moneyInCol && row.raw[moneyInCol] !== undefined) {
-                      rawMoneyIn = parseFloat(String(row.raw[moneyInCol]).replace(/[$,]/g, '')) || 0;
-                    }
-                    if (chargeCol && row.raw[chargeCol] !== undefined) {
-                      rawCharge = parseFloat(String(row.raw[chargeCol]).replace(/[$,]/g, '')) || 0;
-                    }
-                    if (paymentCol && row.raw[paymentCol] !== undefined) {
-                      rawPayment = parseFloat(String(row.raw[paymentCol]).replace(/[$,]/g, '')) || 0;
-                    }
-
-                    // Compute net amount in the same way confirmImport does
-                    if (signedAmtCol && row.raw[signedAmtCol]) {
-                      amt = parseFloat(String(row.raw[signedAmtCol]).replace(/[$,]/g, '')) || 0;
-                      if (wizardSignDirection === 'inverted') amt = -amt;
-                    } else if (isCC && rawCharge !== undefined && rawPayment !== undefined) {
-                      amt = rawPayment - rawCharge;
-                    } else if (!isCC && rawMoneyOut !== undefined && rawMoneyIn !== undefined) {
-                      amt = rawMoneyIn - rawMoneyOut;
-                    } else if (rawMoneyOut !== undefined) {
-                      amt = -Math.abs(rawMoneyOut);
-                    } else if (rawCharge !== undefined) {
-                      amt = -Math.abs(rawCharge);
-                    } else if (rawMoneyIn !== undefined) {
-                      amt = Math.abs(rawMoneyIn);
-                    } else if (rawPayment !== undefined) {
-                      amt = Math.abs(rawPayment);
-                    }
-                    if (wizardSignDirection === 'inverted') amt = -amt;
-
-                    return {
-                      date: dateCol ? (row.raw[dateCol] ?? '') : '',
-                      description: descCol ? (row.raw[descCol] ?? '') : '',
-                      amount: amt,
-                      balance: balCol ? parseFloat(String(row.raw[balCol] || '').replace(/[$,]/g, '')) || null : null,
-                      reference: refCol ? (row.raw[refCol] ?? '') : '',
-                    };
-                  });
-
-                  const hasAnyData = previewRows.some((r: any) => r.date || r.description || r.amount !== 0);
-
-                  return (
-                    <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg overflow-hidden">
-                      <div className="px-4 py-2 border-b border-[var(--border)] flex items-center gap-2">
-                        <ArrowRightLeft size={14} className="text-[var(--text-muted)]" />
-                        <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                          Normalized Import Preview
-                        </span>
-                        <span className="text-[10px] text-[var(--text-faint)] ml-auto">
-                          {isCC ? 'Credit Card Labels' : 'Bank Labels'}
-                        </span>
-                      </div>
-                      {hasAnyData ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b border-[var(--border)]">
-                                {normCols.map((col) => (
-                                  <th key={col} className="text-left px-3 py-2 font-mono text-[10px] uppercase text-[var(--text-muted)] whitespace-nowrap">
-                                    {col}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {previewRows.map((row: any, ri: number) => (
-                                <tr key={ri} className="border-b border-[var(--border)] last:border-0">
-                                  <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">{row.date}</td>
-                                  <td className="px-3 py-1.5 text-[11px] truncate max-w-[200px]">{row.description}</td>
-                                  {isCC ? (
-                                    <>
-                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
-                                        {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
-                                      </td>
-                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
-                                        {row.amount > 0 ? money(row.amount) : '—'}
-                                      </td>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
-                                        {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
-                                      </td>
-                                      <td className={cn('px-3 py-1.5 font-mono text-[11px] whitespace-nowrap', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
-                                        {row.amount > 0 ? money(row.amount) : '—'}
-                                      </td>
-                                    </>
-                                  )}
-                                  <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap text-[var(--text-muted)]">
-                                    {row.balance !== null ? money(row.balance) : '—'}
-                                  </td>
-                                  <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap text-[var(--text-muted)]">
-                                    {row.reference || '—'}
-                                  </td>
-                                  <td className="px-3 py-1.5 whitespace-nowrap">
-                                    <Badge variant="pending">Ready</Badge>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <div className="px-4 py-6 text-center text-xs text-[var(--text-muted)]">
-                          Map at least a Date and Description column to see the normalized preview.
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Save mapping checkbox */}
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-[var(--text-strong)]">
-                  <input
-                    type="checkbox"
-                    checked={wizardSaveMapping}
-                    onChange={(e) => setWizardSaveMapping(e.target.checked)}
-                    className="w-4 h-4 rounded border-[var(--border-strong)] text-[var(--primary)] focus:ring-[var(--ring)]"
-                  />
-                  Save this mapping for this account and statement format
-                </label>
-
-                {/* Mapping validation errors */}
-                {mappingValidation.length > 0 && (
-                  <div className="bg-[var(--danger-soft)] border border-[var(--danger)]/20 rounded-lg p-3">
-                    <ul className="list-disc ml-4 text-xs text-[var(--danger)] space-y-0.5">
-                      {mappingValidation.map((msg, i) => (
-                        <li key={i}>{msg}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Sign direction */}
-                <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="field flex-1">
-                      <label className="text-xs">Sign Direction</label>
-                      <Segmented
-                        options={[
-                          { value: 'normal', label: wizardImportType === 'credit_card' ? 'Normal (credit card)' : 'Normal (bank)' },
-                          { value: 'inverted', label: wizardImportType === 'credit_card' ? 'Inverted (bank)' : 'Inverted (credit card)' },
-                        ]}
-                        value={wizardSignDirection}
-                        onChange={(v) => setWizardSignDirection(v as 'normal' | 'inverted')}
-                      />
-                    </div>
-                    <div className="flex-1 text-xs text-[var(--text-muted)] leading-relaxed">
-                      {wizardSignDirection === 'normal' ? (
-                        wizardImportType === 'credit_card' ? (
-                          <span><strong>Credit card (normal):</strong> Charges are positive on statements but are actually money OUT. Sign is flipped so your books show the expense correctly.</span>
-                        ) : (
-                          <span><strong>Bank (normal):</strong> Debits = money out (negative). Credits = money in (positive).</span>
-                        )
-                      ) : (
-                        wizardImportType === 'credit_card' ? (
-                          <span><strong>Inverted (bank-style):</strong> Amounts are treated like a bank statement. Use this if your credit card statement already has charges as negatives.</span>
-                        ) : (
-                          <span><strong>Inverted (credit-card-style):</strong> Signs are reversed. Use this if your bank statement uses the opposite sign convention.</span>
-                        )
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <Button variant="secondary" onClick={() => setWizardStep('upload')}>
-                    Back
-                  </Button>
-                  <div className="flex-1" />
-                  <Button
-                    onClick={generatePreviewFromMappings}
-                    disabled={mappingValidation.some(m => m.includes('Date') || m.includes('Description') || m.includes('least one amount'))}
-                  >
-                    Preview & Continue
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 3b — Review & Confirm */}
-            {wizardStep === 'review' && (
-              <div className="p-5 space-y-4">
-                <div className="flex items-center gap-4 text-sm flex-wrap">
-                  <div className="bg-[var(--success-soft)] px-3 py-2 rounded-lg">
-                    <span className="font-semibold text-[var(--success)]">{wizardParsed?.totalRows}</span>
-                    <span className="text-[var(--text-muted)] ml-1">transactions found</span>
-                  </div>
-                  {wizardPreview.length > 0 && (
-                    <div className="text-[var(--text-muted)]">
-                      Date range: {wizardPreview[0]?.date ?? '—'} — {wizardPreview[wizardPreview.length - 1]?.date ?? '—'}
-                    </div>
-                  )}
-                  <Badge variant="info">{wizardParsed?.fileType?.toUpperCase()}</Badge>
-                  <Badge variant={wizardImportType === 'credit_card' ? 'pending' : 'info'}>
-                    {wizardImportType === 'credit_card' ? 'Credit Card' : 'Bank'}
-                  </Badge>
-                </div>
-
-                {/* Parse warnings */}
-                {wizardParsed?.errors?.length > 0 && (
-                  <Alert variant="warning">
-                    <ul className="list-disc ml-4 text-xs">
-                      {wizardParsed.errors.map((e: string, i: number) => <li key={i}>{e}</li>)}
-                    </ul>
-                  </Alert>
-                )}
-
-                {/* Low confidence flag for PDF */}
-                {wizardParsed?.fileType === 'pdf' && (
-                  <p className="text-xs text-[var(--text-muted)]">
-                    ⚠️ PDF parsing is best-effort. Please review all transactions carefully before importing.
-                  </p>
-                )}
-                {wizardPdfAmbiguousSign && (
-                  <Alert variant="warning">
-                    Debit/credit direction for this file was guessed, not detected — double-check the
-                    amount sign (red = money out, green = money in) on every row below. Go back to fix
-                    the column mapping if any are wrong.
-                  </Alert>
-                )}
-
-                {/* Normalized preview table for final review */}
-                <div className="border border-[var(--border)] rounded-lg overflow-hidden">
-                  <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface-2)]">
-                    <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                      Final Preview — {wizardImportType === 'credit_card' ? 'Credit Card' : 'Bank'} Labels
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-[var(--surface-2)] sticky top-0">
-                          {normalizedPreviewColumns(wizardImportType).map((col) => (
-                            <th key={col} className="text-left px-3 py-2 font-mono text-micro uppercase text-[var(--text-muted)] whitespace-nowrap">
-                              {col}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {wizardPreview.map((row: any, i: number) => {
-                          const isCC = wizardImportType === 'credit_card';
-                          return (
-                            <tr key={i} className="border-t border-[var(--border)]">
-                              <td className="px-3 py-2 font-mono text-xs">{row.date}</td>
-                              <td className="px-3 py-2 text-xs truncate max-w-[200px]">{row.description}</td>
-                              {isCC ? (
-                                <>
-                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
-                                    {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
-                                  </td>
-                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
-                                    {row.amount > 0 ? money(row.amount) : '—'}
-                                  </td>
-                                </>
-                              ) : (
-                                <>
-                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
-                                    {row.amount < 0 ? money(Math.abs(row.amount)) : '—'}
-                                  </td>
-                                  <td className={cn('px-3 py-2 text-right font-mono tabular-nums text-xs', row.amount > 0 ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
-                                    {row.amount > 0 ? money(row.amount) : '—'}
-                                  </td>
-                                </>
-                              )}
-                              <td className="px-3 py-2 text-right font-mono tabular-nums text-xs text-[var(--text-muted)]">
-                                {row.balance !== undefined && row.balance !== null ? money(row.balance) : '—'}
-                              </td>
-                              <td className="px-3 py-2 font-mono text-xs text-[var(--text-muted)]">
-                                {row.reference || '—'}
-                              </td>
-                              <td className="px-3 py-2">
-                                <Badge variant="pending">Ready</Badge>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                        {wizardPreview.length === 0 && (
-                          <tr>
-                            <td colSpan={7} className="px-3 py-8 text-center text-xs text-[var(--text-muted)]">
-                              No preview available. Go back and map your columns.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Save mapping reminder */}
-                {wizardSaveMapping && (
-                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                    <Check size={14} className="text-[var(--success)]" />
-                    Mapping will be saved for this account and applied to future uploads with matching columns.
-                  </div>
-                )}
-
-                <div className="flex gap-3">
-                  <Button variant="secondary" onClick={() => setWizardStep('map')}>
-                    Back
-                  </Button>
-                  <div className="flex-1" />
-                  <div className="flex flex-col items-end gap-2">
-                    {importBlockReason && (
-                      <div className="max-w-[320px] text-xs text-right text-[var(--danger)]">
-                        {importBlockReason}
-                      </div>
-                    )}
-                    <Button onClick={confirmImport} disabled={wizardImporting || Boolean(importBlockReason)}>
-                      {wizardImporting ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <Check size={16} />
-                      )}
-                      Import {wizardParsed?.totalRows} Transactions
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
       {/* Toast */}
       {toast && (
         <div className="toast-stack">
           <div className={cn('toast', toast.type === 'danger' && 'danger')}>
             <span className="t-ico">
-              {toast.type === 'success' ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 9v4M12 17h.01" /><circle cx="12" cy="12" r="10" /></svg>
-              )}
+              {toast.type === 'success'
+                ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 9v4M12 17h.01" /><circle cx="12" cy="12" r="10" /></svg>
+              }
             </span>
             <div className="t-body"><div>{toast.message}</div></div>
             <button className="t-close" onClick={() => setToast(null)}><X size={15} /></button>
+          </div>
+        </div>
+      )}
+
+      {/* Reminder schedule modal */}
+      {reminderOpen && reminder && (
+        <div className="fixed inset-0 z-90 bg-black/40" onClick={() => setReminderOpen(false)}>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-100 w-full max-w-[420px] bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)] p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-[var(--text-strong)] mb-4">Import reminder</h3>
+            <div className="field">
+              <label>Cadence</label>
+              <select
+                className="input"
+                value={reminder.cadence}
+                onChange={(e) => setReminder({ ...reminder, cadence: e.target.value })}
+              >
+                <option value="monthly">Monthly (1st)</option>
+                <option value="semimonthly">Twice monthly (1st & 15th)</option>
+                <option value="weekly">Weekly (Mondays)</option>
+              </select>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <Button
+                onClick={async () => {
+                  await fetchWithTenantHeaders('/api/import-reminders', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cadence: reminder.cadence, dayOfMonth: 1, dayOfWeek: 1, accountIds: [] }),
+                  });
+                  setReminderOpen(false);
+                }}
+              >
+                Save
+              </Button>
+              <Button variant="ghost" onClick={() => setReminderOpen(false)}>Cancel</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add account modal */}
+      {addAccountOpen && (
+        <div className="fixed inset-0 z-90 bg-black/40" onClick={() => setAddAccountOpen(false)}>
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-100 w-full max-w-[420px] bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)] p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-[var(--text-strong)] mb-4">Add bank account</h3>
+            <div className="space-y-3">
+              <div className="field"><label>Name</label><input className="input" value={newAcct.name} onChange={(e) => setNewAcct({ ...newAcct, name: e.target.value })} placeholder="RBC Business Chequing" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="field">
+                  <label>Kind</label>
+                  <select className="input" value={newAcct.kind} onChange={(e) => setNewAcct({ ...newAcct, kind: e.target.value })}>
+                    <option value="checking">Chequing</option>
+                    <option value="savings">Savings</option>
+                    <option value="creditcard">Credit card</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Currency</label>
+                  <select className="input" value={newAcct.currency} onChange={(e) => setNewAcct({ ...newAcct, currency: e.target.value })}>
+                    {['CAD', 'USD', 'EUR', 'GBP'].map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="field">
+                <label>Institution</label>
+                <select className="input" value={newAcct.institution} onChange={(e) => setNewAcct({ ...newAcct, institution: e.target.value })}>
+                  {['OTHER', 'RBC', 'TD', 'BMO', 'SCOTIA', 'CIBC', 'DESJARDINS', 'NBC', 'TANGERINE', 'EQ'].map((i) => <option key={i} value={i}>{i === 'OTHER' ? 'Other' : i}</option>)}
+                </select>
+              </div>
+              <Button
+                disabled={addingAccount || !newAcct.name.trim()}
+                onClick={async () => {
+                  setAddingAccount(true);
+                  try {
+                    const res = await fetchWithTenantHeaders('/api/accounts', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ name: newAcct.name.trim(), kind: newAcct.kind, currency: newAcct.currency, institution: newAcct.institution }),
+                    });
+                    const json = await res.json();
+                    if (!res.ok) throw new Error(json.error || 'Failed');
+                    setAddAccountOpen(false);
+                    setNewAcct({ name: '', kind: 'checking', currency: 'CAD', institution: 'OTHER' });
+                    fetchAccounts();
+                  } catch (err: any) {
+                    setToast({ message: err.message, type: 'danger' });
+                  } finally {
+                    setAddingAccount(false);
+                  }
+                }}
+              >
+                {addingAccount ? <Loader2 size={14} className="animate-spin" /> : null}
+                Add account
+              </Button>
+            </div>
           </div>
         </div>
       )}

@@ -268,7 +268,10 @@ export async function postInvoicePayment(opts: PaymentPostingOptions) {
   return db.$transaction(async (tx) => {
     const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } });
     if (invoice.status === 'void') throw new Error('Cannot pay a voided invoice.');
-    if (!invoice.fxRate) throw new Error('The invoice has no frozen FX rate to settle against.');
+    // CAD documents legitimately have fxRate = null (resolveDocumentFx returns
+    // null for home-currency docs) — the real invariant is: a FOREIGN document
+    // must have a frozen rate.
+    if (invoice.totalHome != null && !invoice.fxRate) throw new Error('The invoice has no frozen FX rate to settle against.');
 
     const remainingForeign = round2(Number(invoice.total) - Number(invoice.paidAmount));
     const remainingHome = round2(Number(invoice.totalHome ?? invoice.total) - Number(invoice.paidAmountHome ?? invoice.paidAmount));
@@ -473,7 +476,7 @@ export async function postBillPayment(opts: PaymentPostingOptions) {
   return db.$transaction(async (tx) => {
     const bill = await tx.bill.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } });
     if (bill.status === 'void') throw new Error('Cannot pay a voided bill.');
-    if (!bill.fxRate) throw new Error('The bill has no frozen FX rate to settle against.');
+    if (bill.totalHome != null && !bill.fxRate) throw new Error('The bill has no frozen FX rate to settle against.');
 
     const remainingForeign = round2(Number(bill.total) - Number(bill.paidAmount));
     const remainingHome = round2(Number(bill.totalHome ?? bill.total) - Number(bill.paidAmountHome ?? bill.paidAmount));

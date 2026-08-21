@@ -443,11 +443,12 @@ function decodeAscii85(input: string): string {
  * Parse CSV content into normalized rows.
  * Handles common bank formats: Chase, Amex, generic.
  */
-export function parseCSV(content: string): ParseResult {
+export function parseCSV(content: string, opts?: { hasHeader?: boolean }): ParseResult {
   const errors: string[] = [];
+  const hasHeader = opts?.hasHeader !== false;
   const lines = content.split('\n').filter((l) => l.trim());
 
-  if (lines.length < 2) {
+  if (lines.length < (hasHeader ? 2 : 1)) {
     return { rows: [], headers: [], errors: ['File has no data rows'], fileType: 'csv' };
   }
 
@@ -455,10 +456,13 @@ export function parseCSV(content: string): ParseResult {
   const firstLine = lines[0];
   const delimiter = firstLine.includes('\t') ? '\t' : ',';
 
-  const headers = parseCSVLine(firstLine, delimiter);
+  const startRow = hasHeader ? 1 : 0;
+  const headers = hasHeader
+    ? parseCSVLine(firstLine, delimiter)
+    : parseCSVLine(firstLine, delimiter).map((_, idx) => `Column ${idx + 1}`);
   const rows: ParsedRow[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = startRow; i < lines.length; i++) {
     try {
       const values = parseCSVLine(lines[i], delimiter);
       if (values.length === 0 || values.every((v) => !v.trim())) continue;
@@ -945,7 +949,8 @@ export async function parsePDF(buffer: Buffer, fileName: string): Promise<ParseR
  */
 export async function parseStatementFile(
   buffer: Buffer,
-  fileName: string
+  fileName: string,
+  opts?: { hasHeader?: boolean }
 ): Promise<ParseResult> {
   const lower = fileName.toLowerCase();
 
@@ -957,7 +962,7 @@ export async function parseStatementFile(
   const content = buffer.toString('utf-8');
 
   if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
-    return parseCSV(content);
+    return parseCSV(content, opts);
   }
 
   if (lower.endsWith('.ofx') || lower.endsWith('.qfx')) {
@@ -970,7 +975,7 @@ export async function parseStatementFile(
   }
 
   // Default: try CSV
-  return parseCSV(content);
+  return parseCSV(content, opts);
 }
 
 /**
