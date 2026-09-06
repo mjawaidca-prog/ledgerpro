@@ -4,15 +4,21 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npx prisma db push --accept-data-loss && npx prisma generate && next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "security:secrets": "node scripts/check-secrets.mjs",
+    "verify": "npm run security:secrets && prisma validate && npm run typecheck && npm run test:unit && npm run build",
     "test": "jest --verbose",
+    "test:unit": "jest --verbose --runInBand --testPathIgnorePatterns=/__tests__/api.test.ts",
+    "test:integration": "jest __tests__/api.test.ts --verbose --runInBand",
     "test:critical": "jest __tests__/critical-flows.test.ts --verbose"
   },
   "dependencies": {

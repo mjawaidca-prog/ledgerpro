@@ -12,7 +12,6 @@ import { format } from 'date-fns';
 import {
   ArrowLeft, Plus, Trash2, Save, Send, Search, X, Loader2, MoreHorizontal, Printer, Mail,
 } from 'lucide-react';
-import { getTaxRate, type Province } from '@/lib/taxes';
 
 interface CustomerOption {
   id: string; name: string; companyName: string | null; email: string | null;
@@ -53,23 +52,11 @@ export default function EditInvoicePage() {
   const [paidAt, setPaidAt] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
 
-  // Fetch categories & company tax rate
+  // Fetch categories. Existing documents retain their saved historical rate.
   useEffect(() => {
     fetch('/api/coa?type=income')
       .then((r) => r.json())
       .then((json) => setCategories(Array.isArray(json.data) ? json.data : []))
-      .catch(() => {});
-    // Fetch company province to default tax rate
-    fetch('/api/companies')
-      .then((r) => r.json())
-      .then((json) => {
-        const companies = json.data || [];
-        const activeId = document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
-        const active = companies.find((c: any) => c.id === activeId) || companies[0];
-        if (active?.province) {
-          setTaxRate(getTaxRate(active.province as Province).totalRate);
-        }
-      })
       .catch(() => {});
   }, []);
 
