@@ -1063,9 +1063,9 @@ model ReportTemplate {
 // ─── CONSOLIDATED REPORTS — FX RATES & SAVED PACKAGES ──────────
 
 enum ExchangeRateType {
-  daily    // per-day spot rate for transactions
   closing  // reporting-only
   average  // reporting-only
+  daily    // per-day spot rate for transactions
 }
 
 enum RateSource {

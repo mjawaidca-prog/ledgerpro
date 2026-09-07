@@ -77,7 +77,7 @@ CREATE TYPE "InterCompanyRole" AS ENUM ('SOURCE', 'MIRROR');
 CREATE TYPE "RulePatternType" AS ENUM ('merchant_match', 'description_contains', 'amount_range', 'regex');
 
 -- CreateEnum
-CREATE TYPE "ExchangeRateType" AS ENUM ('daily', 'closing', 'average');
+CREATE TYPE "ExchangeRateType" AS ENUM ('closing', 'average', 'daily');
 
 -- CreateEnum
 CREATE TYPE "RateSource" AS ENUM ('feed', 'manual');
