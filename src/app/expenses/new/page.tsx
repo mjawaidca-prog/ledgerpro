@@ -58,6 +58,7 @@ function NewBillContent() {
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<LineItem[]>([newLine()]);
   const [taxRate, setTaxRate] = useState(8.5);
+  const [companyProvince, setCompanyProvince] = useState<Province | null>(null);
   const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
   // Inline vendor creation
   const [newVendorName, setNewVendorName] = useState('');
@@ -102,12 +103,18 @@ function NewBillContent() {
         const activeId = document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
         const active = companies.find((c: any) => c.id === activeId) || companies[0];
         if (active?.province) {
-          setTaxRate(getTaxRate(active.province as Province).totalRate);
+          setCompanyProvince(active.province as Province);
         }
         if (active?.currency) setHomeCurrency(active.currency);
       })
       .catch(() => {});
   }, []);
+
+  // Use the rate in force on the bill/expense date. The field remains editable
+  // for special tax treatments and accountant-directed overrides.
+  useEffect(() => {
+    if (companyProvince) setTaxRate(getTaxRate(companyProvince, billDate).totalRate);
+  }, [companyProvince, billDate]);
 
   const filteredVendors = vendors.filter(v =>
     !vendorSearch || v.name.toLowerCase().includes(vendorSearch.toLowerCase()) ||

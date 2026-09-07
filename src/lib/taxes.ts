@@ -6,7 +6,7 @@
 
 export type Province = 'AB' | 'BC' | 'MB' | 'NB' | 'NL' | 'NS' | 'NT' | 'NU' | 'ON' | 'PE' | 'QC' | 'SK' | 'YT';
 
-interface TaxInfo {
+export interface TaxInfo {
   province: Province;
   provinceName: string;
   gst: number;
@@ -16,13 +16,18 @@ interface TaxInfo {
   label: string;
 }
 
-export const CANADIAN_TAX_RATES: Record<Province, TaxInfo> = {
+interface TaxRatePeriod extends TaxInfo {
+  effectiveFrom: string;
+  effectiveTo?: string;
+}
+
+const CURRENT_CANADIAN_TAX_RATES: Record<Province, TaxInfo> = {
   AB: { province: 'AB', provinceName: 'Alberta',                   gst: 5.0, hst: 0,  pst: 0,    totalRate: 5.0,   label: '5% GST' },
   BC: { province: 'BC', provinceName: 'British Columbia',          gst: 5.0, hst: 0,  pst: 7.0,  totalRate: 12.0,  label: '5% GST + 7% PST' },
   MB: { province: 'MB', provinceName: 'Manitoba',                  gst: 5.0, hst: 0,  pst: 7.0,  totalRate: 12.0,  label: '5% GST + 7% PST' },
   NB: { province: 'NB', provinceName: 'New Brunswick',             gst: 0,    hst: 15, pst: 0,    totalRate: 15.0,  label: '15% HST' },
   NL: { province: 'NL', provinceName: 'Newfoundland and Labrador', gst: 0,    hst: 15, pst: 0,    totalRate: 15.0,  label: '15% HST' },
-  NS: { province: 'NS', provinceName: 'Nova Scotia',               gst: 0,    hst: 15, pst: 0,    totalRate: 15.0,  label: '15% HST' },
+  NS: { province: 'NS', provinceName: 'Nova Scotia',               gst: 0,    hst: 14, pst: 0,    totalRate: 14.0,  label: '14% HST' },
   NT: { province: 'NT', provinceName: 'Northwest Territories',     gst: 5.0, hst: 0,  pst: 0,    totalRate: 5.0,   label: '5% GST' },
   NU: { province: 'NU', provinceName: 'Nunavut',                   gst: 5.0, hst: 0,  pst: 0,    totalRate: 5.0,   label: '5% GST' },
   ON: { province: 'ON', provinceName: 'Ontario',                   gst: 0,    hst: 13, pst: 0,    totalRate: 13.0,  label: '13% HST' },
@@ -32,11 +37,64 @@ export const CANADIAN_TAX_RATES: Record<Province, TaxInfo> = {
   YT: { province: 'YT', provinceName: 'Yukon',                     gst: 5.0, hst: 0,  pst: 0,    totalRate: 5.0,   label: '5% GST' },
 };
 
-export function getTaxRate(province: Province): TaxInfo {
-  return CANADIAN_TAX_RATES[province] || CANADIAN_TAX_RATES['AB'];
+/**
+ * Date-sensitive exceptions to the current tax table. Add new periods here
+ * when a jurisdiction changes a rate; never overwrite the historical rate.
+ */
+const TAX_RATE_HISTORY: Partial<Record<Province, TaxRatePeriod[]>> = {
+  NS: [
+    {
+      province: 'NS',
+      provinceName: 'Nova Scotia',
+      gst: 0,
+      hst: 15,
+      pst: 0,
+      totalRate: 15,
+      label: '15% HST',
+      effectiveFrom: '2016-07-01',
+      effectiveTo: '2025-03-31',
+    },
+    {
+      ...CURRENT_CANADIAN_TAX_RATES.NS,
+      effectiveFrom: '2025-04-01',
+    },
+  ],
+};
+
+// Backwards-compatible export used to populate current province options.
+export const CANADIAN_TAX_RATES = CURRENT_CANADIAN_TAX_RATES;
+
+function dateKey(value: Date | string): string {
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error('Invalid tax effective date');
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, '0'),
+    String(date.getUTCDate()).padStart(2, '0'),
+  ].join('-');
 }
 
-export function calculateTax(subtotal: number, province: Province): {
+export function getTaxRate(province: Province, effectiveDate: Date | string = new Date()): TaxInfo {
+  const fallback = CURRENT_CANADIAN_TAX_RATES[province] || CURRENT_CANADIAN_TAX_RATES.AB;
+  const history = TAX_RATE_HISTORY[province];
+  if (!history) return fallback;
+
+  const key = dateKey(effectiveDate);
+  const period = history.find(({ effectiveFrom, effectiveTo }) => (
+    key >= effectiveFrom && (!effectiveTo || key <= effectiveTo)
+  ));
+  if (!period) return fallback;
+
+  const { effectiveFrom: _from, effectiveTo: _to, ...rate } = period;
+  return rate;
+}
+
+export function calculateTax(subtotal: number, province: Province, effectiveDate: Date | string = new Date()): {
   subtotal: number;
   gst: number;
   hst: number;
@@ -46,7 +104,7 @@ export function calculateTax(subtotal: number, province: Province): {
   rate: number;
   label: string;
 } {
-  const rates = getTaxRate(province);
+  const rates = getTaxRate(province, effectiveDate);
   const gstAmount = Math.round(subtotal * (rates.gst / 100) * 100) / 100;
   const hstAmount = Math.round(subtotal * (rates.hst / 100) * 100) / 100;
   const pstAmount = Math.round(subtotal * (rates.pst / 100) * 100) / 100;

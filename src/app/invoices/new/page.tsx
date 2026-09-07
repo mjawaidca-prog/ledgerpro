@@ -78,6 +78,7 @@ export default function NewInvoicePage() {
 
   // Tax
   const [taxRate, setTaxRate] = useState(8.5);
+  const [companyProvince, setCompanyProvince] = useState<Province | null>(null);
 
   // Inline customer creation
   const [newName, setNewName] = useState('');
@@ -125,12 +126,18 @@ export default function NewInvoicePage() {
         const activeId = document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
         const active = companies.find((c: any) => c.id === activeId) || companies[0];
         if (active?.province) {
-          setTaxRate(getTaxRate(active.province as Province).totalRate);
+          setCompanyProvince(active.province as Province);
         }
         if (active?.currency) setHomeCurrency(active.currency);
       })
       .catch(() => {});
   }, []);
+
+  // Use the rate in force on the invoice date. The field remains editable for
+  // special tax treatments and accountant-directed overrides.
+  useEffect(() => {
+    if (companyProvince) setTaxRate(getTaxRate(companyProvince, issueDate).totalRate);
+  }, [companyProvince, issueDate]);
 
   // Resolve the FX rate whenever the customer currency or issue date changes.
   useEffect(() => {
