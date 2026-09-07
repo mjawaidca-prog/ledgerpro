@@ -16,9 +16,23 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_DB: ledgerpro_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ledgerpro_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
-      DATABASE_URL: postgresql://ci@localhost:5432/ledgerpro_ci
-      DIRECT_URL: postgresql://ci@localhost:5432/ledgerpro_ci
+      DATABASE_URL: postgresql://ci@localhost:5432/ledgerpro_ci?schema=public
+      DIRECT_URL: postgresql://ci@localhost:5432/ledgerpro_ci?schema=public
       NEXTAUTH_SECRET: ci-only-secret-not-used-in-production
       NEXTAUTH_URL: http://localhost:3000
       STRIPE_SECRET_KEY: sk_test_ci_placeholder
@@ -32,7 +46,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run security:secrets
+      - run: npm run db:migrate:safety
       - run: npx prisma validate
+      - run: npm run db:migrate:deploy
+      - run: npm run db:migrate:status
+      - run: npm run db:migrate:drift
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run build
