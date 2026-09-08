@@ -105,20 +105,22 @@ numbers without checking its chart of accounts.
 | Tax rounding adjustments | |
 | Tax remittances / clearing, if separate | |
 
-- [x] Sales, purchases, credits, payments, foreign-currency documents, and
+- [ ] After P1-C posting is implemented, sales, purchases, credits, payments, foreign-currency documents, and
       import-tax examples balance to the cent using these mappings.
 - [x] Existing historical entries will not be rewritten automatically.
 
-## 7. Filing workpapers
+## 7. Filing workpapers — approved design, not yet implemented
 
-- [x] GST/HST workpapers are prepared per legal registrant and reconcile source
+- [x] GST/HST workpapers will be prepared per legal registrant and reconcile source
       documents, component snapshots, GL entries, adjustments, and remittances.
-- [x] QST has separate output-tax and ITR schedules.
-- [x] PST/RST schedules remain province-specific and are not presented as GST
+- [x] QST will have separate output-tax and ITR schedules.
+- [x] PST/RST schedules will remain province-specific and will not be presented as GST
       ITC reports.
-- [x] Workpapers are labelled `not filed` until a user records external filing
+- [x] Workpapers will be labelled `not filed` until a user records external filing
       confirmation.
-- [x] Consolidated reports are not represented as consolidated tax returns.
+- [x] Consolidated reports will not be represented as consolidated tax returns.
+
+- [ ] P1-E staging evidence confirms the workpapers and reconciliations above.
 
 Required filing frequency, method, period rules, and adjustment handling:
 
