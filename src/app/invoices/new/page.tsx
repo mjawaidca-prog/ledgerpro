@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { Button } from '@/components/ui/Button';
@@ -24,6 +24,7 @@ import { getTaxRate, type Province } from '@/lib/taxes';
 import RateChip, { type RateChipData } from '@/components/fx/RateChip';
 import CurrencyPill from '@/components/fx/CurrencyPill';
 import { N } from '@/lib/fx-format';
+import { CanadianTaxPanel, type TaxEditorValue } from '@/components/tax/CanadianTaxPanel';
 
 interface CustomerOption {
   id: string;
@@ -79,6 +80,7 @@ export default function NewInvoicePage() {
   // Tax
   const [taxRate, setTaxRate] = useState(8.5);
   const [companyProvince, setCompanyProvince] = useState<Province | null>(null);
+  const [taxEditor, setTaxEditor] = useState<TaxEditorValue>({ enabled: false, ready: false, pending: true, error: null, preview: null });
 
   // Inline customer creation
   const [newName, setNewName] = useState('');
@@ -98,9 +100,12 @@ export default function NewInvoicePage() {
   const [fxConfirmed, setFxConfirmed] = useState(false);
 
   // Computed
-  const subtotal = lines.reduce((sum, l) => sum + l.amount, 0);
-  const taxAmount = subtotal * (taxRate / 100);
-  const total = subtotal + taxAmount;
+  const legacySubtotal = lines.reduce((sum, l) => sum + l.amount, 0);
+  const legacyTaxAmount = legacySubtotal * (taxRate / 100);
+  const subtotal = taxEditor.enabled && taxEditor.preview ? taxEditor.preview.netMinor / 100 : legacySubtotal;
+  const taxAmount = taxEditor.enabled && taxEditor.preview ? taxEditor.preview.taxMinor / 100 : legacyTaxAmount;
+  const total = taxEditor.enabled && taxEditor.preview ? taxEditor.preview.grossMinor / 100 : subtotal + taxAmount;
+  const taxEditorLines = useMemo(() => lines.map(line => ({ key: line.key, description: line.description, amount: line.amount, categoryId: line.categoryId })), [lines]);
 
   const invoiceCcy = selectedCustomer?.currency ?? 'CAD';
   const isFx = invoiceCcy !== homeCurrency;
@@ -232,6 +237,12 @@ export default function NewInvoicePage() {
 
   // Save / Send
   async function handleSave(newStatus: 'draft' | 'sent') {
+    if (taxEditor.pending) { setError('Please wait while LedgerPro checks the company tax setup.'); return; }
+    if (taxEditor.error && !taxEditor.enabled) { setError(taxEditor.error); return; }
+    if (taxEditor.enabled && newStatus === 'draft') {
+      setError('Reviewed-tax invoices must be completed and posted in one session. Draft tax decisions are not saved.');
+      return;
+    }
     if (!selectedCustomer) {
       setError('Please select a customer.');
       return;
@@ -242,6 +253,10 @@ export default function NewInvoicePage() {
     }
     if (newStatus === 'sent' && lines.some((l) => !l.categoryId)) {
       setError('All line items need a revenue category selected before sending.');
+      return;
+    }
+    if (taxEditor.enabled && (!taxEditor.ready || taxEditor.pending || !taxEditor.preview || !taxEditor.taxDecision)) {
+      setError(taxEditor.error || 'Complete every reviewed tax selection and wait for the server preview.');
       return;
     }
 
@@ -270,6 +285,7 @@ export default function NewInvoicePage() {
         categoryId: l.categoryId,
         sortOrder: i,
       })),
+      taxDecision: taxEditor.enabled ? taxEditor.taxDecision : undefined,
     };
 
     try {
@@ -313,10 +329,10 @@ export default function NewInvoicePage() {
           <p className="text-sm text-[var(--text-muted)] mt-1">Create a new invoice for a customer.</p>
         </div>
         <Badge variant={status === 'draft' ? 'draft' : 'pending'}>{status === 'draft' ? 'Draft' : 'Sent'}</Badge>
-        <Button variant="secondary" onClick={() => handleSave('draft')} disabled={saving}>
+        <Button variant="secondary" onClick={() => handleSave('draft')} disabled={saving || taxEditor.pending}>
           <Save size={16} /> Save Draft
         </Button>
-        <Button onClick={() => handleSave('sent')} disabled={saving || fxMissing} className={fxMissing ? 'opacity-50' : ''}>
+        <Button onClick={() => handleSave('sent')} disabled={saving || fxMissing || taxEditor.pending} className={fxMissing ? 'opacity-50' : ''}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           Send Invoice
         </Button>
@@ -559,6 +575,17 @@ export default function NewInvoicePage() {
           </div>
 
           {/* Notes */}
+          <CanadianTaxPanel
+            direction="sale"
+            documentDate={issueDate}
+            documentCurrency={invoiceCcy}
+            homeCurrency={homeCurrency}
+            fxRate={effectiveRate}
+            lines={taxEditorLines}
+            onChange={setTaxEditor}
+          />
+
+          {/* Notes */}
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] p-5">
             <label className="font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] block mb-2">
               Notes
@@ -673,7 +700,7 @@ export default function NewInvoicePage() {
                 <span className="text-[var(--text-muted)]">Subtotal</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(subtotal)}</span>
               </div>
-              <div className="flex justify-between items-center text-sm">
+              {!taxEditor.enabled && <div className="flex justify-between items-center text-sm">
                 <span className="text-[var(--text-muted)]">Tax Rate</span>
                 <div className="flex items-center gap-2">
                   <input
@@ -687,9 +714,9 @@ export default function NewInvoicePage() {
                   />
                   <span className="text-sm text-[var(--text-muted)]">%</span>
                 </div>
-              </div>
+              </div>}
               <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-muted)]">Tax ({taxRate}%)</span>
+                <span className="text-[var(--text-muted)]">{taxEditor.enabled ? 'GST/HST/QST/PST' : `Tax (${taxRate}%)`}</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(taxAmount)}</span>
               </div>
               <div className="flex justify-between items-center pt-3 border-t border-[var(--border)]">

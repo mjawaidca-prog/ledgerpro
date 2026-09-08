@@ -12,7 +12,10 @@ export default async function PayInvoicePage({ params }: { params: { id: string 
       where: { id: invoiceId },
       include: {
         customer: true,
-        lineItems: { orderBy: { sortOrder: 'asc' } },
+        lineItems: {
+          orderBy: { sortOrder: 'asc' },
+          include: { taxSnapshot: { include: { components: true, taxCodeVersion: { include: { taxCode: true } } } } },
+        },
       },
     });
 
@@ -38,6 +41,13 @@ export default async function PayInvoicePage({ params }: { params: { id: string 
 
   const statusColors: Record<string, string> = { paid: '#16a063', sent: '#d6961f', overdue: '#e0484e', draft: '#697587', void: '#697587' };
   const statusLabel: Record<string, string> = { paid: 'Paid', sent: 'Open', overdue: 'Overdue', draft: 'Draft', void: 'Void' };
+  const taxBreakdown = new Map<string, number>();
+  for (const line of invoice.lineItems) {
+    for (const component of line.taxSnapshot?.components ?? []) {
+      const label = component.type.toUpperCase();
+      taxBreakdown.set(label, (taxBreakdown.get(label) ?? 0) + Number(component.taxAmount));
+    }
+  }
 
   return (
     <html>
@@ -83,10 +93,13 @@ export default async function PayInvoicePage({ params }: { params: { id: string 
             <tbody>
               {invoice.lineItems.map((li: any) => (
                 <tr key={li.id} style={{ borderBottom: '1px solid #e3e8ef' }}>
-                  <td style={{ padding: '10px 12px', color: '#131a24' }}>{li.description}</td>
+                  <td style={{ padding: '10px 12px', color: '#131a24' }}>
+                    {li.description}
+                    {li.taxSnapshot && <div style={{ marginTop: 3, color: '#697587', fontSize: 11 }}>{li.taxSnapshot.taxCodeVersion.taxCode.code}: {li.taxSnapshot.components.map((component: any) => `${component.type.toUpperCase()} ${Number(component.rate)}%`).join(' + ')}</div>}
+                  </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', color: '#697587', fontFamily: 'monospace' }}>{Number(li.quantity || 1)}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', color: '#697587', fontFamily: 'monospace' }}>${Number(li.unitPrice || 0).toFixed(2)}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', color: '#131a24', fontFamily: 'monospace', fontWeight: 500 }}>${Number(li.amount).toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', color: '#697587', fontFamily: 'monospace' }}>${Number(li.taxSnapshot ? Number(li.taxSnapshot.netAmount) / Number(li.quantity || 1) : li.unitPrice || 0).toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', color: '#131a24', fontFamily: 'monospace', fontWeight: 500 }}>${Number(li.taxSnapshot?.netAmount ?? li.amount).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -95,7 +108,12 @@ export default async function PayInvoicePage({ params }: { params: { id: string 
                 <td colSpan={3} style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#364150' }}>Subtotal</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#131a24' }}>${Number(invoice.subtotal || 0).toFixed(2)}</td>
               </tr>
-              {Number(invoice.taxAmount || 0) > 0 && (
+              {taxBreakdown.size > 0 ? Array.from(taxBreakdown.entries()).map(([label, amount]) => (
+                <tr key={label}>
+                  <td colSpan={3} style={{ padding: '6px 12px', textAlign: 'right', color: '#697587' }}>{label}</td>
+                  <td style={{ padding: '6px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#131a24' }}>${amount.toFixed(2)}</td>
+                </tr>
+              )) : Number(invoice.taxAmount || 0) > 0 && (
                 <tr>
                   <td colSpan={3} style={{ padding: '10px 12px', textAlign: 'right', color: '#697587' }}>Tax</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#131a24' }}>${Number(invoice.taxAmount).toFixed(2)}</td>

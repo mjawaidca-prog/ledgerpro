@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import RateChip, { type RateChipData } from '@/components/fx/RateChip';
@@ -14,6 +14,7 @@ import { money } from '@/lib/money';
 import { format, addDays } from 'date-fns';
 import { ArrowLeft, Plus, Trash2, Save, Search, X, Loader2, Building2 } from 'lucide-react';
 import { getTaxRate, type Province } from '@/lib/taxes';
+import { CanadianTaxPanel, type TaxEditorValue } from '@/components/tax/CanadianTaxPanel';
 
 interface VendorOption {
   id: string; name: string; companyName: string | null; email: string | null;
@@ -59,6 +60,7 @@ function NewBillContent() {
   const [lines, setLines] = useState<LineItem[]>([newLine()]);
   const [taxRate, setTaxRate] = useState(8.5);
   const [companyProvince, setCompanyProvince] = useState<Province | null>(null);
+  const [taxEditor, setTaxEditor] = useState<TaxEditorValue>({ enabled: false, ready: false, pending: true, error: null, preview: null });
   const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
   // Inline vendor creation
   const [newVendorName, setNewVendorName] = useState('');
@@ -77,9 +79,12 @@ function NewBillContent() {
   const [fxConfirmed, setFxConfirmed] = useState(false);
   const [importTax, setImportTax] = useState<number>(0);
 
-  const subtotal = lines.reduce((s, l) => s + l.amount, 0);
-  const taxAmount = subtotal * (taxRate / 100);
-  const total = subtotal + taxAmount;
+  const legacySubtotal = lines.reduce((s, l) => s + l.amount, 0);
+  const legacyTaxAmount = legacySubtotal * (taxRate / 100);
+  const subtotal = taxEditor.enabled && taxEditor.preview ? taxEditor.preview.netMinor / 100 : legacySubtotal;
+  const taxAmount = taxEditor.enabled && taxEditor.preview ? taxEditor.preview.taxMinor / 100 : legacyTaxAmount;
+  const total = taxEditor.enabled && taxEditor.preview ? taxEditor.preview.grossMinor / 100 : subtotal + taxAmount;
+  const taxEditorLines = useMemo(() => lines.map(line => ({ key: line.key, description: line.description, amount: line.amount, categoryId: line.categoryId })), [lines]);
 
   const billCcy = selectedVendor?.currency ?? 'CAD';
   const isFx = billCcy !== homeCurrency;
@@ -165,8 +170,18 @@ function NewBillContent() {
   function addLine() { setLines(prev => [...prev, newLine()]); }
 
   async function handleSave(newStatus: 'draft' | 'open') {
+    if (taxEditor.pending) { setError('Please wait while LedgerPro checks the company tax setup.'); return; }
+    if (taxEditor.error && !taxEditor.enabled) { setError(taxEditor.error); return; }
+    if (taxEditor.enabled && newStatus === 'draft') {
+      setError('Reviewed-tax bills must be completed and posted in one session. Draft tax decisions are not saved.');
+      return;
+    }
     if (!selectedVendor) { setError('Please select a vendor.'); return; }
     if (lines.some(l => !l.description.trim())) { setError('All line items need a description.'); return; }
+    if (taxEditor.enabled && (!taxEditor.ready || taxEditor.pending || !taxEditor.preview || !taxEditor.taxDecision)) {
+      setError(taxEditor.error || 'Complete every reviewed tax selection and wait for the server preview.');
+      return;
+    }
 
     setSaving(true); setError(null);
     const payload = {
@@ -181,6 +196,7 @@ function NewBillContent() {
         description: l.description.trim(), amount: l.amount,
         categoryId: l.categoryId, sortOrder: i,
       })),
+      taxDecision: taxEditor.enabled ? taxEditor.taxDecision : undefined,
     };
 
     try {
@@ -211,10 +227,10 @@ function NewBillContent() {
           </p>
         </div>
         <Badge variant="draft">Draft</Badge>
-        <Button variant="secondary" onClick={() => handleSave('draft')} disabled={saving}>
+        <Button variant="secondary" onClick={() => handleSave('draft')} disabled={saving || taxEditor.pending}>
           <Save size={16} /> Save Draft
         </Button>
-        <Button onClick={() => handleSave('open')} disabled={saving || fxMissing} className={fxMissing ? 'opacity-50' : ''}>
+        <Button onClick={() => handleSave('open')} disabled={saving || fxMissing || taxEditor.pending} className={fxMissing ? 'opacity-50' : ''}>
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           {kind === 'bill' ? 'Save Bill' : 'Save Expense'}
         </Button>
@@ -413,6 +429,16 @@ function NewBillContent() {
             </div>
           </div>
 
+          <CanadianTaxPanel
+            direction="purchase"
+            documentDate={billDate}
+            documentCurrency={billCcy}
+            homeCurrency={homeCurrency}
+            fxRate={effectiveRate}
+            lines={taxEditorLines}
+            onChange={setTaxEditor}
+          />
+
           {/* Notes */}
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] p-5">
             <label className="font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] block mb-2">Notes</label>
@@ -455,7 +481,7 @@ function NewBillContent() {
           )}
 
           {/* Import tax */}
-          {kind === 'bill' && (
+          {kind === 'bill' && !taxEditor.enabled && (
             <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] p-5 space-y-3">
               <label className="font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] block">
                 Import tax
@@ -535,7 +561,7 @@ function NewBillContent() {
                 <span className="text-[var(--text-muted)]">Subtotal</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(subtotal)}</span>
               </div>
-              <div className="flex justify-between items-center text-sm">
+              {!taxEditor.enabled && <div className="flex justify-between items-center text-sm">
                 <span className="text-[var(--text-muted)]">Tax Rate</span>
                 <div className="flex items-center gap-2">
                   <input type="number" min="0" max="100" step="0.1" value={taxRate}
@@ -544,9 +570,9 @@ function NewBillContent() {
                   />
                   <span className="text-sm text-[var(--text-muted)]">%</span>
                 </div>
-              </div>
+              </div>}
               <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-muted)]">Tax ({taxRate}%)</span>
+                <span className="text-[var(--text-muted)]">{taxEditor.enabled ? 'GST/HST/QST/PST' : `Tax (${taxRate}%)`}</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(taxAmount)}</span>
               </div>
               <div className="flex justify-between items-center pt-3 border-t border-[var(--border)]">

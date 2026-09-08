@@ -19,16 +19,23 @@ interface Bill {
   status: 'draft' | 'open' | 'paid' | 'overdue' | 'void';
   notes: string | null; paidAt: string | null; paidAmount: number;
   paymentAccount: { id: string; name: string; mask: string | null } | null;
-  lineItems: { id: string; description: string; amount: number; categoryId: string | null; sortOrder: number }[];
+  lineItems: { id: string; description: string; amount: number; categoryId: string | null; sortOrder: number; taxSnapshot?: TaxSnapshot | null }[];
+}
+
+interface TaxSnapshot {
+  netAmount: number; taxAmount: number; grossAmount: number;
+  taxCodeVersion: { taxCode: { code: string; name: string } };
+  components: Array<{ type: string; rate: number; taxAmount: number; recoverableTax: number; nonrecoverableTax: number }>;
 }
 
 interface LineItem {
   key: string; description: string; amount: number; categoryId: string | null;
+  taxSnapshot?: TaxSnapshot | null;
 }
 
 let lineKey = 0;
-function fromSaved(li: { id: string; description: string; amount: number; categoryId: string | null }): LineItem {
-  return { key: `line-${lineKey++}`, description: li.description, amount: Number(li.amount), categoryId: li.categoryId };
+function fromSaved(li: { id: string; description: string; amount: number; categoryId: string | null; taxSnapshot?: TaxSnapshot | null }): LineItem {
+  return { key: `line-${lineKey++}`, description: li.description, amount: Number(li.amount), categoryId: li.categoryId, taxSnapshot: li.taxSnapshot };
 }
 
 interface CategoryOption {
@@ -53,7 +60,9 @@ export default function EditBillPage() {
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('draft');
   const [lines, setLines] = useState<LineItem[]>([]);
+  const [documentCurrency, setDocumentCurrency] = useState('CAD');
   const [taxRate, setTaxRate] = useState(8.5);
+  const [savedTotals, setSavedTotals] = useState<{ subtotal: number; tax: number; total: number } | null>(null);
   const [vendor, setVendor] = useState<{ id: string; name: string; companyName: string | null; email: string | null } | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
 
@@ -69,7 +78,7 @@ export default function EditBillPage() {
         const res = await fetch(`/api/bills/${id}`);
         if (!res.ok) throw new Error('Bill not found');
         const json = await res.json();
-        const b: Bill = json.data;
+        const b: Bill & { currency?: string } = json.data;
         setKind(b.kind);
         setBillDate(format(new Date(b.billDate), 'yyyy-MM-dd'));
         setDueDate(b.dueDate ? format(new Date(b.dueDate), 'yyyy-MM-dd') : '');
@@ -77,7 +86,9 @@ export default function EditBillPage() {
         setReferenceNo(b.referenceNo ?? '');
         setNotes(b.notes ?? '');
         setStatus(b.status);
+        setDocumentCurrency(b.currency ?? 'CAD');
         setTaxRate(Number(b.taxRate ?? 0));
+        setSavedTotals({ subtotal: Number(b.subtotal), tax: Number(b.taxAmount), total: Number(b.total) });
         setVendor(b.vendor);
         setLines(b.lineItems.map(fromSaved));
       } catch (err) {
@@ -87,10 +98,11 @@ export default function EditBillPage() {
     load();
   }, [id]);
 
-  const subtotal = lines.reduce((s, l) => s + l.amount, 0);
-  const taxAmount = subtotal * (taxRate / 100);
-  const total = subtotal + taxAmount;
-  const isLocked = status === 'paid' || status === 'void';
+  const hasReviewedTax = lines.some(line => Boolean(line.taxSnapshot));
+  const subtotal = hasReviewedTax && savedTotals ? savedTotals.subtotal : lines.reduce((s, l) => s + l.amount, 0);
+  const taxAmount = hasReviewedTax && savedTotals ? savedTotals.tax : subtotal * (taxRate / 100);
+  const total = hasReviewedTax && savedTotals ? savedTotals.total : subtotal + taxAmount;
+  const isLocked = status === 'paid' || status === 'void' || hasReviewedTax;
 
   function updateLine(key: string, field: keyof LineItem, value: any) {
     setLines(prev => prev.map(l => l.key === key ? { ...l, [field]: value } : l));
@@ -127,9 +139,11 @@ export default function EditBillPage() {
     if (!confirm('Void this record?')) return;
     setSaving(true);
     try {
-      await fetch(`/api/bills/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'void' }) });
+      const response = await fetch(`/api/bills/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'void' }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not void this bill.');
       setToast({ message: 'Voided.', type: 'success' }); setStatus('void');
-    } catch { setToast({ message: 'Failed.', type: 'danger' }); }
+    } catch (reason) { setToast({ message: reason instanceof Error ? reason.message : 'Failed.', type: 'danger' }); }
     finally { setSaving(false); }
   }
 
@@ -166,6 +180,9 @@ export default function EditBillPage() {
         {!isLocked && status !== 'void' && (
           <Button variant="destructive" size="sm" onClick={handleVoid}>Void</Button>
         )}
+        {hasReviewedTax && status !== 'void' && (
+          <Button variant="destructive" size="sm" onClick={handleVoid}>Void</Button>
+        )}
       </div>
 
       {error && <Alert variant="danger" className="mb-4">{error}</Alert>}
@@ -196,7 +213,8 @@ export default function EditBillPage() {
             </div>
             <div className="divide-y divide-[var(--border)]">
               {lines.map(line => (
-                <div key={line.key} className="flex items-center gap-4 px-5 py-3">
+                <div key={line.key} className="px-5 py-3">
+                  <div className="flex items-center gap-4">
                   <input type="text" placeholder="Description" value={line.description}
                     onChange={e => updateLine(line.key, 'description', e.target.value)} readOnly={isLocked}
                     className="flex-1 h-[34px] px-2 rounded-md border border-transparent bg-transparent text-sm text-[var(--text-strong)] placeholder:text-[var(--text-faint)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)]"
@@ -207,7 +225,7 @@ export default function EditBillPage() {
                     <option value="">Select...</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
                   </select>
-                  <input type="number" min="0" step="0.01" value={line.amount || ''}
+                  <input type="number" min="0" step="0.01" value={Number(line.taxSnapshot?.netAmount ?? line.amount) || ''}
                     onChange={e => updateLine(line.key, 'amount', parseFloat(e.target.value) || 0)} readOnly={isLocked}
                     className="w-[120px] h-[34px] px-2 text-right rounded-md border border-transparent bg-transparent font-mono text-sm text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
@@ -217,6 +235,10 @@ export default function EditBillPage() {
                       <Trash2 size={14} />
                     </button>
                   )}
+                  </div>
+                  {line.taxSnapshot && <div className="mt-1 pl-2 text-xs text-[var(--text-muted)] print:text-gray-700">
+                    {line.taxSnapshot.taxCodeVersion.taxCode.code}: {line.taxSnapshot.components.map(component => `${component.type.toUpperCase()} ${Number(component.rate)}% (${money(Number(component.taxAmount))})`).join(' + ')}
+                  </div>}
                 </div>
               ))}
             </div>
@@ -265,7 +287,7 @@ export default function EditBillPage() {
                 <span className="text-[var(--text-muted)]">Subtotal</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(subtotal)}</span>
               </div>
-              <div className="flex justify-between items-center text-sm">
+              {!hasReviewedTax && <div className="flex justify-between items-center text-sm">
                 <span className="text-[var(--text-muted)]">Tax Rate</span>
                 <div className="flex items-center gap-2">
                   <input type="number" min="0" max="100" step="0.1" value={taxRate}
@@ -274,13 +296,13 @@ export default function EditBillPage() {
                   />
                   <span className="text-sm text-[var(--text-muted)]">%</span>
                 </div>
-              </div>
+              </div>}
               <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-muted)]">Tax ({taxRate}%)</span>
+                <span className="text-[var(--text-muted)]">{hasReviewedTax ? 'GST/HST/QST/PST' : `Tax (${taxRate}%)`}</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(taxAmount)}</span>
               </div>
               <div className="flex justify-between pt-3 border-t border-[var(--border)]">
-                <span className="text-sm font-semibold text-[var(--text-strong)]">Total (USD)</span>
+                <span className="text-sm font-semibold text-[var(--text-strong)]">Total ({documentCurrency})</span>
                 <span className="font-mono tabular-nums text-lg font-semibold text-[var(--text-strong)]">{money(total)}</span>
               </div>
             </div>

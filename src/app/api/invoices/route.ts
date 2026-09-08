@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { invoiceSchema } from '@/lib/validators/invoice';
 import { postInvoiceToLedger } from '@/lib/journal';
 import { notifyBillDue } from '@/lib/notifications';
 import { resolveDocumentFx, FxValidationError } from '@/lib/fx/document';
+import { getTaxUiContext, previewTaxDraft } from '@/lib/tax/ui-service';
+import { postTaxDocument, TaxPostingError, type TaxLineSelection } from '@/lib/tax/posting-service';
+
+import { withReviewedDocumentRequest } from '@/lib/tax/document-request';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,7 +89,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -103,7 +108,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { lineItems, fxRate, fxRateConfirmed, ...invoiceData } = parsed.data;
+    const { lineItems, fxRate, fxRateConfirmed, taxDecision, ...invoiceData } = parsed.data;
 
     if (invoiceData.status !== 'draft' && lineItems.some((item) => !item.categoryId)) {
       return NextResponse.json(
@@ -113,16 +118,21 @@ export async function POST(req: NextRequest) {
     }
 
     // The invoice currency comes from the contact — never from the payload.
-    const [customer, company] = await Promise.all([
+    const [customer, company, taxContext] = await Promise.all([
       db.contact.findUnique({
         where: { id: invoiceData.customerId, companyId },
         select: { name: true, currency: true },
       }),
       db.company.findUnique({ where: { id: companyId }, select: { currency: true } }),
+      getTaxUiContext(companyId, new Date(`${invoiceData.issueDate}T00:00:00.000Z`)),
     ]);
 
-    const currency = customer?.currency ?? 'CAD';
+    if (!customer) return NextResponse.json({ error: 'customer not found in this company.' }, { status: 404 });
+    const currency = customer.currency;
     const homeCurrency = company?.currency ?? 'CAD';
+    const serverLineItems = taxContext.enabled
+      ? lineItems.map(line => ({ ...line, amount: new Prisma.Decimal(line.quantity).toDecimalPlaces(2).mul(new Prisma.Decimal(line.unitPrice).toDecimalPlaces(2)).toDecimalPlaces(2).toNumber() }))
+      : lineItems;
     if (invoiceData.currency && invoiceData.currency !== currency) {
       return NextResponse.json(
         { error: `This customer is set to ${currency}, so the invoice is raised in ${currency}. Change it on the contact, not here.` },
@@ -144,20 +154,59 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const invoice = await db.invoice.create({
+    let taxPlan = null;
+    if (taxContext.enabled) {
+      if (!['sent', 'draft'].includes(invoiceData.status)) {
+        return NextResponse.json({ error: 'Create this document as sent; record payments separately.', code: 'invalid_initial_status' }, { status: 400 });
+      }
+      if (invoiceData.status === 'draft') {
+        return NextResponse.json({ error: 'Reviewed-tax invoices must be completed and posted in one session; draft tax decisions are not persisted.', code: 'tax_draft_not_supported' }, { status: 409 });
+      }
+      if (!taxContext.ready) {
+        return NextResponse.json({ error: taxContext.issues.map(issue => issue.message).join(' '), code: 'tax_configuration_not_ready' }, { status: 409 });
+      }
+      if (!taxDecision || taxDecision.lines.length !== serverLineItems.length) {
+        return NextResponse.json({ error: 'Choose a reviewed tax code and provide jurisdiction evidence for every invoice line.', code: 'tax_decision_required' }, { status: 400 });
+      }
+      const decisions = new Map(taxDecision.lines.map(line => [line.lineIndex, line]));
+      taxPlan = await previewTaxDraft({
+        companyId,
+        userId,
+        direction: 'sale',
+        documentDate: new Date(`${invoiceData.issueDate}T00:00:00.000Z`),
+        documentCurrency: currency,
+        fxRate: fx?.fxRate?.toString() ?? null,
+        lines: serverLineItems.map((line, index) => {
+          const decision = decisions.get(index);
+          if (!decision) throw new TaxPostingError('line_selection_mismatch', 'Every invoice line requires one tax decision.');
+          return { clientLineId: `line-${index}`, categoryId: line.categoryId ?? null, amount: line.amount, ...decision };
+        }),
+      });
+      invoiceData.subtotal = taxPlan.netMinor / 100;
+      invoiceData.taxAmount = taxPlan.taxMinor / 100;
+      invoiceData.total = taxPlan.grossMinor / 100;
+      invoiceData.taxRate = null;
+    } else if (taxDecision) {
+      return NextResponse.json({ error: 'The reviewed tax workflow is not enabled for this company.', code: 'tax_feature_disabled' }, { status: 409 });
+    }
+
+    const requestedStatus = invoiceData.status;
+    const saveDocument = async (client: Prisma.TransactionClient, documentId: string) => {
+    let invoice = await client.invoice.create({
       data: {
-        id: generateInvoiceId(),
+        id: documentId,
         ...invoiceData,
+        status: taxContext.enabled ? 'draft' : requestedStatus,
         currency,
         fxRate: fx?.fxRate ?? null,
         fxRateSource: fx?.fxRateSource ?? null,
         fxRateDate: fx?.fxRateDate ?? null,
-        totalHome: fx?.totalHome ?? null,
+        totalHome: taxPlan && fx ? taxPlan.grossHomeMinor / 100 : fx?.totalHome ?? null,
         companyId,
         issueDate: new Date(invoiceData.issueDate),
         dueDate: new Date(invoiceData.dueDate),
         lineItems: {
-          create: lineItems.map((item, idx) => ({
+          create: serverLineItems.map((item, idx) => ({
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
@@ -169,12 +218,25 @@ export async function POST(req: NextRequest) {
       },
       include: {
         customer: { select: { id: true, name: true, companyName: true } },
-        lineItems: true,
+        lineItems: { orderBy: { sortOrder: 'asc' } },
       },
     });
 
     // Post to journal if not a draft
-    if (invoiceData.status !== 'draft') {
+    let taxPosting = null;
+    if (invoiceData.status !== 'draft' && taxContext.enabled && taxDecision) {
+      const byIndex = new Map(taxDecision.lines.map(line => [line.lineIndex, line]));
+      const selections: TaxLineSelection[] = invoice.lineItems.map((line, index) => {
+        const decision = byIndex.get(index)!;
+        return { sourceLineId: line.id, taxCodeVersionId: decision.taxCodeVersionId, jurisdictionEvidence: decision.jurisdictionEvidence, jurisdictionOverrideReason: decision.jurisdictionOverrideReason, recovery: decision.recovery };
+      });
+      taxPosting = await postTaxDocument({ companyId, userId, sourceKey: `invoice:${invoice.id}:${taxDecision.requestKey}`, sourceType: 'invoice', sourceId: invoice.id, description: `Invoice ${invoice.id}`, lines: selections, expectedTotals: taxPlan ? { netMinor: taxPlan.netMinor, taxMinor: taxPlan.taxMinor, grossMinor: taxPlan.grossMinor, grossHomeMinor: taxPlan.grossHomeMinor } : undefined }, client);
+      invoice = await client.invoice.update({
+        where: { id: invoice.id, companyId },
+        data: { status: requestedStatus, sentAt: requestedStatus === 'sent' ? new Date() : undefined },
+        include: { customer: { select: { id: true, name: true, companyName: true } }, lineItems: true },
+      });
+    } else if (invoiceData.status !== 'draft') {
       await postInvoiceToLedger(
         invoice.id,
         customer?.name ?? 'Unknown',
@@ -187,15 +249,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    return { data: invoice, taxPosting };
+    };
+    if (taxContext.enabled && taxDecision) {
+      const result = await withReviewedDocumentRequest(
+        { companyId, userId, kind: 'invoice', key: taxDecision.requestKey, payload: parsed.data },
+        saveDocument,
+        async (client, id) => ({
+          data: await client.invoice.findUniqueOrThrow({ where: { id, companyId }, include: { customer: { select: { id: true, name: true, companyName: true } }, lineItems: { orderBy: { sortOrder: 'asc' } } } }),
+          taxPosting: await client.taxPosting.findFirst({ where: { companyId, journalEntry: { sourceType: 'invoice', sourceId: id }, reversalOfId: null }, include: { journalEntry: { include: { lines: true } }, snapshots: { include: { components: true } } } }),
+        }),
+      );
+      return NextResponse.json(result, { status: 201 });
+    }
+    const { data: invoice, taxPosting } = await saveDocument(db, generateInvoiceId());
+
     // Notify if sent (overdue check will happen later via scheduled task)
-    if (invoiceData.status === 'sent') {
+    if (requestedStatus === 'sent') {
       notifyBillDue(companyId, invoice.id, customer?.name || 'Customer').catch(() => {});
     }
 
-    return NextResponse.json({ data: invoice }, { status: 201 });
+    return NextResponse.json({ data: invoice, taxPosting }, { status: 201 });
   } catch (error: any) {
     if (error instanceof FxValidationError) {
       return NextResponse.json({ error: error.message, code: 'fx_validation' }, { status: 400 });
+    }
+    if (error instanceof TaxPostingError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     console.error('POST /api/invoices error:', error);
     return NextResponse.json({ error: error.message || 'Failed to create invoice' }, { status: 500 });

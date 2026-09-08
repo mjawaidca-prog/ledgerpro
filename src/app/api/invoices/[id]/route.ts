@@ -4,6 +4,7 @@ import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { invoiceUpdateSchema } from '@/lib/validators/invoice';
 import { voidJournalEntry, postInvoiceToLedger } from '@/lib/journal';
 import { resolveDocumentFx, FxValidationError } from '@/lib/fx/document';
+import { reverseTaxPosting, TaxPostingError } from '@/lib/tax/posting-service';
 export const dynamic = 'force-dynamic';
 
 export async function GET(
@@ -18,7 +19,10 @@ export async function GET(
       where: { id: params.id, companyId },
       include: {
         customer: true,
-        lineItems: { orderBy: { sortOrder: 'asc' } },
+        lineItems: {
+          orderBy: { sortOrder: 'asc' },
+          include: { taxSnapshot: { include: { components: true, taxCodeVersion: { include: { taxCode: true } } } } },
+        },
         paymentAccount: { select: { id: true, name: true, mask: true, kind: true } },
       },
     });
@@ -60,12 +64,39 @@ export async function PUT(
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
-    const { lineItems, ...invoiceData } = parsed.data;
+    const { lineItems, taxDecision: _taxDecision, ...invoiceData } = parsed.data;
     const isVoidTransition = invoiceData.status === 'void' && existing.status !== 'void';
     const isOnlyStatusChange = Object.keys(invoiceData).every((k) => k === 'status') && !lineItems;
     const newTotal = invoiceData.total !== undefined ? Number(invoiceData.total) : Number(existing.total);
     const newTaxAmount = invoiceData.taxAmount !== undefined ? Number(invoiceData.taxAmount) : Number(existing.taxAmount);
     const totalChanged = Math.abs(newTotal - Number(existing.total)) > 0.005;
+    const existingTaxPosting = await db.taxPosting.findFirst({
+      where: { companyId, journalEntry: { sourceId: params.id, sourceType: 'invoice' }, reversalOfId: null },
+      include: { reversedBy: true },
+    });
+
+    if (existingTaxPosting) {
+      if (!isOnlyStatusChange || !['void', existing.status].includes(invoiceData.status ?? '')) {
+        throw new TaxPostingError('tax_document_immutable', 'Posted tax documents cannot be edited or returned to draft. Void and recreate the document to correct it.', 409);
+      }
+      if (invoiceData.status === existing.status) return NextResponse.json({ data: existing });
+      const updated = await db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${params.id} AND "companyId" = ${companyId} FOR UPDATE`;
+        const current = await tx.invoice.findUniqueOrThrow({ where: { id: params.id, companyId } });
+        if (current.status === 'void') return current;
+        const payment = await tx.journalEntry.findFirst({ where: { companyId, sourceId: params.id, sourceType: 'payment', voidedAt: null } });
+        if (Number(current.paidAmount) !== 0 || payment) {
+          throw new TaxPostingError('tax_settlement_reversal_required', 'Reverse the payments and bank matches before voiding this reviewed-tax document.', 409);
+        }
+        await reverseTaxPosting({ companyId, userId, postingId: existingTaxPosting.id, sourceKey: 'invoice-void:' + params.id, reversalDate: new Date(), reason: 'invoice voided by user' }, tx);
+        return tx.invoice.update({ where: { id: params.id, companyId }, data: { status: 'void' } });
+      });
+      return NextResponse.json({ data: updated });
+    }
+    const taxConfiguration = await db.companyTaxConfiguration.findUnique({ where: { companyId }, select: { enabled: true } });
+    if (taxConfiguration?.enabled && !isVoidTransition) {
+      throw new TaxPostingError('legacy_tax_review_required', 'This document predates reviewed tax. Void it if posted, then create a new document with explicit line tax decisions.', 409);
+    }
 
     // Paid or voided invoices are locked to status-only transitions (e.g. void)
     // — unwinding a payment or a void takes more than a field edit.
@@ -101,11 +132,11 @@ export async function PUT(
       const reversalGuard = await closedPeriodGuard(companyId, new Date());
       if (reversalGuard) return reversalGuard;
 
-      const entries = await db.journalEntry.findMany({
-        where: { companyId, sourceId: params.id, sourceType: { in: ['invoice', 'payment'] }, voidedAt: null },
-      });
-      for (const entry of entries) {
-        await voidJournalEntry(entry.id, companyId, userId);
+      {
+        const entries = await db.journalEntry.findMany({
+          where: { companyId, sourceId: params.id, sourceType: { in: ['invoice', 'payment'] }, voidedAt: null },
+        });
+        for (const entry of entries) await voidJournalEntry(entry.id, companyId, userId);
       }
     } else if (existingInvoiceEntry && totalChanged) {
       // Already posted and the total changed (e.g. a line item was edited on
@@ -208,6 +239,9 @@ export async function PUT(
   } catch (error: any) {
     if (error instanceof FxValidationError) {
       return NextResponse.json({ error: error.message, code: 'fx_validation' }, { status: 400 });
+    }
+    if (error instanceof TaxPostingError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     console.error('PUT /api/invoices/[id] error:', error);
     return NextResponse.json({ error: error.message || 'Failed to update invoice' }, { status: 500 });

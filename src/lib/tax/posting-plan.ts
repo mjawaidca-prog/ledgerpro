@@ -188,6 +188,8 @@ export function buildTaxPostingPlan(input: BuildTaxPostingPlanInput): TaxPosting
         ...component,
         authority: source.authority,
         recoveryReason: source.recoveryReason,
+        recoveryEvidence: source.recoveryEvidence,
+        recoveryReviewedById: source.recoveryReviewedById,
         taxHomeMinor,
         outputTaxHomeMinor,
         recoverableHomeMinor,

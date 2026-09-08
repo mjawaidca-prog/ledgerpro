@@ -1,3 +1,4 @@
+import { isTaxDate } from '@/lib/tax/date';
 import { z } from 'zod';
 
 const billLineItemSchema = z.object({
@@ -8,11 +9,31 @@ const billLineItemSchema = z.object({
   sortOrder: z.coerce.number().int().default(0),
 });
 
+const recoveryDecisionSchema = z.object({
+  basisPoints: z.coerce.number().int().min(0).max(10000),
+  reason: z.string().min(1).max(500),
+  evidence: z.record(z.unknown()).refine((value) => Object.keys(value).length > 0, 'Recovery evidence is required'),
+  reviewedById: z.string().min(1),
+});
+
+const taxLineDecisionSchema = z.object({
+  lineIndex: z.coerce.number().int().min(0),
+  taxCodeVersionId: z.string().min(1),
+  jurisdictionEvidence: z.record(z.unknown()).refine((value) => Object.keys(value).length > 0, 'Jurisdiction evidence is required'),
+  jurisdictionOverrideReason: z.string().max(500).optional(),
+  recovery: z.record(recoveryDecisionSchema).optional(),
+});
+
+const taxDecisionSchema = z.object({
+  requestKey: z.string().min(8).max(200),
+  lines: z.array(taxLineDecisionSchema).min(1),
+});
+
 export const billSchema = z.object({
   kind: z.enum(['bill', 'expense']),
   vendorId: z.string().min(1, 'Vendor is required'),
-  billDate: z.string().min(1, 'Bill date is required'),
-  dueDate: z.string().nullable().optional(),
+  billDate: z.string().refine(isTaxDate, 'Enter a valid date (YYYY-MM-DD)'),
+  dueDate: z.string().refine(value => value === '' || isTaxDate(value), 'Enter a valid due date').nullable().optional(),
   terms: z.string().max(50).nullable().optional(),
   referenceNo: z.string().max(100).nullable().optional(),
   subtotal: z.coerce.number().min(0),
@@ -29,6 +50,7 @@ export const billSchema = z.object({
   // Import GST/HST assessed by CBSA in CAD on its own valuation.
   importTaxAmount: z.coerce.number().min(0).nullable().optional(),
   lineItems: z.array(billLineItemSchema).min(1, 'At least one line item is required'),
+  taxDecision: taxDecisionSchema.optional(),
 });
 
 export type BillInput = z.infer<typeof billSchema>;

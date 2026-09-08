@@ -53,4 +53,8 @@ jobs:
       - run: npm run db:migrate:drift
       - run: npm run typecheck
       - run: npm run test:unit
+      - name: Verify reviewed tax lifecycle against Postgres
+        run: npx jest __tests__/tax-database.test.ts --runInBand --verbose
+        env:
+          CI_TAX_DATABASE: '1'
       - run: npm run build

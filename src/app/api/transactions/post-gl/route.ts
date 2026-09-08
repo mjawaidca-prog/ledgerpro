@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
 import { postTransactionToLedger } from '@/lib/journal';
 import { resolveRate } from '@/lib/fx/rate';
+import { assertReviewedBankTaxAdapter, type LegacyBankTaxInput } from '@/lib/tax/bank-adapter';
 export const dynamic = 'force-dynamic';
 
 // POST — post categorized bank transactions to the General Ledger
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
 
     const company = await db.company.findUnique({ where: { id: companyId }, select: { currency: true } });
     const homeCurrency = company?.currency ?? 'CAD';
+    const reviewedTaxEnabled = Boolean((await db.companyTaxConfiguration.findUnique({ where: { companyId }, select: { enabled: true } }))?.enabled);
 
     if (transactions.length === 0) {
       return NextResponse.json({ error: 'No categorized transactions found' }, { status: 400 });
@@ -69,6 +71,7 @@ export async function POST(req: NextRequest) {
       }
 
       try {
+        assertReviewedBankTaxAdapter({ reviewedTaxEnabled, row: { taxCode: tx.taxCode, taxRate: Number(tx.taxRate ?? 0), taxAmount: Number(tx.taxAmount ?? 0) }, splits: Array.isArray(tx.splits) ? tx.splits as LegacyBankTaxInput[] : null });
         const entry = await postTransactionToLedger(
           {
             id: tx.id,

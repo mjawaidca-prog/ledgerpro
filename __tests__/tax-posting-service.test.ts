@@ -216,12 +216,13 @@ describe('P1-C tax posting authorization, locks, and atomicity', () => {
     const approvedClient = tx({
       ...baseOverrides,
       membership: {
-        findUnique: jest.fn().mockResolvedValue({ role: 'bookkeeper' }),
+        findUnique: jest.fn().mockResolvedValue({ role: 'admin' }),
         findMany: jest.fn().mockResolvedValue([{ userId: 'reviewer-1' }]),
       },
     });
     transaction.mockImplementation(async work => work(approvedClient));
-    await expect(postTaxDocument(purchaseCommand)).resolves.toEqual({ id: 'posting-1' });
+    await expect(postTaxDocument(purchaseCommand)).rejects.toMatchObject({ code: 'recovery_decision_required' });
+    await expect(postTaxDocument({ ...purchaseCommand, userId: 'reviewer-1' })).resolves.toEqual({ id: 'posting-1' });
     expect(approvedClient.documentLineTaxSnapshot.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         components: { create: [expect.objectContaining({
