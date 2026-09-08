@@ -136,3 +136,5 @@ Release acceptance matrix:
 ## 9. Open decisions before implementation
 
 Accountant must approve initial supply categories, special-method exclusions, province-specific exemptions, recovery evidence/fractions, tax-point and FX reporting policy, rounding and report mappings. Product owner must select the pilot legal entity and filing regime. P0.1 must establish the production baseline and staging/backup evidence. These decisions block live enablement, not parallel groundwork.
+
+P1-C implementation details and its disabled-by-default release boundary are recorded in `docs/P1C_TAX_POSTING.md`.
