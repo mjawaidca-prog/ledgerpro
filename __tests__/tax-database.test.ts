@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 
 let actor = 'p1d-ci-owner';
 const companyId = 'p1d-ci-company';
+jest.mock('@/lib/auth', () => ({ getServerSession: jest.fn() }));
 jest.mock('@/lib/api-helpers', () => ({
   ...jest.requireActual('@/lib/api-helpers'),
   requireCompany: async () => ({ companyId: 'p1d-ci-company', userId: actor, error: null }),
