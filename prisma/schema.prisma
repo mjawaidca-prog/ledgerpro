@@ -33,6 +33,8 @@ model User {
   taxRegistrationsReviewed CompanyTaxRegistration[] @relation("TaxRegistrationReviewer")
   taxCodeVersionsReviewed TaxCodeVersion[]          @relation("TaxCodeVersionReviewer")
   taxSnapshotsCreated    DocumentLineTaxSnapshot[]  @relation("TaxSnapshotCreator")
+  taxPostingsCreated     TaxPosting[]                @relation("TaxPostingCreator")
+  taxRecoveriesReviewed  DocumentLineTaxComponent[]  @relation("TaxRecoveryReviewer")
 }
 
 model Company {
@@ -91,6 +93,7 @@ model Company {
   taxRegistrations    CompanyTaxRegistration[]
   taxCodes            TaxCode[]
   taxSnapshots        DocumentLineTaxSnapshot[]
+  taxPostings         TaxPosting[]
 }
 
 enum BusinessType {
@@ -771,6 +774,7 @@ model TaxCodeComponent {
   taxCodeVersion   TaxCodeVersion   @relation(fields: [taxCodeVersionId], references: [id], onDelete: Cascade)
   type             TaxComponentType
   authority        TaxAuthority
+  treatment        TaxTreatment     @default(taxable)
   rate             Decimal          @db.Decimal(7, 3)
   recoveryAllowed  Boolean          @default(false)
 
@@ -789,6 +793,9 @@ model DocumentLineTaxSnapshot {
   invoiceLineItem            InvoiceLineItem?           @relation(fields: [invoiceLineItemId], references: [id], onDelete: Restrict)
   billLineItemId             String?                    @unique
   billLineItem               BillLineItem?              @relation(fields: [billLineItemId], references: [id], onDelete: Restrict)
+  reversalOfId               String?                    @unique
+  reversalOf                 DocumentLineTaxSnapshot?   @relation("TaxSnapshotReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy                 DocumentLineTaxSnapshot?   @relation("TaxSnapshotReversal")
   direction                  TaxDirection
   treatment                  TaxTreatment
   priceMode                  TaxPriceMode
@@ -812,29 +819,66 @@ model DocumentLineTaxSnapshot {
   createdById                String?
   createdBy                  User?                      @relation("TaxSnapshotCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt                  DateTime                   @default(now())
+  postingId                  String?
+  posting                    TaxPosting?                @relation(fields: [postingId], references: [id], onDelete: Restrict)
   components                 DocumentLineTaxComponent[]
 
   @@unique([companyId, sourceKey])
   @@index([companyId, taxPointDate])
   @@index([taxCodeVersionId])
   @@index([createdById])
+  @@index([postingId])
 }
 
 model DocumentLineTaxComponent {
-  id                  String                  @id @default(cuid())
-  snapshotId          String
-  snapshot            DocumentLineTaxSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  type                TaxComponentType
-  authority           TaxAuthority
-  rate                Decimal                 @db.Decimal(7, 3)
-  taxAmount           Decimal                 @db.Decimal(14, 2)
-  outputTax           Decimal                 @db.Decimal(14, 2)
-  recoverableTax      Decimal                 @db.Decimal(14, 2)
-  nonrecoverableTax   Decimal                 @db.Decimal(14, 2)
-  recoveryBasisPoints Int
-  recoveryReason      String?
+  id                     String                  @id @default(cuid())
+  snapshotId             String
+  snapshot               DocumentLineTaxSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  type                   TaxComponentType
+  authority              TaxAuthority
+  treatment              TaxTreatment            @default(legacy_unclassified)
+  rate                   Decimal                 @db.Decimal(7, 3)
+  taxAmount              Decimal                 @db.Decimal(14, 2)
+  taxHome                Decimal                 @default(0) @db.Decimal(14, 2)
+  outputTax              Decimal                 @db.Decimal(14, 2)
+  outputTaxHome          Decimal                 @default(0) @db.Decimal(14, 2)
+  recoverableTax         Decimal                 @db.Decimal(14, 2)
+  recoverableTaxHome     Decimal                 @default(0) @db.Decimal(14, 2)
+  nonrecoverableTax      Decimal                 @db.Decimal(14, 2)
+  nonrecoverableTaxHome  Decimal                 @default(0) @db.Decimal(14, 2)
+  recoveryBasisPoints    Int
+  recoveryReason         String?
+  recoveryEvidence       Json?
+  recoveryReviewedById   String?
+  recoveryReviewedBy     User?                   @relation("TaxRecoveryReviewer", fields: [recoveryReviewedById], references: [id], onDelete: SetNull)
+  recoveryReviewedAt     DateTime?
 
   @@unique([snapshotId, type])
+  @@index([recoveryReviewedById])
+}
+
+// One durable link joins an idempotent posting request to its journal entry
+// and immutable line snapshots. Corrections are new postings linked through
+// reversalOfId; posted facts are never updated or deleted.
+model TaxPosting {
+  id             String                    @id @default(cuid())
+  companyId      String
+  company        Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sourceKey      String
+  requestHash    String
+  journalEntryId String                    @unique
+  journalEntry   JournalEntry              @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  reversalOfId   String?                   @unique
+  reversalOf     TaxPosting?               @relation("TaxPostingReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy     TaxPosting?               @relation("TaxPostingReversal")
+  createdById    String?
+  createdBy      User?                     @relation("TaxPostingCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime                  @default(now())
+  snapshots      DocumentLineTaxSnapshot[]
+
+  @@unique([companyId, sourceKey])
+  @@index([companyId, createdAt])
+  @@index([createdById])
 }
 
 enum TaxRegime {
@@ -926,6 +970,7 @@ model JournalEntry {
   icMirrorOf       InterCompanyTransaction? @relation("ICMirror")
   fxRevaluation    FxRevaluation? @relation("RevalEntry")
   fxReversal       FxRevaluation? @relation("RevalReversal")
+  taxPosting       TaxPosting?
 
   createdBy       String?
   createdAt       DateTime      @default(now())
