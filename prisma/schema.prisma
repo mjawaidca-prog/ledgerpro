@@ -29,6 +29,10 @@ model User {
   auditLogs              AuditLog[]
   notifications          Notification[]
   interCompanyTransactions InterCompanyTransaction[]
+  taxConfigurations      CompanyTaxConfiguration[] @relation("TaxConfigurationActor")
+  taxRegistrationsReviewed CompanyTaxRegistration[] @relation("TaxRegistrationReviewer")
+  taxCodeVersionsReviewed TaxCodeVersion[]          @relation("TaxCodeVersionReviewer")
+  taxSnapshotsCreated    DocumentLineTaxSnapshot[]  @relation("TaxSnapshotCreator")
 }
 
 model Company {
@@ -83,6 +87,10 @@ model Company {
   bankRules           BankRule[]
   reconciliations     Reconciliation[]
   importReminder      ImportReminder?
+  taxConfiguration    CompanyTaxConfiguration?
+  taxRegistrations    CompanyTaxRegistration[]
+  taxCodes            TaxCode[]
+  taxSnapshots        DocumentLineTaxSnapshot[]
 }
 
 enum BusinessType {
@@ -220,8 +228,16 @@ model ChartOfAccount {
   billLines           BillLineItem[]        @relation("BillLineCategory")
   lineItems           InvoiceLineItem[]     @relation("InvoiceLineCategory")
   categorizationRules CategorizationRule[]
+  gstHstOutputTaxConfigurations      CompanyTaxConfiguration[] @relation("GstHstOutputAccount")
+  gstHstRecoverableConfigurations    CompanyTaxConfiguration[] @relation("GstHstRecoverableAccount")
+  qstOutputTaxConfigurations         CompanyTaxConfiguration[] @relation("QstOutputAccount")
+  qstRecoverableConfigurations       CompanyTaxConfiguration[] @relation("QstRecoverableAccount")
+  pstRstPayableConfigurations        CompanyTaxConfiguration[] @relation("PstRstPayableAccount")
+  taxRoundingConfigurations          CompanyTaxConfiguration[] @relation("TaxRoundingAccount")
+  taxClearingConfigurations          CompanyTaxConfiguration[] @relation("TaxClearingAccount")
 
   @@unique([companyId, code])
+  @@unique([companyId, id])
   @@index([companyId, type])
   @@index([parentCode])
 }
@@ -558,6 +574,7 @@ model InvoiceLineItem {
   category    ChartOfAccount? @relation("InvoiceLineCategory", fields: [categoryId], references: [id])
 
   sortOrder   Int      @default(0)
+  taxSnapshot DocumentLineTaxSnapshot?
 }
 
 // ─── BILLS & EXPENSES ──────────────────────────────────────
@@ -636,6 +653,246 @@ model BillLineItem {
   category    ChartOfAccount? @relation("BillLineCategory", fields: [categoryId], references: [id])
 
   sortOrder   Int      @default(0)
+  taxSnapshot DocumentLineTaxSnapshot?
+}
+
+// ─── CANADIAN TAX CONFIGURATION & IMMUTABLE SNAPSHOTS ─────
+
+// P1-B is additive and disabled by default. Account mappings are selected from
+// each company's own chart; the application must not guess generic codes.
+model CompanyTaxConfiguration {
+  id                          String       @id @default(cuid())
+  companyId                   String       @unique
+  company                     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  enabled                     Boolean      @default(false)
+  engineVersion               String       @default("p1")
+  defaultPriceMode            TaxPriceMode @default(exclusive)
+  requireJurisdictionEvidence Boolean      @default(true)
+
+  gstHstOutputAccountId      String?
+  gstHstOutputAccount        ChartOfAccount? @relation("GstHstOutputAccount", fields: [companyId, gstHstOutputAccountId], references: [companyId, id], onDelete: Restrict)
+  gstHstRecoverableAccountId String?
+  gstHstRecoverableAccount   ChartOfAccount? @relation("GstHstRecoverableAccount", fields: [companyId, gstHstRecoverableAccountId], references: [companyId, id], onDelete: Restrict)
+  qstOutputAccountId         String?
+  qstOutputAccount           ChartOfAccount? @relation("QstOutputAccount", fields: [companyId, qstOutputAccountId], references: [companyId, id], onDelete: Restrict)
+  qstRecoverableAccountId    String?
+  qstRecoverableAccount      ChartOfAccount? @relation("QstRecoverableAccount", fields: [companyId, qstRecoverableAccountId], references: [companyId, id], onDelete: Restrict)
+  pstRstPayableAccountId     String?
+  pstRstPayableAccount       ChartOfAccount? @relation("PstRstPayableAccount", fields: [companyId, pstRstPayableAccountId], references: [companyId, id], onDelete: Restrict)
+  taxRoundingAccountId       String?
+  taxRoundingAccount         ChartOfAccount? @relation("TaxRoundingAccount", fields: [companyId, taxRoundingAccountId], references: [companyId, id], onDelete: Restrict)
+  taxClearingAccountId       String?
+  taxClearingAccount         ChartOfAccount? @relation("TaxClearingAccount", fields: [companyId, taxClearingAccountId], references: [companyId, id], onDelete: Restrict)
+
+  configuredById String?
+  configuredBy   User?     @relation("TaxConfigurationActor", fields: [configuredById], references: [id], onDelete: SetNull)
+  configuredAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([enabled])
+  @@index([companyId, gstHstOutputAccountId])
+  @@index([companyId, gstHstRecoverableAccountId])
+  @@index([companyId, qstOutputAccountId])
+  @@index([companyId, qstRecoverableAccountId])
+  @@index([companyId, pstRstPayableAccountId])
+  @@index([companyId, taxRoundingAccountId])
+  @@index([companyId, taxClearingAccountId])
+  @@index([configuredById])
+}
+
+model CompanyTaxRegistration {
+  id                 String             @id @default(cuid())
+  companyId          String
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  regime             TaxRegime
+  registrationNumber String
+  province           CanadianProvince?
+  method             TaxFilingMethod    @default(regular)
+  filingFrequency    TaxFilingFrequency
+  validFrom          DateTime
+  validTo            DateTime?
+  active             Boolean            @default(true)
+  reviewedById       String?
+  reviewedBy         User?              @relation("TaxRegistrationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([companyId, regime, registrationNumber, validFrom])
+  @@index([companyId, regime, active])
+  @@index([companyId, validFrom, validTo])
+  @@index([reviewedById])
+}
+
+model TaxCode {
+  id        String           @id @default(cuid())
+  companyId String
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  active    Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  versions  TaxCodeVersion[]
+
+  @@unique([companyId, code])
+  @@index([companyId, active])
+}
+
+model TaxCodeVersion {
+  id              String                    @id @default(cuid())
+  taxCodeId       String
+  taxCode         TaxCode                   @relation(fields: [taxCodeId], references: [id], onDelete: Cascade)
+  version         Int
+  treatment       TaxTreatment
+  jurisdiction    CanadianProvince
+  priceMode       TaxPriceMode              @default(exclusive)
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  sourceReference String
+  reviewStatus    TaxReviewStatus           @default(draft)
+  reviewedById    String?
+  reviewedBy      User?                     @relation("TaxCodeVersionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  createdAt       DateTime                  @default(now())
+  components      TaxCodeComponent[]
+  snapshots       DocumentLineTaxSnapshot[]
+
+  @@unique([taxCodeId, version])
+  @@index([taxCodeId, effectiveFrom, effectiveTo])
+  @@index([jurisdiction, reviewStatus])
+  @@index([reviewedById])
+}
+
+model TaxCodeComponent {
+  id               String           @id @default(cuid())
+  taxCodeVersionId String
+  taxCodeVersion   TaxCodeVersion   @relation(fields: [taxCodeVersionId], references: [id], onDelete: Cascade)
+  type             TaxComponentType
+  authority        TaxAuthority
+  rate             Decimal          @db.Decimal(7, 3)
+  recoveryAllowed  Boolean          @default(false)
+
+  @@unique([taxCodeVersionId, type])
+}
+
+// Created only when P1 posting is introduced. Rows have no updatedAt field on
+// purpose: posted tax facts are append-only and corrections use reversals.
+model DocumentLineTaxSnapshot {
+  id                         String                     @id @default(cuid())
+  companyId                  String
+  company                    Company                    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  taxCodeVersionId           String
+  taxCodeVersion             TaxCodeVersion             @relation(fields: [taxCodeVersionId], references: [id], onDelete: Restrict)
+  invoiceLineItemId          String?                    @unique
+  invoiceLineItem            InvoiceLineItem?           @relation(fields: [invoiceLineItemId], references: [id], onDelete: Restrict)
+  billLineItemId             String?                    @unique
+  billLineItem               BillLineItem?              @relation(fields: [billLineItemId], references: [id], onDelete: Restrict)
+  direction                  TaxDirection
+  treatment                  TaxTreatment
+  priceMode                  TaxPriceMode
+  taxPointDate               DateTime
+  jurisdiction               CanadianProvince
+  jurisdictionEvidence       Json
+  jurisdictionOverrideReason String?
+  documentCurrency           String
+  homeCurrency               String
+  netAmount                  Decimal                    @db.Decimal(14, 2)
+  taxAmount                  Decimal                    @db.Decimal(14, 2)
+  grossAmount                Decimal                    @db.Decimal(14, 2)
+  netHome                    Decimal                    @db.Decimal(14, 2)
+  taxHome                    Decimal                    @db.Decimal(14, 2)
+  grossHome                  Decimal                    @db.Decimal(14, 2)
+  fxRate                     Decimal?                   @db.Decimal(18, 8)
+  fxRateSource               RateSource?
+  fxRateDate                 DateTime?
+  engineVersion              String
+  sourceKey                  String
+  createdById                String?
+  createdBy                  User?                      @relation("TaxSnapshotCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt                  DateTime                   @default(now())
+  components                 DocumentLineTaxComponent[]
+
+  @@unique([companyId, sourceKey])
+  @@index([companyId, taxPointDate])
+  @@index([taxCodeVersionId])
+  @@index([createdById])
+}
+
+model DocumentLineTaxComponent {
+  id                  String                  @id @default(cuid())
+  snapshotId          String
+  snapshot            DocumentLineTaxSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  type                TaxComponentType
+  authority           TaxAuthority
+  rate                Decimal                 @db.Decimal(7, 3)
+  taxAmount           Decimal                 @db.Decimal(14, 2)
+  outputTax           Decimal                 @db.Decimal(14, 2)
+  recoverableTax      Decimal                 @db.Decimal(14, 2)
+  nonrecoverableTax   Decimal                 @db.Decimal(14, 2)
+  recoveryBasisPoints Int
+  recoveryReason      String?
+
+  @@unique([snapshotId, type])
+}
+
+enum TaxRegime {
+  gst_hst
+  qst
+  pst
+  rst
+}
+
+enum TaxFilingMethod {
+  regular
+}
+
+enum TaxFilingFrequency {
+  monthly
+  quarterly
+  annual
+  other
+}
+
+enum TaxTreatment {
+  taxable
+  zero_rated
+  exempt
+  out_of_scope
+  legacy_unclassified
+}
+
+enum TaxPriceMode {
+  exclusive
+  inclusive
+}
+
+enum TaxReviewStatus {
+  draft
+  approved
+  retired
+}
+
+enum TaxDirection {
+  sale
+  purchase
+}
+
+enum TaxComponentType {
+  gst
+  hst
+  pst
+  rst
+  qst
+}
+
+enum TaxAuthority {
+  cra
+  revenu_quebec
+  british_columbia
+  manitoba
+  saskatchewan
 }
 
 // ─── DOUBLE-ENTRY JOURNAL ──────────────────────────────────
