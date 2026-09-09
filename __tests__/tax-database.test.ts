@@ -89,7 +89,7 @@ run('P1-D real Postgres document lifecycle', () => {
 
   test('settles and reverses reviewed CAD payments without treating a null FX rate as zero', async () => {
     const invoiceResponse = await createInvoice(request({
-      customerId: 'p1d-ci-contact', issueDate: '2026-02-01', dueDate: '2026-03-01', status: 'sent',
+      customerId: 'p1d-ci-contact', issueDate: '2026-04-01', dueDate: '2026-05-01', status: 'sent',
       subtotal: 0, total: 0,
       lineItems: [{ description: 'Synthetic taxable service', quantity: 1, unitPrice: 100, amount: 999, categoryId: 'p1d-4000' }],
       taxDecision: { requestKey: 'p1f-ci-cad-payment-invoice', lines: selections() },
@@ -97,13 +97,13 @@ run('P1-D real Postgres document lifecycle', () => {
     const invoiceBody = await invoiceResponse.json();
     expect(invoiceResponse.status).toBe(201);
 
-    const receipt = await payInvoice(request({ amount: 114.98, currency: 'CAD', date: '2026-02-10', accountId: 'p1d-ci-bank' }), { params: { id: invoiceBody.data.id } });
+    const receipt = await payInvoice(request({ amount: 114.98, currency: 'CAD', date: '2026-04-10', accountId: 'p1d-ci-bank' }), { params: { id: invoiceBody.data.id } });
     expect(receipt.status).toBe(201);
     const receiptBody = await receipt.json();
     const invoice = await db.invoice.findUniqueOrThrow({ where: { id: invoiceBody.data.id } });
     expect({ status: invoice.status, paid: Number(invoice.paidAmount), paidHome: Number(invoice.paidAmountHome) }).toEqual({ status: 'paid', paid: 114.98, paidHome: 114.98 });
 
-    const disbursement = await payBill(request({ amount: 114.98, date: '2026-02-11', accountId: 'p1d-ci-bank' }), { params: { id: billId } });
+    const disbursement = await payBill(request({ amount: 114.98, date: '2026-04-11', accountId: 'p1d-ci-bank' }), { params: { id: billId } });
     expect(disbursement.status).toBe(201);
     const disbursementBody = await disbursement.json();
     const paidBill = await db.bill.findUniqueOrThrow({ where: { id: billId } });
@@ -124,8 +124,8 @@ run('P1-D real Postgres document lifecycle', () => {
     expect(Number((await db.financialAccount.findUniqueOrThrow({ where: { id: 'p1d-ci-bank' } })).currentBalance)).toBe(0);
 
     expect((await updateInvoice(request({ status: 'void' }, 'PUT'), { params: { id: invoiceBody.data.id } })).status).toBe(409);
-    const invoiceReversal = await reverseInvoicePayment(request({ paymentEntryId: receiptBody.data.entry.id, date: '2026-02-12' }, 'DELETE'), { params: { id: invoiceBody.data.id } });
-    const billReversal = await reverseBillPayment(request({ paymentEntryId: disbursementBody.data.entry.id, date: '2026-02-12' }, 'DELETE'), { params: { id: billId } });
+    const invoiceReversal = await reverseInvoicePayment(request({ paymentEntryId: receiptBody.data.entry.id, date: '2026-04-12' }, 'DELETE'), { params: { id: invoiceBody.data.id } });
+    const billReversal = await reverseBillPayment(request({ paymentEntryId: disbursementBody.data.entry.id, date: '2026-04-12' }, 'DELETE'), { params: { id: billId } });
     expect([invoiceReversal.status, billReversal.status]).toEqual([200, 200]);
     const [reopenedInvoice, reopenedBill, restoredBank] = await Promise.all([
       db.invoice.findUniqueOrThrow({ where: { id: invoiceBody.data.id } }),
