@@ -10,6 +10,8 @@ jest.mock('@/lib/api-helpers', () => ({
 }));
 import { POST as createBill } from '@/app/api/bills/route';
 import { POST as createInvoice } from '@/app/api/invoices/route';
+import { POST as payBill, DELETE as reverseBillPayment } from '@/app/api/bills/[id]/payments/route';
+import { POST as payInvoice, DELETE as reverseInvoicePayment } from '@/app/api/invoices/[id]/payments/route';
 import { PUT as updateInvoice } from '@/app/api/invoices/[id]/route';
 import { createWorkpaper, getWorkpaper, transitionWorkpaper } from '@/lib/tax/workpaper-service';
 
@@ -24,9 +26,10 @@ run('P1-D real Postgres document lifecycle', () => {
     await db.user.createMany({ data: [{ id: actor, name: 'Synthetic tax reviewer', email: 'p1d-owner@example.invalid' }, { id: 'p1d-ci-bookkeeper', name: 'Synthetic bookkeeper', email: 'p1d-bookkeeper@example.invalid' }] });
     await db.company.create({ data: { id: companyId, name: 'P1-D synthetic CI company', province: 'QC', fiscalYearStart: date, onboardingComplete: true } });
     await db.membership.createMany({ data: [{ companyId, userId: actor, role: 'owner' }, { companyId, userId: 'p1d-ci-bookkeeper', role: 'bookkeeper' }] });
-    for (const [code, type] of [['1100', 'asset'], ['2200', 'liability'], ['2300', 'liability'], ['2310', 'liability'], ['1300', 'asset'], ['1310', 'asset'], ['4000', 'income'], ['5000', 'expense'], ['5999', 'expense']] as const) {
+    for (const [code, type] of [['1000', 'asset'], ['1100', 'asset'], ['2200', 'liability'], ['2300', 'liability'], ['2310', 'liability'], ['1300', 'asset'], ['1310', 'asset'], ['4000', 'income'], ['4310', 'income'], ['5000', 'expense'], ['4390', 'expense'], ['5999', 'expense']] as const) {
       await db.chartOfAccount.create({ data: { id: `p1d-${code}`, companyId, code, type, name: `Synthetic ${code}` } });
     }
+    await db.financialAccount.create({ data: { id: 'p1d-ci-bank', companyId, name: 'Synthetic CAD bank', kind: 'checking', currency: 'CAD', glAccountCode: '1000' } });
     await db.contact.create({ data: { id: 'p1d-ci-contact', companyId, name: 'Synthetic contact', type: 'supplier' } });
     await db.companyTaxConfiguration.create({ data: { companyId, enabled: true, configuredById: actor, configuredAt: date, gstHstOutputAccountId: 'p1d-2300', gstHstRecoverableAccountId: 'p1d-1300', qstOutputAccountId: 'p1d-2310', qstRecoverableAccountId: 'p1d-1310', taxRoundingAccountId: 'p1d-5999' } });
     for (const regime of ['gst_hst', 'qst'] as const) await db.companyTaxRegistration.create({ data: { companyId, regime, registrationNumber: `SYNTHETIC-${regime}`, filingFrequency: 'quarterly', validFrom: date, reviewedById: actor, reviewedAt: date } });
@@ -36,6 +39,7 @@ run('P1-D real Postgres document lifecycle', () => {
   const selections = (purchase = false) => [{ lineIndex: 0, taxCodeVersionId: 'p1d-taxable', jurisdictionEvidence: { reference: 'Synthetic Quebec delivery' }, ...(purchase ? { recovery: { GST: { basisPoints: 5000, reason: 'Half commercial use fixture', evidence: { receipt: 'synthetic' }, reviewedById: 'p1d-ci-owner' }, QST: { basisPoints: 10000, reason: 'Fully eligible fixture', evidence: { receipt: 'synthetic' }, reviewedById: 'p1d-ci-owner' } } } : {}) }];
   const bill = (key: string) => ({ kind: 'bill', vendorId: 'p1d-ci-contact', billDate: '2026-01-15', status: 'open', subtotal: 1, taxAmount: 999, total: 1000, lineItems: [{ description: 'Synthetic supplies', amount: 100, categoryId: 'p1d-5000' }], taxDecision: { requestKey: key, lines: selections(true) } });
   let invoiceId: string;
+  let billId: string;
 
   test('creates a mixed taxable/exempt invoice with exact independent GST and QST', async () => {
     const response = await createInvoice(request({ customerId: 'p1d-ci-contact', issueDate: '2026-01-15', dueDate: '2026-02-15', status: 'sent', subtotal: 0, total: 0, lineItems: [{ description: 'Taxable', quantity: 1, unitPrice: 100, amount: 999, categoryId: 'p1d-4000' }, { description: 'Exempt', quantity: 1, unitPrice: 50, amount: 888, categoryId: 'p1d-4000' }], taxDecision: { requestKey: 'p1d-ci-mixed-invoice', lines: [...selections(), { lineIndex: 1, taxCodeVersionId: 'p1d-exempt', jurisdictionEvidence: { reference: 'Synthetic exemption' } }] } }));
@@ -55,6 +59,7 @@ run('P1-D real Postgres document lifecycle', () => {
     const bodies = await Promise.all(responses.map(response => response.json()));
     expect(responses.map(response => response.status)).toEqual([201, 201]);
     expect(bodies[0].data.id).toBe(bodies[1].data.id);
+    billId = bodies[0].data.id;
     expect(Number(bodies[0].data.total)).toBe(114.98);
     expect(await db.journalEntry.count({ where: { companyId, sourceId: bodies[0].data.id } })).toBe(1);
     const snapshot = await db.documentLineTaxSnapshot.findFirstOrThrow({ where: { billLineItem: { billId: bodies[0].data.id } }, include: { components: true } });
@@ -81,6 +86,58 @@ run('P1-D real Postgres document lifecycle', () => {
       expect(await db.journalEntry.count({ where: { companyId } })).toBe(journalsBefore);
     } finally { await db.chartOfAccount.update({ where: { id: 'p1d-2200' }, data: { active: true } }); }
   });
+
+  test('settles and reverses reviewed CAD payments without treating a null FX rate as zero', async () => {
+    const invoiceResponse = await createInvoice(request({
+      customerId: 'p1d-ci-contact', issueDate: '2026-04-01', dueDate: '2026-05-01', status: 'sent',
+      subtotal: 0, total: 0,
+      lineItems: [{ description: 'Synthetic taxable service', quantity: 1, unitPrice: 100, amount: 999, categoryId: 'p1d-4000' }],
+      taxDecision: { requestKey: 'p1f-ci-cad-payment-invoice', lines: selections() },
+    }));
+    const invoiceBody = await invoiceResponse.json();
+    expect(invoiceResponse.status).toBe(201);
+
+    const receipt = await payInvoice(request({ amount: 114.98, currency: 'CAD', date: '2026-04-10', accountId: 'p1d-ci-bank' }), { params: { id: invoiceBody.data.id } });
+    expect(receipt.status).toBe(201);
+    const receiptBody = await receipt.json();
+    const invoice = await db.invoice.findUniqueOrThrow({ where: { id: invoiceBody.data.id } });
+    expect({ status: invoice.status, paid: Number(invoice.paidAmount), paidHome: Number(invoice.paidAmountHome) }).toEqual({ status: 'paid', paid: 114.98, paidHome: 114.98 });
+
+    const disbursement = await payBill(request({ amount: 114.98, date: '2026-04-11', accountId: 'p1d-ci-bank' }), { params: { id: billId } });
+    expect(disbursement.status).toBe(201);
+    const disbursementBody = await disbursement.json();
+    const paidBill = await db.bill.findUniqueOrThrow({ where: { id: billId } });
+    expect({ status: paidBill.status, paid: Number(paidBill.paidAmount), paidHome: Number(paidBill.paidAmountHome) }).toEqual({ status: 'paid', paid: 114.98, paidHome: 114.98 });
+
+    const payments = await db.journalEntry.findMany({
+      where: { companyId, sourceType: 'payment', sourceId: { in: [invoiceBody.data.id, billId] } },
+      include: { lines: true },
+    });
+    expect(payments).toHaveLength(2);
+    for (const payment of payments) {
+      const debit = payment.lines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const credit = payment.lines.reduce((sum, line) => sum + Number(line.credit), 0);
+      expect(debit).toBeCloseTo(114.98, 2);
+      expect(credit).toBeCloseTo(114.98, 2);
+      expect(payment.lines.some(line => ['4310', '4390'].includes(line.glAccountCode))).toBe(false);
+    }
+    expect(Number((await db.financialAccount.findUniqueOrThrow({ where: { id: 'p1d-ci-bank' } })).currentBalance)).toBe(0);
+
+    expect((await updateInvoice(request({ status: 'void' }, 'PUT'), { params: { id: invoiceBody.data.id } })).status).toBe(409);
+    const invoiceReversal = await reverseInvoicePayment(request({ paymentEntryId: receiptBody.data.entry.id, date: '2026-04-12' }, 'DELETE'), { params: { id: invoiceBody.data.id } });
+    const billReversal = await reverseBillPayment(request({ paymentEntryId: disbursementBody.data.entry.id, date: '2026-04-12' }, 'DELETE'), { params: { id: billId } });
+    expect([invoiceReversal.status, billReversal.status]).toEqual([200, 200]);
+    const [reopenedInvoice, reopenedBill, restoredBank] = await Promise.all([
+      db.invoice.findUniqueOrThrow({ where: { id: invoiceBody.data.id } }),
+      db.bill.findUniqueOrThrow({ where: { id: billId } }),
+      db.financialAccount.findUniqueOrThrow({ where: { id: 'p1d-ci-bank' } }),
+    ]);
+    expect({ status: reopenedInvoice.status, paid: Number(reopenedInvoice.paidAmount), paidHome: Number(reopenedInvoice.paidAmountHome) }).toEqual({ status: 'sent', paid: 0, paidHome: 0 });
+    expect({ status: reopenedBill.status, paid: Number(reopenedBill.paidAmount), paidHome: Number(reopenedBill.paidAmountHome) }).toEqual({ status: 'open', paid: 0, paidHome: 0 });
+    expect(Number(restoredBank.currentBalance)).toBe(0);
+    expect(await db.journalEntry.count({ where: { companyId, reversalOfId: { not: null }, sourceType: 'payment' } })).toBe(2);
+  });
+
 
   test('a bookkeeper cannot impersonate the recovery reviewer', async () => {
     actor = 'p1d-ci-bookkeeper';

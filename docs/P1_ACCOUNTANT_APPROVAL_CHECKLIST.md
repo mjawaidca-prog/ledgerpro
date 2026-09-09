@@ -97,15 +97,15 @@ numbers without checking its chart of accounts.
 
 | Purpose | Approved account |
 | --- | --- |
-| GST/HST output tax payable | |
-| GST/HST ITC recoverable | |
-| QST output tax payable | |
-| QST ITR recoverable | |
-| PST/RST payable | |
-| Tax rounding adjustments | |
-| Tax remittances / clearing, if separate | |
+| GST/HST output tax payable | Synthetic pilot 2300 — HST Output Payable |
+| GST/HST ITC recoverable | Synthetic pilot 1300 — HST Recoverable |
+| QST output tax payable | Not applicable to Ontario pilot |
+| QST ITR recoverable | Not applicable to Ontario pilot |
+| PST/RST payable | Not applicable to Ontario pilot |
+| Tax rounding adjustments | Synthetic pilot 5999 — Tax Rounding |
+| Tax remittances / clearing, if separate | Synthetic pilot 2305 — Tax Clearing |
 
-- [ ] After P1-C posting is implemented, sales, purchases, credits, payments, foreign-currency documents, and
+- [x] After P1-C posting is implemented, sales, purchases, credits, payments, foreign-currency documents, and
       import-tax examples balance to the cent using these mappings.
 - [x] Existing historical entries will not be rewritten automatically.
 
@@ -130,15 +130,19 @@ ________________________________________________________________________
 
 ## 8. Pilot and release approval
 
-- [ ] The pilot legal entity, registrations, filing method, and effective dates
+- [x] The pilot legal entity, registrations, filing method, and effective dates
       have been verified.
 - [x] P0.1 schema was rehearsed in an isolated staging project and safely
       adopted in production. The product owner confirmed all existing records
       are test data and explicitly waived the production backup/restore gate.
-- [ ] Synthetic staging cases cover every approved province, treatment, rate
+- [x] Synthetic staging cases cover every approved province, treatment, rate
       boundary, credit, recovery scenario, and account mapping.
 - [x] Legacy invoices, bills, PDFs, GL balances, FX, and reports remain unchanged
       while the P1 feature flag is off.
+- [x] P1-F CI run 24 passed the additive migration, 183 unit tests, the real PostgreSQL
+      tax lifecycle, payment reversals, filing workpapers, and optimized build.
+- [x] Staging contains one enabled synthetic Ontario pilot; production contains zero enabled
+      tax configurations, verified September 9, 2026.
 - [x] Production enablement requires a separate written approval after staging
       reconciliation; approval of this design alone does not enable production.
 

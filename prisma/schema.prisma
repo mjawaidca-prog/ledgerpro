@@ -307,7 +307,9 @@ model FinancialAccount {
   bills            Bill[]            @relation("BillPaymentAccount")
   columnMappings   ColumnMapping[]
   invoicePayments  Invoice[]         @relation("InvoicePaymentAccount")
+  journalPayments  JournalEntry[]    @relation("JournalPaymentAccount")
 
+  @@unique([companyId, id])
   @@index([companyId])
 }
 
@@ -1020,6 +1022,11 @@ model JournalEntry {
   sourceType  JournalSource
   sourceId    String?
 
+  // Payment entries retain the exact bank/card account used so a later
+  // reversal can restore both the subledger and financial-account balance.
+  paymentAccountId String?
+  paymentAccount   FinancialAccount? @relation("JournalPaymentAccount", fields: [companyId, paymentAccountId], references: [companyId, id], onDelete: Restrict)
+
   lines JournalLine[]
 
   transferMatchId String?        @unique
@@ -1046,6 +1053,7 @@ model JournalEntry {
   createdAt DateTime @default(now())
 
   @@index([companyId, entryDate])
+  @@index([companyId, paymentAccountId])
   @@index([sourceType, sourceId])
   @@index([interCompanyId])
 }
