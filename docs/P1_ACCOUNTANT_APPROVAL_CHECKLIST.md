@@ -120,7 +120,9 @@ numbers without checking its chart of accounts.
       confirmation.
 - [x] Consolidated reports will not be represented as consolidated tax returns.
 
-- [ ] P1-E staging evidence confirms the workpapers and reconciliations above.
+- [x] P1-E automated PostgreSQL evidence confirms source-to-return-to-GL reconciliation,
+      review and external-filing recording controls, frozen exports, and amendment versions.
+      Company-specific staging acceptance remains part of P1-F.
 
 Required filing frequency, method, period rules, and adjustment handling:
 

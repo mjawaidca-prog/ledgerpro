@@ -11,6 +11,7 @@ jest.mock('@/lib/api-helpers', () => ({
 import { POST as createBill } from '@/app/api/bills/route';
 import { POST as createInvoice } from '@/app/api/invoices/route';
 import { PUT as updateInvoice } from '@/app/api/invoices/[id]/route';
+import { createWorkpaper, getWorkpaper, transitionWorkpaper } from '@/lib/tax/workpaper-service';
 
 const run = process.env.CI_TAX_DATABASE === '1' ? describe : describe.skip;
 const request = (body: unknown, method = 'POST') => new NextRequest('http://localhost/api/test', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -101,5 +102,23 @@ run('P1-D real Postgres document lifecycle', () => {
     for (const line of entries.flatMap(entry => entry.lines)) amounts.set(line.glAccountCode, (amounts.get(line.glAccountCode) ?? 0) + Math.round(Number(line.debit) * 100) - Math.round(Number(line.credit) * 100));
     expect([...amounts.values()].every(value => value === 0)).toBe(true);
     expect((await db.invoice.findUniqueOrThrow({ where: { id: invoiceId } })).status).toBe('void');
+  });
+
+  test('prepares, reviews, records external filing, and opens an amendment version', async () => {
+    const registration = await db.companyTaxRegistration.findFirstOrThrow({ where: { companyId, regime: 'gst_hst' } });
+    const inputs = { classifications: [], periodEvidence: 'Synthetic PostgreSQL source-to-ledger reconciliation', reviewNote: 'Synthetic approval only' };
+    const first = await createWorkpaper(companyId, actor, registration.id, new Date('2026-01-01T00:00:00Z'), new Date('2026-03-31T00:00:00Z'), inputs);
+    const draft = await getWorkpaper(companyId, first.id);
+    expect(draft.current.blockers).toEqual([]);
+    expect(draft.current.lines['103']).toBe(500);
+    expect(draft.current.lines['106']).toBe(250);
+    expect(draft.current.lines['109']).toBe(250);
+    await transitionWorkpaper(companyId, actor, first.id, 'prepare', inputs);
+    await transitionWorkpaper(companyId, actor, first.id, 'review', inputs);
+    await transitionWorkpaper(companyId, actor, first.id, 'record_filing', inputs, 'SYNTHETIC-CRA-CONFIRMATION');
+    expect((await db.taxReturnWorkpaper.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('filed_recorded');
+    const amendment = await createWorkpaper(companyId, actor, registration.id, new Date('2026-01-01T00:00:00Z'), new Date('2026-03-31T00:00:00Z'), inputs);
+    expect(amendment.version).toBe(2);
+    expect(await db.auditLog.count({ where: { companyId, entityId: first.id, action: { startsWith: 'tax.workpaper.' } } })).toBe(3);
   });
 });
