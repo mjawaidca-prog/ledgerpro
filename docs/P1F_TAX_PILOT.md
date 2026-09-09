@@ -44,4 +44,12 @@ The broader unit suite covers supported Canadian rates, component treatment, exc
 
 ## Completion decision
 
-P1-F is complete when the migration and lifecycle tests pass in CI, the synthetic Ontario staging fixture reconciles with no blockers or drift, the staging flag is enabled only for that fixture, and production is verified to have zero enabled tax configurations.
+Completed evidence (September 9, 2026):
+
+- GitHub CI run 24 passed all gates, including 183 unit tests, migration deploy/status/drift, the real PostgreSQL tax lifecycle, typecheck, and optimized build.
+- The additive P1-F migration is applied to staging and production.
+- All eight staging readiness checks passed.
+- Staging has exactly one enabled tax configuration: `p1f-staging-ontario`.
+- Production has zero enabled tax configurations.
+- The payment trace column and tenant-scoped foreign key exist in both databases.
+- Direct `anon` and `authenticated` SELECT privileges remain revoked from the server-owned tax tables.
