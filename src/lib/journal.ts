@@ -38,6 +38,7 @@ interface JournalEntryInput {
   sourceType: 'invoice' | 'bill' | 'payment' | 'transfer' | 'manual' | 'revaluation';
   sourceId?: string;
   createdBy?: string;
+  paymentAccountId?: string;
   lines: JournalLineInput[];
 }
 
@@ -93,6 +94,7 @@ export async function postJournalEntry(
       sourceType: input.sourceType,
       sourceId: input.sourceId,
       createdBy: input.createdBy,
+      paymentAccountId: input.paymentAccountId,
       lines: {
         create: input.lines.map((line) => ({
           glAccountCode: line.glAccountCode,
@@ -266,12 +268,18 @@ export interface PaymentPostingOptions {
  */
 export async function postInvoicePayment(opts: PaymentPostingOptions) {
   return db.$transaction(async (tx) => {
-    const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } });
+    const invoice = await tx.invoice.findUniqueOrThrow({
+      where: { id: opts.documentId, companyId: opts.companyId },
+      include: { company: { select: { currency: true } } },
+    });
     if (invoice.status === 'void') throw new Error('Cannot pay a voided invoice.');
-    // CAD documents legitimately have fxRate = null (resolveDocumentFx returns
-    // null for home-currency docs) — the real invariant is: a FOREIGN document
-    // must have a frozen rate.
-    if (invoice.totalHome != null && !invoice.fxRate) throw new Error('The invoice has no frozen FX rate to settle against.');
+    const isHomeCurrency = invoice.currency === invoice.company.currency;
+    if (!isHomeCurrency && !invoice.fxRate) throw new Error('The invoice has no frozen FX rate to settle against.');
+    // Home-currency documents intentionally store no FX block. A missing value
+    // therefore means 1.00 only when both currencies are the same; Number(null)
+    // must never turn a CAD settlement rate into zero.
+    const documentRate = isHomeCurrency ? 1 : Number(invoice.fxRate);
+    if (!Number.isFinite(documentRate) || documentRate <= 0) throw new Error('The invoice has an invalid frozen FX rate.');
 
     const remainingForeign = round2(Number(invoice.total) - Number(invoice.paidAmount));
     const remainingHome = round2(Number(invoice.totalHome ?? invoice.total) - Number(invoice.paidAmountHome ?? invoice.paidAmount));
@@ -282,7 +290,7 @@ export async function postInvoicePayment(opts: PaymentPostingOptions) {
 
     const c = computeSettlement({
       amountForeign: reliefForeign,
-      invoiceRate: Number(invoice.fxRate),
+      invoiceRate: documentRate,
       settlementRate: opts.settlementRate,
       remainingForeign,
       remainingHome,
@@ -329,6 +337,7 @@ export async function postInvoicePayment(opts: PaymentPostingOptions) {
         sourceType: 'payment',
         sourceId: opts.documentId,
         createdBy: opts.userId,
+        paymentAccountId: opts.paymentAccountId,
         lines,
       },
       opts.companyId,
@@ -341,7 +350,9 @@ export async function postInvoicePayment(opts: PaymentPostingOptions) {
       where: { id: opts.documentId },
       data: {
         paidAmount: { increment: new Prisma.Decimal(opts.amountForeign) },
-        paidAmountHome: { increment: new Prisma.Decimal(cashHome) },
+        // Track the home-currency carrying amount relieved from AR. Cash at the
+        // settlement rate is separately represented by the journal entry.
+        paidAmountHome: { increment: new Prisma.Decimal(c.reliefHome) },
         paidAt: opts.paymentDate,
         paymentAccountId: opts.paymentAccountId ?? invoice.paymentAccountId,
         status: fullyPaid ? 'paid' : invoice.status,
@@ -474,9 +485,15 @@ export async function postBillToLedger(
  */
 export async function postBillPayment(opts: PaymentPostingOptions) {
   return db.$transaction(async (tx) => {
-    const bill = await tx.bill.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } });
+    const bill = await tx.bill.findUniqueOrThrow({
+      where: { id: opts.documentId, companyId: opts.companyId },
+      include: { company: { select: { currency: true } } },
+    });
     if (bill.status === 'void') throw new Error('Cannot pay a voided bill.');
-    if (bill.totalHome != null && !bill.fxRate) throw new Error('The bill has no frozen FX rate to settle against.');
+    const isHomeCurrency = bill.currency === bill.company.currency;
+    if (!isHomeCurrency && !bill.fxRate) throw new Error('The bill has no frozen FX rate to settle against.');
+    const documentRate = isHomeCurrency ? 1 : Number(bill.fxRate);
+    if (!Number.isFinite(documentRate) || documentRate <= 0) throw new Error('The bill has an invalid frozen FX rate.');
 
     const remainingForeign = round2(Number(bill.total) - Number(bill.paidAmount));
     const remainingHome = round2(Number(bill.totalHome ?? bill.total) - Number(bill.paidAmountHome ?? bill.paidAmount));
@@ -487,7 +504,7 @@ export async function postBillPayment(opts: PaymentPostingOptions) {
 
     const c = computeSettlement({
       amountForeign: reliefForeign,
-      invoiceRate: Number(bill.fxRate),
+      invoiceRate: documentRate,
       settlementRate: opts.settlementRate,
       remainingForeign,
       remainingHome,
@@ -533,6 +550,7 @@ export async function postBillPayment(opts: PaymentPostingOptions) {
         sourceType: 'payment',
         sourceId: opts.documentId,
         createdBy: opts.userId,
+        paymentAccountId: opts.paymentAccountId,
         lines,
       },
       opts.companyId,
@@ -545,7 +563,9 @@ export async function postBillPayment(opts: PaymentPostingOptions) {
       where: { id: opts.documentId },
       data: {
         paidAmount: { increment: new Prisma.Decimal(opts.amountForeign) },
-        paidAmountHome: { increment: new Prisma.Decimal(cashHome) },
+        // Track the AP carrying amount relieved, not the settlement-date cash
+        // value; their difference is the realized FX gain or loss.
+        paidAmountHome: { increment: new Prisma.Decimal(c.reliefHome) },
         paidAt: opts.paymentDate,
         paymentAccountId: opts.paymentAccountId ?? bill.paymentAccountId,
         status: fullyPaid ? 'paid' : bill.status,
@@ -564,6 +584,96 @@ export async function postBillPayment(opts: PaymentPostingOptions) {
     }
 
     return entry;
+  });
+}
+
+
+export interface PaymentReversalOptions {
+  documentId: string;
+  paymentEntryId: string;
+  companyId: string;
+  documentType: 'invoice' | 'bill';
+  reversalDate: Date;
+  userId?: string;
+}
+
+/**
+ * Reverse one recorded document payment while keeping the journal, document
+ * subledger, and financial-account balance synchronized. The original entry
+ * remains visible and is linked to an equal-and-opposite reversal.
+ */
+export async function reverseDocumentPayment(opts: PaymentReversalOptions) {
+  return db.$transaction(async (tx) => {
+    const payment = await tx.journalEntry.findUnique({
+      where: { id: opts.paymentEntryId, companyId: opts.companyId },
+      include: { lines: true, paymentAccount: true },
+    });
+    if (!payment || payment.sourceType !== 'payment' || payment.sourceId !== opts.documentId || payment.reversalOfId) {
+      throw new Error('Payment journal entry not found for this document.');
+    }
+    if (payment.voidedAt) throw new Error('This payment has already been reversed.');
+    if (!payment.paymentAccount) {
+      throw new Error('This older payment has no recorded bank account and cannot be safely reversed automatically.');
+    }
+
+    const isInvoice = opts.documentType === 'invoice';
+    const controlCode = isInvoice ? '1100' : '2200';
+    const cashSign = isInvoice ? 1 : -1;
+    const cashLines = payment.lines.filter(line => line.glAccountCode === payment.paymentAccount!.glAccountCode);
+    const cashHome = round2(cashSign * cashLines.reduce((sum, line) => sum + Number(line.debit) - Number(line.credit), 0));
+    const cashForeign = round2(cashSign * cashLines.reduce((sum, line) => sum + Number(line.debitForeign ?? 0) - Number(line.creditForeign ?? 0), 0));
+    const amountForeign = cashForeign > 0 ? cashForeign : cashHome;
+    const relievedLines = payment.lines.filter(line => line.glAccountCode === controlCode && line.description?.startsWith('Relieved at'));
+    const reliefHome = round2((isInvoice ? -1 : 1) * relievedLines.reduce((sum, line) => sum + Number(line.debit) - Number(line.credit), 0));
+    if (amountForeign <= 0 || cashHome <= 0 || reliefHome <= 0) {
+      throw new Error('The payment journal does not contain a valid settlement trace.');
+    }
+
+    const document = isInvoice
+      ? await tx.invoice.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } })
+      : await tx.bill.findUniqueOrThrow({ where: { id: opts.documentId, companyId: opts.companyId } });
+    const newPaid = round2(Math.max(0, Number(document.paidAmount) - amountForeign));
+    const newPaidHome = round2(Math.max(0, Number(document.paidAmountHome) - reliefHome));
+
+    const { reversal } = await voidJournalEntry(payment.id, opts.companyId, opts.userId, opts.reversalDate, tx);
+    const latestRemaining = await tx.journalEntry.findFirst({
+      where: {
+        companyId: opts.companyId,
+        sourceType: 'payment',
+        sourceId: opts.documentId,
+        voidedAt: null,
+        reversalOfId: null,
+        id: { not: payment.id },
+      },
+      orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    const fullyPaid = newPaid >= Number(document.total) - 0.005;
+    const shared = {
+      paidAmount: new Prisma.Decimal(newPaid),
+      paidAmountHome: new Prisma.Decimal(newPaidHome),
+      paidAt: latestRemaining?.entryDate ?? null,
+      paymentAccountId: latestRemaining?.paymentAccountId ?? null,
+    };
+    if (isInvoice) {
+      await tx.invoice.update({
+        where: { id: opts.documentId },
+        data: { ...shared, status: fullyPaid ? 'paid' : 'sent' },
+      });
+    } else {
+      await tx.bill.update({
+        where: { id: opts.documentId },
+        data: { ...shared, status: fullyPaid ? 'paid' : 'open' },
+      });
+    }
+
+    const accountDelta = payment.paymentAccount.currency === document.currency ? amountForeign : cashHome;
+    await tx.financialAccount.update({
+      where: { id: payment.paymentAccount.id },
+      data: { currentBalance: { increment: new Prisma.Decimal(isInvoice ? -accountDelta : accountDelta) } },
+    });
+
+    return { original: payment, reversal };
   });
 }
 
