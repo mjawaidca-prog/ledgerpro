@@ -8,80 +8,84 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")   // pooled (PgBouncer, port 6543) for Prisma Client
-  directUrl = env("DIRECT_URL")     // direct (port 5432) for migrations
+  url       = env("DATABASE_URL") // pooled (PgBouncer, port 6543) for Prisma Client
+  directUrl = env("DIRECT_URL") // direct (port 5432) for migrations
 }
 
 // ─── AUTH & ORGANIZATION ────────────────────────────────────
 
 model User {
-  id                     String     @id @default(cuid())
+  id                     String    @id @default(cuid())
   name                   String
-  email                  String     @unique
+  email                  String    @unique
   emailVerified          DateTime?
   emailVerificationToken String?
-  passwordHash           String?    // bcrypt hash
+  passwordHash           String? // bcrypt hash
   image                  String?
-  createdAt              DateTime   @default(now())
-  updatedAt              DateTime   @updatedAt
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  memberships            Membership[]
-  auditLogs              AuditLog[]
-  notifications          Notification[]
+  memberships              Membership[]
+  auditLogs                AuditLog[]
+  notifications            Notification[]
   interCompanyTransactions InterCompanyTransaction[]
-  taxConfigurations      CompanyTaxConfiguration[] @relation("TaxConfigurationActor")
-  taxRegistrationsReviewed CompanyTaxRegistration[] @relation("TaxRegistrationReviewer")
-  taxCodeVersionsReviewed TaxCodeVersion[]          @relation("TaxCodeVersionReviewer")
-  taxSnapshotsCreated    DocumentLineTaxSnapshot[]  @relation("TaxSnapshotCreator")
-  taxPostingsCreated     TaxPosting[]                @relation("TaxPostingCreator")
-  taxRecoveriesReviewed  DocumentLineTaxComponent[]  @relation("TaxRecoveryReviewer")
+  taxConfigurations        CompanyTaxConfiguration[]  @relation("TaxConfigurationActor")
+  taxRegistrationsReviewed CompanyTaxRegistration[]   @relation("TaxRegistrationReviewer")
+  taxCodeVersionsReviewed  TaxCodeVersion[]           @relation("TaxCodeVersionReviewer")
+  taxSnapshotsCreated      DocumentLineTaxSnapshot[]  @relation("TaxSnapshotCreator")
+  taxPostingsCreated       TaxPosting[]               @relation("TaxPostingCreator")
+  taxRecoveriesReviewed    DocumentLineTaxComponent[] @relation("TaxRecoveryReviewer")
+  taxWorkpapersCreated     TaxReturnWorkpaper[]       @relation("TaxWorkpaperCreator")
+  taxWorkpapersPrepared    TaxReturnWorkpaper[]       @relation("TaxWorkpaperPreparer")
+  taxWorkpapersReviewed    TaxReturnWorkpaper[]       @relation("TaxWorkpaperReviewer")
+  taxWorkpaperRemittances  TaxWorkpaperRemittance[]   @relation("TaxWorkpaperRemittanceCreator")
 }
 
 model Company {
-  id               String             @id @default(cuid())
-  name             String
-  legalName        String?
-  fiscalYearStart  DateTime           // e.g. 2025-01-01
-  fiscalYearEnd    DateTime?          // e.g. 2025-12-31 (auto: +1y -1d, editable)
-  businessType     BusinessType?      // sole_proprietor, partnership, corporation, etc.
-  businessNumber   String?            // Canada: BN (9 digits)
-  gstNumber        String?            // GST/HST registration number
-  province         CanadianProvince?  // AB, BC, MB, NB, NL, NS, NT, NU, ON, PE, QC, SK, YT
-  currency         String   @default("CAD")
-  locale           String   @default("en-CA")
-  timezone         String   @default("America/Edmonton")
-  onboardingComplete Boolean @default(false)
+  id                 String            @id @default(cuid())
+  name               String
+  legalName          String?
+  fiscalYearStart    DateTime // e.g. 2025-01-01
+  fiscalYearEnd      DateTime? // e.g. 2025-12-31 (auto: +1y -1d, editable)
+  businessType       BusinessType? // sole_proprietor, partnership, corporation, etc.
+  businessNumber     String? // Canada: BN (9 digits)
+  gstNumber          String? // GST/HST registration number
+  province           CanadianProvince? // AB, BC, MB, NB, NL, NS, NT, NU, ON, PE, QC, SK, YT
+  currency           String            @default("CAD")
+  locale             String            @default("en-CA")
+  timezone           String            @default("America/Edmonton")
+  onboardingComplete Boolean           @default(false)
 
   // ── Foreign currency ──
   enabledCurrencies       String[] @default(["CAD"])
   rateSource              String   @default("bank_of_canada") // bank_of_canada | exchangerate_host | manual_only
-  realizedFxAccountCode   String?  // defaults to 4310 at read time
-  unrealizedFxAccountCode String?  // defaults to 4320 at read time
-  fxRoundingAccountCode   String?  // defaults to 4390 at read time
+  realizedFxAccountCode   String? // defaults to 4310 at read time
+  unrealizedFxAccountCode String? // defaults to 4320 at read time
+  fxRoundingAccountCode   String? // defaults to 4390 at read time
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  memberships     Membership[]
-  subscriptions   Subscription[]
+  memberships   Membership[]
+  subscriptions Subscription[]
 
-  contacts         Contact[]
-  invoices         Invoice[]
-  bills            Bill[]
-  accounts         FinancialAccount[]
-  chartOfAccounts  ChartOfAccount[]
-  transactions     Transaction[]
-  journalEntries   JournalEntry[]
-  importBatches    ImportBatch[]
-  transferMatches  TransferMatch[]
+  contacts            Contact[]
+  invoices            Invoice[]
+  bills               Bill[]
+  accounts            FinancialAccount[]
+  chartOfAccounts     ChartOfAccount[]
+  transactions        Transaction[]
+  journalEntries      JournalEntry[]
+  importBatches       ImportBatch[]
+  transferMatches     TransferMatch[]
   auditLogs           AuditLog[]
   budgets             Budget[]
   periodCloses        PeriodClose[]
   recurringTemplates  RecurringTemplate[]
   categorizationRules CategorizationRule[]
   reportTemplates     ReportTemplate[]
-  relatedPartyLinksA  RelatedPartyLink[]    @relation("RPLinkA")
-  relatedPartyLinksB  RelatedPartyLink[]    @relation("RPLinkB")
+  relatedPartyLinksA  RelatedPartyLink[]        @relation("RPLinkA")
+  relatedPartyLinksB  RelatedPartyLink[]        @relation("RPLinkB")
   fxRevaluations      FxRevaluation[]
   fxFeedStatus        FxFeedStatus?
   importPresets       ImportPreset[]
@@ -94,6 +98,8 @@ model Company {
   taxCodes            TaxCode[]
   taxSnapshots        DocumentLineTaxSnapshot[]
   taxPostings         TaxPosting[]
+  taxWorkpapers       TaxReturnWorkpaper[]
+  taxWorkpaperRemittances TaxWorkpaperRemittance[]
 }
 
 enum BusinessType {
@@ -126,8 +132,8 @@ model Membership {
   companyId String
   role      UserRole @default(viewer)
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -146,11 +152,11 @@ enum UserRole {
 // ─── SUBSCRIPTION & PLANS ───────────────────────────────────
 
 model Plan {
-  id            String   @id @default(cuid())
-  name          String   // "Free Trial", "Basic", "Pro", "Enterprise"
+  id            String  @id @default(cuid())
+  name          String // "Free Trial", "Basic", "Pro", "Enterprise"
   stripePriceId String?
-  monthlyPrice  Decimal  @db.Decimal(10, 2)
-  annualPrice   Decimal  @db.Decimal(10, 2)
+  monthlyPrice  Decimal @db.Decimal(10, 2)
+  annualPrice   Decimal @db.Decimal(10, 2)
 
   maxUsers        Int     @default(1)
   maxCompanies    Int     @default(1)
@@ -163,32 +169,32 @@ model Plan {
   prioritySupport Boolean @default(false)
   whiteLabel      Boolean @default(false)
 
-  features        Json?
+  features Json?
 
-  subscriptions   Subscription[]
+  subscriptions Subscription[]
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Subscription {
-  id              String             @id @default(cuid())
-  companyId       String
-  company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  planId          String
-  plan            Plan               @relation(fields: [planId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planId    String
+  plan      Plan    @relation(fields: [planId], references: [id])
 
-  status          SubscriptionStatus @default(trialing)
-  trialEndsAt     DateTime?
+  status             SubscriptionStatus @default(trialing)
+  trialEndsAt        DateTime?
   currentPeriodStart DateTime
   currentPeriodEnd   DateTime
-  canceledAt      DateTime?
+  canceledAt         DateTime?
 
   stripeSubscriptionId String?
   stripeCustomerId     String?
 
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([companyId])
   @@index([status])
@@ -205,39 +211,39 @@ enum SubscriptionStatus {
 // ─── CHART OF ACCOUNTS (GL) ─────────────────────────────────
 
 model ChartOfAccount {
-  id          String  @id @default(cuid())
-  companyId   String
-  company     Company @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
   code        String
   name        String
   type        GLType
-  subType     AccountSubType?  // classification for statement presentation — falls back to a code-range heuristic when unset
-  gifiCode    String?          // CRA General Index of Financial Information code, for T2/CaseWare export
+  subType     AccountSubType? // classification for statement presentation — falls back to a code-range heuristic when unset
+  gifiCode    String? // CRA General Index of Financial Information code, for T2/CaseWare export
   detailType  String?
   parentCode  String?
   description String?
-  balance     Decimal  @default(0) @db.Decimal(14, 2)
-  active      Boolean  @default(true)
+  balance     Decimal         @default(0) @db.Decimal(14, 2)
+  active      Boolean         @default(true)
 
   // Inter-company control account — set on the 4 auto-provisioned Due from/To accounts
-  isControlAccount       Boolean  @default(false)
-  relatedPartyCompanyId  String?  // counterparty company id for reconciliation lookups
+  isControlAccount      Boolean @default(false)
+  relatedPartyCompanyId String? // counterparty company id for reconciliation lookups
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  transactions        Transaction[]        @relation("TransactionCategory")
-  billLines           BillLineItem[]        @relation("BillLineCategory")
-  lineItems           InvoiceLineItem[]     @relation("InvoiceLineCategory")
-  categorizationRules CategorizationRule[]
-  gstHstOutputTaxConfigurations      CompanyTaxConfiguration[] @relation("GstHstOutputAccount")
-  gstHstRecoverableConfigurations    CompanyTaxConfiguration[] @relation("GstHstRecoverableAccount")
-  qstOutputTaxConfigurations         CompanyTaxConfiguration[] @relation("QstOutputAccount")
-  qstRecoverableConfigurations       CompanyTaxConfiguration[] @relation("QstRecoverableAccount")
-  pstRstPayableConfigurations        CompanyTaxConfiguration[] @relation("PstRstPayableAccount")
-  taxRoundingConfigurations          CompanyTaxConfiguration[] @relation("TaxRoundingAccount")
-  taxClearingConfigurations          CompanyTaxConfiguration[] @relation("TaxClearingAccount")
+  transactions                    Transaction[]             @relation("TransactionCategory")
+  billLines                       BillLineItem[]            @relation("BillLineCategory")
+  lineItems                       InvoiceLineItem[]         @relation("InvoiceLineCategory")
+  categorizationRules             CategorizationRule[]
+  gstHstOutputTaxConfigurations   CompanyTaxConfiguration[] @relation("GstHstOutputAccount")
+  gstHstRecoverableConfigurations CompanyTaxConfiguration[] @relation("GstHstRecoverableAccount")
+  qstOutputTaxConfigurations      CompanyTaxConfiguration[] @relation("QstOutputAccount")
+  qstRecoverableConfigurations    CompanyTaxConfiguration[] @relation("QstRecoverableAccount")
+  pstRstPayableConfigurations     CompanyTaxConfiguration[] @relation("PstRstPayableAccount")
+  taxRoundingConfigurations       CompanyTaxConfiguration[] @relation("TaxRoundingAccount")
+  taxClearingConfigurations       CompanyTaxConfiguration[] @relation("TaxClearingAccount")
 
   @@unique([companyId, code])
   @@unique([companyId, id])
@@ -268,39 +274,39 @@ enum AccountSubType {
 // ─── FINANCIAL ACCOUNTS (bank / credit card / clearing) ─────
 
 model FinancialAccount {
-  id             String       @id @default(cuid())
-  companyId      String
-  company        Company      @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
   name           String
   mask           String?
   kind           AccountKind
-  institution     BankInstitution @default(OTHER)
-  currency       String       @default("CAD") // a USD bank account keeps USD
-  lastImportAt   DateTime?    // drives "Import overdue" and the step-1 overlap note
-  lockedThrough  DateTime?    // monotonic per-account reconciliation lock
-  currentBalance Decimal      @default(0) @db.Decimal(14, 2)
-  glAccountCode  String?      // e.g. "1010" — manual reference to ChartOfAccount.code
+  institution    BankInstitution @default(OTHER)
+  currency       String          @default("CAD") // a USD bank account keeps USD
+  lastImportAt   DateTime? // drives "Import overdue" and the step-1 overlap note
+  lockedThrough  DateTime? // monotonic per-account reconciliation lock
+  currentBalance Decimal         @default(0) @db.Decimal(14, 2)
+  glAccountCode  String? // e.g. "1010" — manual reference to ChartOfAccount.code
 
-  syncStatus      SyncStatus @default(manual)
-  lastSyncedAt    DateTime?
-  plaidItemId     String?
+  syncStatus       SyncStatus @default(manual)
+  lastSyncedAt     DateTime?
+  plaidItemId      String?
   plaidAccessToken String?
 
-  displayColor   String?
-  logoInitials   String?
-  isActive       Boolean     @default(true)
+  displayColor String?
+  logoInitials String?
+  isActive     Boolean @default(true)
 
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  transactions   Transaction[]  @relation("TxAccount")
-  imports        ImportBatch[]
+  transactions     Transaction[]     @relation("TxAccount")
+  imports          ImportBatch[]
   statementImports StatementImport[]
   reconciliations  Reconciliation[]
-  bills          Bill[]         @relation("BillPaymentAccount")
-  columnMappings ColumnMapping[]
-  invoicePayments Invoice[]     @relation("InvoicePaymentAccount")
+  bills            Bill[]            @relation("BillPaymentAccount")
+  columnMappings   ColumnMapping[]
+  invoicePayments  Invoice[]         @relation("InvoicePaymentAccount")
 
   @@index([companyId])
 }
@@ -322,30 +328,30 @@ enum SyncStatus {
 // ─── COLUMN MAPPING PROFILES ────────────────────────────────
 
 model ColumnMapping {
-  id                  String           @id @default(cuid())
-  financialAccountId  String
-  account             FinancialAccount @relation(fields: [financialAccountId], references: [id])
+  id                 String           @id @default(cuid())
+  financialAccountId String
+  account            FinancialAccount @relation(fields: [financialAccountId], references: [id])
 
-  profileName         String?
-  dateColumn          String
-  descriptionColumn   String
-  amountColumn        String?
-  debitColumn         String?
-  creditColumn        String?
-  balanceColumn       String?
-  signDirection       SignDirection    @default(normal)
-  skipRows            Int              @default(0)
-  dateFormat          String           @default("yyyy-MM-dd")
+  profileName       String?
+  dateColumn        String
+  descriptionColumn String
+  amountColumn      String?
+  debitColumn       String?
+  creditColumn      String?
+  balanceColumn     String?
+  signDirection     SignDirection @default(normal)
+  skipRows          Int           @default(0)
+  dateFormat        String        @default("yyyy-MM-dd")
 
   // Bank Import Redesign: header signature for matching future files
-  headerSignature     String?          // normalized: lowercased, trimmed, pipe-joined headers e.g. "date|description|withdrawals|deposits"
-  mappingsJson        Json?            // full column-to-role mapping e.g. {"Transaction Date":"date","Description":"description",...}
+  headerSignature String? // normalized: lowercased, trimmed, pipe-joined headers e.g. "date|description|withdrawals|deposits"
+  mappingsJson    Json? // full column-to-role mapping e.g. {"Transaction Date":"date","Description":"description",...}
 
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-  lastUsedAt          DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  lastUsedAt DateTime?
 
-  importBatches       ImportBatch[]
+  importBatches ImportBatch[]
 
   @@unique([financialAccountId, profileName])
   @@index([financialAccountId, headerSignature])
@@ -359,64 +365,64 @@ enum SignDirection {
 // ─── TRANSACTIONS (bank / card line items) ──────────────────
 
 model Transaction {
-  id                 String        @id @default(cuid())
-  companyId          String
-  company            Company       @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
   financialAccountId String
   account            FinancialAccount @relation("TxAccount", fields: [financialAccountId], references: [id])
 
-  date               DateTime
-  description        String
-  merchant           String?
-  rawStatementText   String?
-  amount             Decimal       @db.Decimal(14, 2)
-  currency           String        @default("CAD")
-  fxRate             Decimal?      @db.Decimal(18, 8) // frozen per-row rate (home per 1 foreign)
-  amountHome         Decimal?      @db.Decimal(14, 2) // frozen home-currency value
+  date             DateTime
+  description      String
+  merchant         String?
+  rawStatementText String?
+  amount           Decimal  @db.Decimal(14, 2)
+  currency         String   @default("CAD")
+  fxRate           Decimal? @db.Decimal(18, 8) // frozen per-row rate (home per 1 foreign)
+  amountHome       Decimal? @db.Decimal(14, 2) // frozen home-currency value
 
   // ── Banking overhaul: statement rows, matching, reconciliation ──
-  statementImportId String?       // new import log
-  statementImport    StatementImport? @relation(fields: [statementImportId], references: [id])
-  dedupeHash         String?       // sha1(date|amount|normalized description) — OFX FITID wins
-  payeeGuess         String?
-  contactId          String?       // matched contact
-  contact            Contact?      @relation(fields: [contactId], references: [id])
-  memo               String?
-  reference          String?       // cheque no / OFX FITID
-  statementBalance   Decimal?      @db.Decimal(14, 2)
-  taxCode            String?
-  taxRate            Decimal?      @db.Decimal(5, 3)
-  taxAmount          Decimal?      @db.Decimal(14, 2)
-  splits             Json?         // [{ categoryCode, amount, taxCode, taxRate, taxAmount, memo }]
-  matchedDocs        Json?         // [{ type: 'invoice'|'bill', id, amount }]
-  appliedRuleId      String?       // BankRule that categorized this row
-  appliedRule        BankRule?     @relation(fields: [appliedRuleId], references: [id])
-  reconciledInId     String?       // reconciliation membership (tick state)
-  reconciliation     Reconciliation? @relation(fields: [reconciledInId], references: [id])
+  statementImportId String? // new import log
+  statementImport   StatementImport? @relation(fields: [statementImportId], references: [id])
+  dedupeHash        String? // sha1(date|amount|normalized description) — OFX FITID wins
+  payeeGuess        String?
+  contactId         String? // matched contact
+  contact           Contact?         @relation(fields: [contactId], references: [id])
+  memo              String?
+  reference         String? // cheque no / OFX FITID
+  statementBalance  Decimal?         @db.Decimal(14, 2)
+  taxCode           String?
+  taxRate           Decimal?         @db.Decimal(5, 3)
+  taxAmount         Decimal?         @db.Decimal(14, 2)
+  splits            Json? // [{ categoryCode, amount, taxCode, taxRate, taxAmount, memo }]
+  matchedDocs       Json? // [{ type: 'invoice'|'bill', id, amount }]
+  appliedRuleId     String? // BankRule that categorized this row
+  appliedRule       BankRule?        @relation(fields: [appliedRuleId], references: [id])
+  reconciledInId    String? // reconciliation membership (tick state)
+  reconciliation    Reconciliation?  @relation(fields: [reconciledInId], references: [id])
 
-  categoryId         String?
-  category           ChartOfAccount? @relation("TransactionCategory", fields: [categoryId], references: [id])
+  categoryId          String?
+  category            ChartOfAccount? @relation("TransactionCategory", fields: [categoryId], references: [id])
   suggestedCategoryId String?
 
-  status             TxStatus      @default(toreview)
-  excludeReason      String?
-  matchRef           String?
-  reconciledAt       DateTime?
-  reconciledBy       String?
-  voidedAt           DateTime?
-  voidedBy           String?
+  status        TxStatus  @default(toreview)
+  excludeReason String?
+  matchRef      String?
+  reconciledAt  DateTime?
+  reconciledBy  String?
+  voidedAt      DateTime?
+  voidedBy      String?
 
-  importBatchId      String?
-  importBatch        ImportBatch?   @relation(fields: [importBatchId], references: [id])
-  source             TxSource      @default(manual)
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id])
+  source        TxSource     @default(manual)
 
-  transferMatch      TransferMatch? @relation("Transfers")
+  transferMatch       TransferMatch? @relation("Transfers")
   inflowTransferMatch TransferMatch? @relation("TransferInflow")
-  transferMatchId    String?        // set by transfer matching engine
+  transferMatchId     String? // set by transfer matching engine
 
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([companyId, financialAccountId, date])
   @@index([status])
@@ -445,27 +451,27 @@ enum TxSource {
 // ─── TRANSFER MATCHING ──────────────────────────────────────
 
 model TransferMatch {
-  id              String        @id @default(cuid())
-  companyId       String
-  company         Company       @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  outflowTxId     String        @unique
-  inflowTxId      String        @unique
-  amount          Decimal       @db.Decimal(14, 2)
+  outflowTxId String  @unique
+  inflowTxId  String  @unique
+  amount      Decimal @db.Decimal(14, 2)
 
   matchDate       DateTime
-  matchConfidence Decimal       @default(1.0) @db.Decimal(3, 2)
-  confirmed       Boolean       @default(false)
+  matchConfidence Decimal   @default(1.0) @db.Decimal(3, 2)
+  confirmed       Boolean   @default(false)
   confirmedAt     DateTime?
   confirmedBy     String?
 
-  journalEntryId  String?       @unique
-  journalEntry    JournalEntry?
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry?
 
-  createdAt       DateTime      @default(now())
+  createdAt DateTime @default(now())
 
-  outflowTx       Transaction   @relation("Transfers", fields: [outflowTxId], references: [id])
-  inflowTx        Transaction   @relation("TransferInflow", fields: [inflowTxId], references: [id])
+  outflowTx Transaction @relation("Transfers", fields: [outflowTxId], references: [id])
+  inflowTx  Transaction @relation("TransferInflow", fields: [inflowTxId], references: [id])
 
   @@index([companyId, confirmed])
 }
@@ -473,31 +479,31 @@ model TransferMatch {
 // ─── CONTACTS ───────────────────────────────────────────────
 
 model Contact {
-  id                String        @id @default(cuid())
-  companyId         String
-  company           Company       @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  name              String
-  companyName       String?
-  type              ContactType
-  email             String?
-  phone             String?
-  address           String?
-  currency          String         @default("CAD") // drives the invoice/bill currency
-  outstandingBalance Decimal      @default(0) @db.Decimal(14, 2)
-  status            ContactStatus @default(active)
-  notes             String?
+  name               String
+  companyName        String?
+  type               ContactType
+  email              String?
+  phone              String?
+  address            String?
+  currency           String        @default("CAD") // drives the invoice/bill currency
+  outstandingBalance Decimal       @default(0) @db.Decimal(14, 2)
+  status             ContactStatus @default(active)
+  notes              String?
 
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  invoices          Invoice[]     @relation("InvoiceCustomer")
-  bills             Bill[]        @relation("BillVendor")
+  invoices         Invoice[]     @relation("InvoiceCustomer")
+  bills            Bill[]        @relation("BillVendor")
+  bankTransactions Transaction[]
+  bankRules        BankRule[]
 
   @@index([companyId, type])
   @@index([companyId, status])
-  bankTransactions Transaction[]
-  bankRules        BankRule[]
 }
 
 enum ContactType {
@@ -513,43 +519,43 @@ enum ContactStatus {
 // ─── INVOICES ──────────────────────────────────────────────
 
 model Invoice {
-  id              String      @id
-  companyId       String
-  company         Company     @relation(fields: [companyId], references: [id])
+  id        String  @id
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  customerId      String
-  customer        Contact     @relation("InvoiceCustomer", fields: [customerId], references: [id])
+  customerId String
+  customer   Contact @relation("InvoiceCustomer", fields: [customerId], references: [id])
 
-  issueDate       DateTime
-  dueDate         DateTime
-  terms           String?
-  currency        String      @default("CAD")
+  issueDate DateTime
+  dueDate   DateTime
+  terms     String?
+  currency  String   @default("CAD")
 
-  subtotal        Decimal     @db.Decimal(14, 2)
-  taxRate         Decimal?    @default(0) @db.Decimal(5, 3)
-  taxAmount       Decimal     @default(0) @db.Decimal(14, 2)
-  total           Decimal     @db.Decimal(14, 2)
+  subtotal  Decimal  @db.Decimal(14, 2)
+  taxRate   Decimal? @default(0) @db.Decimal(5, 3)
+  taxAmount Decimal  @default(0) @db.Decimal(14, 2)
+  total     Decimal  @db.Decimal(14, 2)
 
   // FX — frozen at post, never recomputed
-  fxRate          Decimal?    @db.Decimal(18, 8) // home units per 1 foreign unit
-  fxRateSource    RateSource?
-  fxRateDate      DateTime?                      // the date the rate belongs to
-  totalHome       Decimal?    @db.Decimal(14, 2)
-  paidAmountHome  Decimal     @default(0) @db.Decimal(14, 2)
+  fxRate         Decimal?    @db.Decimal(18, 8) // home units per 1 foreign unit
+  fxRateSource   RateSource?
+  fxRateDate     DateTime? // the date the rate belongs to
+  totalHome      Decimal?    @db.Decimal(14, 2)
+  paidAmountHome Decimal     @default(0) @db.Decimal(14, 2)
 
-  status          InvoiceStatus @default(draft)
-  sentAt          DateTime?
-  paidAt          DateTime?
-  paidAmount      Decimal     @default(0) @db.Decimal(14, 2)
+  status     InvoiceStatus @default(draft)
+  sentAt     DateTime?
+  paidAt     DateTime?
+  paidAmount Decimal       @default(0) @db.Decimal(14, 2)
 
-  notes           String?
+  notes            String?
   paymentAccountId String?
 
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  paymentAccount  FinancialAccount? @relation("InvoicePaymentAccount", fields: [paymentAccountId], references: [id])
-  lineItems       InvoiceLineItem[]
+  paymentAccount FinancialAccount? @relation("InvoicePaymentAccount", fields: [paymentAccountId], references: [id])
+  lineItems      InvoiceLineItem[]
 
   @@index([companyId, customerId])
   @@index([companyId, status])
@@ -565,42 +571,42 @@ enum InvoiceStatus {
 }
 
 model InvoiceLineItem {
-  id          String   @id @default(cuid())
-  invoiceId   String
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   description String
-  quantity    Decimal  @default(1) @db.Decimal(10, 2)
-  unitPrice   Decimal  @db.Decimal(14, 2)
-  amount      Decimal  @db.Decimal(14, 2)
+  quantity    Decimal         @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal         @db.Decimal(14, 2)
+  amount      Decimal         @db.Decimal(14, 2)
   categoryId  String?
   category    ChartOfAccount? @relation("InvoiceLineCategory", fields: [categoryId], references: [id])
 
-  sortOrder   Int      @default(0)
+  sortOrder   Int                      @default(0)
   taxSnapshot DocumentLineTaxSnapshot?
 }
 
 // ─── BILLS & EXPENSES ──────────────────────────────────────
 
 model Bill {
-  id              String      @id
-  companyId       String
-  company         Company     @relation(fields: [companyId], references: [id])
+  id        String  @id
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  kind            BillKind
-  vendorId        String
-  vendor          Contact     @relation("BillVendor", fields: [vendorId], references: [id])
+  kind     BillKind
+  vendorId String
+  vendor   Contact  @relation("BillVendor", fields: [vendorId], references: [id])
 
-  billDate        DateTime
-  dueDate         DateTime?
-  terms           String?
-  referenceNo     String?
+  billDate    DateTime
+  dueDate     DateTime?
+  terms       String?
+  referenceNo String?
 
-  subtotal        Decimal     @db.Decimal(14, 2)
-  taxRate         Decimal?    @default(0) @db.Decimal(5, 3)
-  taxAmount       Decimal     @default(0) @db.Decimal(14, 2)
-  total           Decimal     @db.Decimal(14, 2)
-  currency        String      @default("CAD")
+  subtotal  Decimal  @db.Decimal(14, 2)
+  taxRate   Decimal? @default(0) @db.Decimal(5, 3)
+  taxAmount Decimal  @default(0) @db.Decimal(14, 2)
+  total     Decimal  @db.Decimal(14, 2)
+  currency  String   @default("CAD")
 
   // FX — frozen at post, never recomputed
   fxRate          Decimal?    @db.Decimal(18, 8)
@@ -612,20 +618,20 @@ model Bill {
   // derived from the foreign amount.
   importTaxAmount Decimal?    @db.Decimal(14, 2)
 
-  status          BillStatus  @default(draft)
+  status BillStatus @default(draft)
 
   paymentAccountId String?
-  paidAt          DateTime?
-  paidAmount      Decimal     @default(0) @db.Decimal(14, 2)
+  paidAt           DateTime?
+  paidAmount       Decimal   @default(0) @db.Decimal(14, 2)
 
-  notes           String?
-  attachments     String[]    @default([])
+  notes       String?
+  attachments String[] @default([])
 
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  paymentAccount  FinancialAccount? @relation("BillPaymentAccount", fields: [paymentAccountId], references: [id])
-  lineItems       BillLineItem[]
+  paymentAccount FinancialAccount? @relation("BillPaymentAccount", fields: [paymentAccountId], references: [id])
+  lineItems      BillLineItem[]
 
   @@index([companyId, vendorId])
   @@index([companyId, kind])
@@ -646,16 +652,16 @@ enum BillStatus {
 }
 
 model BillLineItem {
-  id          String   @id @default(cuid())
-  billId      String
-  bill        Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  billId String
+  bill   Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
 
   description String
-  amount      Decimal  @db.Decimal(14, 2)
+  amount      Decimal         @db.Decimal(14, 2)
   categoryId  String?
   category    ChartOfAccount? @relation("BillLineCategory", fields: [categoryId], references: [id])
 
-  sortOrder   Int      @default(0)
+  sortOrder   Int                      @default(0)
   taxSnapshot DocumentLineTaxSnapshot?
 }
 
@@ -705,22 +711,23 @@ model CompanyTaxConfiguration {
 }
 
 model CompanyTaxRegistration {
-  id                 String             @id @default(cuid())
+  id                 String               @id @default(cuid())
   companyId          String
-  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company            Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   regime             TaxRegime
   registrationNumber String
   province           CanadianProvince?
-  method             TaxFilingMethod    @default(regular)
+  method             TaxFilingMethod      @default(regular)
   filingFrequency    TaxFilingFrequency
   validFrom          DateTime
   validTo            DateTime?
-  active             Boolean            @default(true)
+  active             Boolean              @default(true)
   reviewedById       String?
-  reviewedBy         User?              @relation("TaxRegistrationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedBy         User?                @relation("TaxRegistrationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   reviewedAt         DateTime?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  workpapers         TaxReturnWorkpaper[]
 
   @@unique([companyId, regime, registrationNumber, validFrom])
   @@index([companyId, regime, active])
@@ -831,27 +838,27 @@ model DocumentLineTaxSnapshot {
 }
 
 model DocumentLineTaxComponent {
-  id                     String                  @id @default(cuid())
-  snapshotId             String
-  snapshot               DocumentLineTaxSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  type                   TaxComponentType
-  authority              TaxAuthority
-  treatment              TaxTreatment            @default(legacy_unclassified)
-  rate                   Decimal                 @db.Decimal(7, 3)
-  taxAmount              Decimal                 @db.Decimal(14, 2)
-  taxHome                Decimal                 @default(0) @db.Decimal(14, 2)
-  outputTax              Decimal                 @db.Decimal(14, 2)
-  outputTaxHome          Decimal                 @default(0) @db.Decimal(14, 2)
-  recoverableTax         Decimal                 @db.Decimal(14, 2)
-  recoverableTaxHome     Decimal                 @default(0) @db.Decimal(14, 2)
-  nonrecoverableTax      Decimal                 @db.Decimal(14, 2)
-  nonrecoverableTaxHome  Decimal                 @default(0) @db.Decimal(14, 2)
-  recoveryBasisPoints    Int
-  recoveryReason         String?
-  recoveryEvidence       Json?
-  recoveryReviewedById   String?
-  recoveryReviewedBy     User?                   @relation("TaxRecoveryReviewer", fields: [recoveryReviewedById], references: [id], onDelete: SetNull)
-  recoveryReviewedAt     DateTime?
+  id                    String                  @id @default(cuid())
+  snapshotId            String
+  snapshot              DocumentLineTaxSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  type                  TaxComponentType
+  authority             TaxAuthority
+  treatment             TaxTreatment            @default(legacy_unclassified)
+  rate                  Decimal                 @db.Decimal(7, 3)
+  taxAmount             Decimal                 @db.Decimal(14, 2)
+  taxHome               Decimal                 @default(0) @db.Decimal(14, 2)
+  outputTax             Decimal                 @db.Decimal(14, 2)
+  outputTaxHome         Decimal                 @default(0) @db.Decimal(14, 2)
+  recoverableTax        Decimal                 @db.Decimal(14, 2)
+  recoverableTaxHome    Decimal                 @default(0) @db.Decimal(14, 2)
+  nonrecoverableTax     Decimal                 @db.Decimal(14, 2)
+  nonrecoverableTaxHome Decimal                 @default(0) @db.Decimal(14, 2)
+  recoveryBasisPoints   Int
+  recoveryReason        String?
+  recoveryEvidence      Json?
+  recoveryReviewedById  String?
+  recoveryReviewedBy    User?                   @relation("TaxRecoveryReviewer", fields: [recoveryReviewedById], references: [id], onDelete: SetNull)
+  recoveryReviewedAt    DateTime?
 
   @@unique([snapshotId, type])
   @@index([recoveryReviewedById])
@@ -860,6 +867,68 @@ model DocumentLineTaxComponent {
 // One durable link joins an idempotent posting request to its journal entry
 // and immutable line snapshots. Corrections are new postings linked through
 // reversalOfId; posted facts are never updated or deleted.
+model TaxReturnWorkpaper {
+  id                 String                   @id @default(cuid())
+  companyId          String
+  company            Company                  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  registrationId     String
+  registration       CompanyTaxRegistration   @relation(fields: [registrationId], references: [id], onDelete: Restrict)
+  regime             TaxRegime
+  periodStart        DateTime                 @db.Date
+  periodEnd          DateTime                 @db.Date
+  status             TaxWorkpaperStatus       @default(draft)
+  version            Int                      @default(1)
+  inputs             Json
+  snapshot           Json
+  sourceHash         String
+  createdById        String
+  createdBy          User                     @relation("TaxWorkpaperCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  preparedById       String?
+  preparedBy         User?                    @relation("TaxWorkpaperPreparer", fields: [preparedById], references: [id], onDelete: SetNull)
+  reviewedById       String?
+  reviewedBy         User?                    @relation("TaxWorkpaperReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt         DateTime?
+  filingConfirmation String?
+  filedAt            DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  remittances        TaxWorkpaperRemittance[]
+  @@unique([companyId, registrationId, periodStart, periodEnd, version])
+  @@unique([companyId, id])
+  @@index([companyId, regime, periodStart, periodEnd])
+  @@index([registrationId])
+  @@index([createdById])
+  @@index([preparedById])
+  @@index([reviewedById])
+}
+
+enum TaxWorkpaperStatus {
+  draft
+  prepared
+  reviewed
+  filed_recorded
+}
+
+model TaxWorkpaperRemittance {
+  id             String             @id @default(cuid())
+  companyId      String
+  company        Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  workpaperId    String
+  workpaper      TaxReturnWorkpaper @relation(fields: [companyId, workpaperId], references: [companyId, id], onDelete: Restrict)
+  journalEntryId String
+  journalEntry   JournalEntry       @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  regime         TaxRegime
+  amount         Decimal            @db.Decimal(14, 2)
+  reference      String
+  createdById    String
+  createdBy      User               @relation("TaxWorkpaperRemittanceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime           @default(now())
+
+  @@unique([companyId, journalEntryId])
+  @@index([companyId, workpaperId])
+  @@index([createdById])
+}
+
 model TaxPosting {
   id             String                    @id @default(cuid())
   companyId      String
@@ -942,38 +1011,39 @@ enum TaxAuthority {
 // ─── DOUBLE-ENTRY JOURNAL ──────────────────────────────────
 
 model JournalEntry {
-  id              String        @id @default(cuid())
-  companyId       String
-  company         Company       @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  entryDate       DateTime
-  description     String
-  sourceType      JournalSource
-  sourceId        String?
+  entryDate   DateTime
+  description String
+  sourceType  JournalSource
+  sourceId    String?
 
-  lines           JournalLine[]
+  lines JournalLine[]
 
-  transferMatchId String?       @unique
+  transferMatchId String?        @unique
   transferMatch   TransferMatch? @relation(fields: [transferMatchId], references: [id])
 
   // Void/reversal trail: voiding never deletes a posted entry — it links a reversing entry instead.
-  voidedAt        DateTime?
-  voidedBy        String?
-  reversalOfId    String?       @unique
-  reversalOf      JournalEntry? @relation("EntryReversal", fields: [reversalOfId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  reversedBy      JournalEntry? @relation("EntryReversal")
+  voidedAt     DateTime?
+  voidedBy     String?
+  reversalOfId String?       @unique
+  reversalOf   JournalEntry? @relation("EntryReversal", fields: [reversalOfId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reversedBy   JournalEntry? @relation("EntryReversal")
 
   // Inter-company linking — set when this entry is part of a related-party pair
-  interCompanyId   String?
-  interCompanyRole InterCompanyRole?
-  icSourceOf       InterCompanyTransaction? @relation("ICSource")
-  icMirrorOf       InterCompanyTransaction? @relation("ICMirror")
-  fxRevaluation    FxRevaluation? @relation("RevalEntry")
-  fxReversal       FxRevaluation? @relation("RevalReversal")
-  taxPosting       TaxPosting?
+  interCompanyId          String?
+  interCompanyRole        InterCompanyRole?
+  icSourceOf              InterCompanyTransaction? @relation("ICSource")
+  icMirrorOf              InterCompanyTransaction? @relation("ICMirror")
+  fxRevaluation           FxRevaluation?           @relation("RevalEntry")
+  fxReversal              FxRevaluation?           @relation("RevalReversal")
+  taxPosting              TaxPosting?
+  taxWorkpaperRemittances TaxWorkpaperRemittance[]
 
-  createdBy       String?
-  createdAt       DateTime      @default(now())
+  createdBy String?
+  createdAt DateTime @default(now())
 
   @@index([companyId, entryDate])
   @@index([sourceType, sourceId])
@@ -990,21 +1060,21 @@ enum JournalSource {
 }
 
 model JournalLine {
-  id              String        @id @default(cuid())
-  journalEntryId  String
-  journalEntry    JournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  id             String       @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
 
-  glAccountCode   String        // e.g. "1010" — manual reference to ChartOfAccount.code
-  description     String?
-  debit           Decimal       @default(0) @db.Decimal(14, 2)
-  credit          Decimal       @default(0) @db.Decimal(14, 2)
+  glAccountCode String // e.g. "1010" — manual reference to ChartOfAccount.code
+  description   String?
+  debit         Decimal @default(0) @db.Decimal(14, 2)
+  credit        Decimal @default(0) @db.Decimal(14, 2)
 
   // Foreign-currency detail — debit/credit stay in the HOME currency always;
   // these columns are additive detail (transaction currency + amounts).
-  currency       String?  @default("CAD")
-  fxRate         Decimal? @db.Decimal(18, 8)
-  debitForeign   Decimal? @db.Decimal(14, 2)
-  creditForeign  Decimal? @db.Decimal(14, 2)
+  currency      String?  @default("CAD")
+  fxRate        Decimal? @db.Decimal(18, 8)
+  debitForeign  Decimal? @db.Decimal(14, 2)
+  creditForeign Decimal? @db.Decimal(14, 2)
 
   @@index([glAccountCode])
 }
@@ -1012,36 +1082,36 @@ model JournalLine {
 // ─── IMPORT BATCHES ────────────────────────────────────────
 
 model ImportBatch {
-  id                   String           @id @default(cuid())
-  companyId            String
-  company              Company          @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  financialAccountId   String
-  account              FinancialAccount @relation(fields: [financialAccountId], references: [id])
+  financialAccountId String
+  account            FinancialAccount @relation(fields: [financialAccountId], references: [id])
 
-  fileName             String
-  fileType             TxSource
-  fileSize             Int?
+  fileName String
+  fileType TxSource
+  fileSize Int?
 
-  rowsParsed           Int
-  rowsImported         Int
-  duplicatesFound      Int              @default(0)
-  dateRangeStart       DateTime?
-  dateRangeEnd         DateTime?
+  rowsParsed      Int
+  rowsImported    Int
+  duplicatesFound Int       @default(0)
+  dateRangeStart  DateTime?
+  dateRangeEnd    DateTime?
 
-  columnMappingId      String?
-  columnMapping        ColumnMapping?   @relation(fields: [columnMappingId], references: [id])
-  mappingConfirmed     Boolean          @default(false)
-  importConfirmed      Boolean          @default(false)
+  columnMappingId  String?
+  columnMapping    ColumnMapping? @relation(fields: [columnMappingId], references: [id])
+  mappingConfirmed Boolean        @default(false)
+  importConfirmed  Boolean        @default(false)
 
-  errors               Json?
+  errors Json?
 
-  status               ImportStatus     @default(draft)
+  status ImportStatus @default(draft)
 
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  transactions         Transaction[]
+  transactions Transaction[]
 
   @@index([companyId, financialAccountId])
   @@index([status])
@@ -1058,19 +1128,19 @@ enum ImportStatus {
 // ─── AUDIT LOG ─────────────────────────────────────────────
 
 model AuditLog {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  userId    String?
+  user      User?   @relation(fields: [userId], references: [id])
 
-  action      String      // e.g. "invoice.create", "transaction.categorize"
-  entityType  String      // "invoice", "transaction", "contact", "journal_entry"
-  entityId    String?
-  changes     Json?       // { before, after } diff
-  metadata    Json?       // IP, user agent, etc.
+  action     String // e.g. "invoice.create", "transaction.categorize"
+  entityType String // "invoice", "transaction", "contact", "journal_entry"
+  entityId   String?
+  changes    Json? // { before, after } diff
+  metadata   Json? // IP, user agent, etc.
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([companyId, createdAt])
   @@index([entityType, entityId])
@@ -1079,30 +1149,30 @@ model AuditLog {
 // ─── BUDGETS ───────────────────────────────────────────────
 
 model Budget {
-  id            String       @id @default(cuid())
-  companyId     String
-  company       Company      @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  name          String
-  fiscalYear    Int
-  period        BudgetPeriod // monthly, quarterly, annual
+  name       String
+  fiscalYear Int
+  period     BudgetPeriod // monthly, quarterly, annual
 
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  lines         BudgetLine[]
+  lines BudgetLine[]
 
   @@unique([companyId, name, fiscalYear])
 }
 
 model BudgetLine {
-  id            String   @id @default(cuid())
-  budgetId      String
-  budget        Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  id       String @id @default(cuid())
+  budgetId String
+  budget   Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
 
   glAccountCode String
-  amount        Decimal  @db.Decimal(14, 2)
-  period        String?  // e.g. "2026-01" for monthly
+  amount        Decimal @db.Decimal(14, 2)
+  period        String? // e.g. "2026-01" for monthly
 
   @@index([glAccountCode])
 }
@@ -1116,19 +1186,19 @@ enum BudgetPeriod {
 // ─── PERIOD CLOSE ──────────────────────────────────────────
 
 model PeriodClose {
-  id            String      @id @default(cuid())
-  companyId     String
-  company       Company     @relation(fields: [companyId], references: [id])
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
 
-  periodStart   DateTime
-  periodEnd     DateTime
-  closedBy      String?
-  closedAt      DateTime?
+  periodStart DateTime
+  periodEnd   DateTime
+  closedBy    String?
+  closedAt    DateTime?
 
-  status        CloseStatus @default(draft)
-  notes         String?
+  status CloseStatus @default(draft)
+  notes  String?
 
-  createdAt     DateTime    @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([companyId, periodStart, periodEnd])
 }
@@ -1142,18 +1212,18 @@ enum CloseStatus {
 // ─── NOTIFICATIONS ─────────────────────────────────────────
 
 model Notification {
-  id          String           @id @default(cuid())
-  userId      String
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  companyId   String
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
 
-  type        NotificationType
-  title       String
-  body        String
-  actionUrl   String?
-  read        Boolean          @default(false)
+  type      NotificationType
+  title     String
+  body      String
+  actionUrl String?
+  read      Boolean          @default(false)
 
-  createdAt   DateTime         @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId, read])
   @@index([companyId, createdAt])
@@ -1177,52 +1247,52 @@ enum NotificationType {
 model TaxRate {
   id            String           @id @default(cuid())
   province      CanadianProvince @unique
-  provinceName  String           // "Alberta", "British Columbia", etc.
-  gst           Decimal          @default(5.00) @db.Decimal(5, 3)   // Federal GST (5% everywhere)
-  hst           Decimal          @default(0) @db.Decimal(5, 3)      // Harmonized (replaces GST+PST in some provinces)
-  pst           Decimal          @default(0) @db.Decimal(5, 3)      // Provincial sales tax (separate from GST)
-  totalSalesTax Decimal          @db.Decimal(5, 3)                  // Effective total sales tax rate
-  label         String                                               // "5% GST", "13% HST", "5% GST + 7% PST"
+  provinceName  String // "Alberta", "British Columbia", etc.
+  gst           Decimal          @default(5.00) @db.Decimal(5, 3) // Federal GST (5% everywhere)
+  hst           Decimal          @default(0) @db.Decimal(5, 3) // Harmonized (replaces GST+PST in some provinces)
+  pst           Decimal          @default(0) @db.Decimal(5, 3) // Provincial sales tax (separate from GST)
+  totalSalesTax Decimal          @db.Decimal(5, 3) // Effective total sales tax rate
+  label         String // "5% GST", "13% HST", "5% GST + 7% PST"
 
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ─── RECURRING TRANSACTIONS ──────────────────────────────────
 
 model RecurringTemplate {
-  id            String          @id @default(cuid())
-  companyId     String
-  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  name          String          // "Monthly Rent", "Annual SaaS"
-  description   String?
-  frequency     RecurringFrequency // weekly, monthly, quarterly, annual
-  nextPostDate  DateTime        // next scheduled posting date
-  endDate       DateTime?       // optional end date
-  active        Boolean         @default(true)
+  name         String // "Monthly Rent", "Annual SaaS"
+  description  String?
+  frequency    RecurringFrequency // weekly, monthly, quarterly, annual
+  nextPostDate DateTime // next scheduled posting date
+  endDate      DateTime? // optional end date
+  active       Boolean            @default(true)
 
   // Template for the journal entry
-  sourceType    JournalSource   @default(manual)
-  lines         RecurringLine[]
+  sourceType JournalSource   @default(manual)
+  lines      RecurringLine[]
 
-  lastPostedAt  DateTime?
-  timesPosted   Int             @default(0)
+  lastPostedAt DateTime?
+  timesPosted  Int       @default(0)
 
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model RecurringLine {
-  id            String          @id @default(cuid())
-  templateId    String
-  template      RecurringTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  id         String            @id @default(cuid())
+  templateId String
+  template   RecurringTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   glAccountCode String
   description   String?
-  debit         Decimal         @default(0) @db.Decimal(14, 2)
-  credit        Decimal         @default(0) @db.Decimal(14, 2)
-  sortOrder     Int             @default(0)
+  debit         Decimal @default(0) @db.Decimal(14, 2)
+  credit        Decimal @default(0) @db.Decimal(14, 2)
+  sortOrder     Int     @default(0)
 }
 
 enum RecurringFrequency {
@@ -1255,11 +1325,11 @@ enum InterCompanyRole {
 // ─── INTER-COMPANY / RELATED PARTIES ─────────────────────────
 
 model RelatedPartyLink {
-  id                String   @id @default(cuid())
-  companyAId        String
-  companyBId        String
-  companyA          Company  @relation("RPLinkA", fields: [companyAId], references: [id])
-  companyB          Company  @relation("RPLinkB", fields: [companyBId], references: [id])
+  id         String  @id @default(cuid())
+  companyAId String
+  companyBId String
+  companyA   Company @relation("RPLinkA", fields: [companyAId], references: [id])
+  companyB   Company @relation("RPLinkB", fields: [companyBId], references: [id])
 
   // auto-provisioned control accounts (4 total — Due from + Due to in each company)
   aDueFromAccountId String
@@ -1268,45 +1338,45 @@ model RelatedPartyLink {
   bDueToAccountId   String
 
   // ownership percentages — "company A holds X% of B" (default 100 = wholly owned)
-  aOwnershipOfB     Decimal? @default(100) @db.Decimal(5, 2)
-  bOwnershipOfA     Decimal? @default(100) @db.Decimal(5, 2)
+  aOwnershipOfB Decimal? @default(100) @db.Decimal(5, 2)
+  bOwnershipOfA Decimal? @default(100) @db.Decimal(5, 2)
 
-  isActive          Boolean  @default(true)
-  createdAt         DateTime @default(now())
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 
-  transactions      InterCompanyTransaction[]
+  transactions InterCompanyTransaction[]
 
   @@unique([companyAId, companyBId])
   @@index([companyBId])
 }
 
 model InterCompanyTransaction {
-  id              String               @id @default(cuid())
-  reference       String               @unique          // IC-0042
-  link            RelatedPartyLink     @relation(fields: [linkId], references: [id])
-  linkId          String
+  id        String           @id @default(cuid())
+  reference String           @unique // IC-0042
+  link      RelatedPartyLink @relation(fields: [linkId], references: [id])
+  linkId    String
 
   sourceCompanyId String
   targetCompanyId String
   kind            InterCompanyKind
-  date            DateTime             @db.Date
-  amount          Decimal              @db.Decimal(18, 2)
-  currency        String               @default("CAD")
-  fxRate          Decimal?             @db.Decimal(18, 8)   // target units per source unit
+  date            DateTime         @db.Date
+  amount          Decimal          @db.Decimal(18, 2)
+  currency        String           @default("CAD")
+  fxRate          Decimal?         @db.Decimal(18, 8) // target units per source unit
   memo            String?
 
-  sourceEntryId   String               @unique
-  mirrorEntryId   String?              @unique
-  sourceEntry     JournalEntry         @relation("ICSource", fields: [sourceEntryId], references: [id])
-  mirrorEntry     JournalEntry?        @relation("ICMirror", fields: [mirrorEntryId], references: [id])
+  sourceEntryId String        @unique
+  mirrorEntryId String?       @unique
+  sourceEntry   JournalEntry  @relation("ICSource", fields: [sourceEntryId], references: [id])
+  mirrorEntry   JournalEntry? @relation("ICMirror", fields: [mirrorEntryId], references: [id])
 
-  status          InterCompanyStatus   @default(POSTED)
-  createdById     String
-  createdBy       User                 @relation(fields: [createdById], references: [id])
-  voidedAt        DateTime?
-  voidedById      String?
+  status      InterCompanyStatus @default(POSTED)
+  createdById String
+  createdBy   User               @relation(fields: [createdById], references: [id])
+  voidedAt    DateTime?
+  voidedById  String?
 
-  createdAt       DateTime             @default(now())
+  createdAt DateTime @default(now())
 
   @@index([sourceCompanyId, date])
   @@index([targetCompanyId, date])
@@ -1316,26 +1386,26 @@ model InterCompanyTransaction {
 // ─── AI CATEGORIZATION RULES ─────────────────────────────────
 
 model CategorizationRule {
-  id            String          @id @default(cuid())
-  companyId     String
-  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  name          String          // "AWS charges", "Google Workspace"
-  pattern       String          // regex or merchant name
-  patternType   RulePatternType // merchant_match, description_contains, amount_range
-  categoryId    String
-  category      ChartOfAccount  @relation(fields: [categoryId], references: [id])
+  name        String // "AWS charges", "Google Workspace"
+  pattern     String // regex or merchant name
+  patternType RulePatternType // merchant_match, description_contains, amount_range
+  categoryId  String
+  category    ChartOfAccount  @relation(fields: [categoryId], references: [id])
 
-  minAmount     Decimal?        @db.Decimal(14, 2)  // for amount_range
-  maxAmount     Decimal?        @db.Decimal(14, 2)
-  priority      Int             @default(0)          // higher = checked first
-  active        Boolean         @default(true)
+  minAmount Decimal? @db.Decimal(14, 2) // for amount_range
+  maxAmount Decimal? @db.Decimal(14, 2)
+  priority  Int      @default(0) // higher = checked first
+  active    Boolean  @default(true)
 
-  matchCount    Int             @default(0)          // how many times matched
+  matchCount    Int       @default(0) // how many times matched
   lastMatchedAt DateTime?
 
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum RulePatternType {
@@ -1348,26 +1418,26 @@ enum RulePatternType {
 // ─── CUSTOM REPORT TEMPLATES ──────────────────────────────────
 
 model ReportTemplate {
-  id            String          @id @default(cuid())
-  companyId     String
-  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  name          String          // "Monthly P&L by Department"
-  reportType    String          // profit_loss, balance_sheet, custom, etc.
-  config        Json            // { accounts: [...], grouping, columns, period }
-  isPublic      Boolean         @default(false)    // visible to all company members
+  name       String // "Monthly P&L by Department"
+  reportType String // profit_loss, balance_sheet, custom, etc.
+  config     Json // { accounts: [...], grouping, columns, period }
+  isPublic   Boolean @default(false) // visible to all company members
 
-  createdBy     String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ─── CONSOLIDATED REPORTS — FX RATES & SAVED PACKAGES ──────────
 
 enum ExchangeRateType {
-  closing  // reporting-only
-  average  // reporting-only
-  daily    // per-day spot rate for transactions
+  closing // reporting-only
+  average // reporting-only
+  daily // per-day spot rate for transactions
 }
 
 enum RateSource {
@@ -1378,13 +1448,13 @@ enum RateSource {
 model ExchangeRate {
   id        String           @id @default(cuid())
   date      DateTime         @db.Date
-  from      String           // "USD"
-  to        String           // "CAD"
-  rate      Decimal          @db.Decimal(18, 8)  // 1 unit of `from` = `rate` units of `to`
+  from      String // "USD"
+  to        String // "CAD"
+  rate      Decimal          @db.Decimal(18, 8) // 1 unit of `from` = `rate` units of `to`
   type      ExchangeRateType
   source    RateSource       @default(manual)
-  fetchedAt DateTime?        // when the feed returned it
-  enteredBy String?          // userId for manual entries
+  fetchedAt DateTime? // when the feed returned it
+  enteredBy String? // userId for manual entries
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
@@ -1398,7 +1468,7 @@ model ReportPackage {
   id        String   @id @default(cuid())
   userId    String
   name      String
-  setup     Json     // full ConsolidatedSetup object
+  setup     Json // full ConsolidatedSetup object
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1418,12 +1488,12 @@ model FxRevaluation {
   journalEntry    JournalEntry     @relation("RevalEntry", fields: [journalEntryId], references: [id])
   reversalEntryId String?          @unique
   reversalEntry   JournalEntry?    @relation("RevalReversal", fields: [reversalEntryId], references: [id])
-  lines           Json             // the preview table, frozen as the working paper
+  lines           Json // the preview table, frozen as the working paper
   postedById      String
   postedAt        DateTime         @default(now())
   voidedAt        DateTime?
 
-  @@unique([companyId, asOf])   // idempotency per company-month
+  @@unique([companyId, asOf]) // idempotency per company-month
 }
 
 model FxFeedStatus {
@@ -1434,11 +1504,10 @@ model FxFeedStatus {
   lastAttemptAt       DateTime?
   consecutiveFailures Int       @default(0)
   lastError           String?
-  lastResults         Json?     // { pairsPulled, missingPairs } — drives the partial-set copy
+  lastResults         Json? // { pairsPulled, missingPairs } — drives the partial-set copy
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 }
-
 
 // ─── BANKING OVERHAUL — PRESETS, IMPORTS, RULES, RECONCILIATION ──
 
@@ -1470,15 +1539,15 @@ enum PresetAmountMode {
 
 model ImportPreset {
   id              String            @id @default(cuid())
-  companyId       String?           // null = system seed
+  companyId       String? // null = system seed
   company         Company?          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   institution     BankInstitution
-  label           String            // "RBC Royal Bank"
-  fileTypes       String[]          // ["csv"] | ["ofx","qfx"]
-  hasHeader       Boolean           @default(true)   // CIBC ships headerless CSV
+  label           String // "RBC Royal Bank"
+  fileTypes       String[] // ["csv"] | ["ofx","qfx"]
+  hasHeader       Boolean           @default(true) // CIBC ships headerless CSV
   dateFormat      PresetDateFormat
   amountMode      PresetAmountMode
-  columnMap       Json              // { "Transaction Date": "date", ... } — "Column N" keys for headerless
+  columnMap       Json // { "Transaction Date": "date", ... } — "Column N" keys for headerless
   headerSignature String?
   isSystem        Boolean           @default(false)
   createdAt       DateTime          @default(now())
@@ -1496,30 +1565,30 @@ enum StatementImportStatus {
 }
 
 model StatementImport {
-  id                   String   @id @default(cuid())
+  id                   String                @id @default(cuid())
   companyId            String
-  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company              Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
   financialAccountId   String
-  account              FinancialAccount @relation(fields: [financialAccountId], references: [id])
+  account              FinancialAccount      @relation(fields: [financialAccountId], references: [id])
   fileName             String
   fileSize             Int
   fileType             TxSource
   presetId             String?
-  preset               ImportPreset? @relation(fields: [presetId], references: [id])
+  preset               ImportPreset?         @relation(fields: [presetId], references: [id])
   mappingJson          Json?
   dateRangeStart       DateTime?
   dateRangeEnd         DateTime?
   rowsTotal            Int
   rowsImported         Int
-  rowsSkippedDuplicate Int      @default(0)
-  rowsSkippedLocked    Int      @default(0)
-  rulesApplied         Int      @default(0)
+  rowsSkippedDuplicate Int                   @default(0)
+  rowsSkippedLocked    Int                   @default(0)
+  rulesApplied         Int                   @default(0)
   status               StatementImportStatus
   createdById          String?
   reversibleUntil      DateTime
   reversedAt           DateTime?
   reversedBy           String?
-  createdAt            DateTime @default(now())
+  createdAt            DateTime              @default(now())
   transactions         Transaction[]
 
   @@index([companyId, financialAccountId, createdAt])
@@ -1532,26 +1601,26 @@ enum RuleOp {
 }
 
 model BankRule {
-  id              String   @id @default(cuid())
+  id              String        @id @default(cuid())
   companyId       String
-  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name            String
-  order           Int      @default(0)     // ascending, first-match-wins
+  order           Int           @default(0) // ascending, first-match-wins
   op              RuleOp
   value           String
-  anyOf           String[] @default([])    // OR values
-  scope           Json                     // { accountIds: string[] | "all", direction: "in"|"out"|"both" }
-  setCategoryCode String?                  // null = "Leave for matching"
+  anyOf           String[]      @default([]) // OR values
+  scope           Json // { accountIds: string[] | "all", direction: "in"|"out"|"both" }
+  setCategoryCode String? // null = "Leave for matching"
   setTaxCode      String?
-  setTaxRate      Decimal? @db.Decimal(5, 3)
-  setTaxInclusive Boolean  @default(true)
+  setTaxRate      Decimal?      @db.Decimal(5, 3)
+  setTaxInclusive Boolean       @default(true)
   setContactId    String?
-  contact         Contact? @relation(fields: [setContactId], references: [id])
-  autoPost        Boolean  @default(false)
-  appliedCount    Int      @default(0)
-  enabled         Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  contact         Contact?      @relation(fields: [setContactId], references: [id])
+  autoPost        Boolean       @default(false)
+  appliedCount    Int           @default(0)
+  enabled         Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
   transactions    Transaction[]
 
   @@index([companyId, order])
@@ -1564,23 +1633,23 @@ enum ReconciliationState {
 }
 
 model Reconciliation {
-  id                     String   @id @default(cuid())
-  companyId              String
-  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  financialAccountId     String
-  account                FinancialAccount @relation(fields: [financialAccountId], references: [id])
-  periodStart            DateTime
-  periodEnd              DateTime
-  statementClosingBalance Decimal @db.Decimal(14, 2)
-  ledgerBalance          Decimal? @db.Decimal(14, 2)  // frozen at close
-  difference             Decimal? @db.Decimal(14, 2)
-  unrecordedItems        Json?                         // [{ description, amount }]
-  state                  ReconciliationState @default(open)
-  closedBy               String?
-  closedAt               DateTime?
-  varianceReason         String?
-  transactions           Transaction[]
-  createdAt              DateTime @default(now())
+  id                      String              @id @default(cuid())
+  companyId               String
+  company                 Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  financialAccountId      String
+  account                 FinancialAccount    @relation(fields: [financialAccountId], references: [id])
+  periodStart             DateTime
+  periodEnd               DateTime
+  statementClosingBalance Decimal             @db.Decimal(14, 2)
+  ledgerBalance           Decimal?            @db.Decimal(14, 2) // frozen at close
+  difference              Decimal?            @db.Decimal(14, 2)
+  unrecordedItems         Json? // [{ description, amount }]
+  state                   ReconciliationState @default(open)
+  closedBy                String?
+  closedAt                DateTime?
+  varianceReason          String?
+  transactions            Transaction[]
+  createdAt               DateTime            @default(now())
 
   @@index([companyId, financialAccountId, state])
 }
@@ -1592,15 +1661,15 @@ enum ReminderCadence {
 }
 
 model ImportReminder {
-  id         String   @id @default(cuid())
-  companyId  String   @unique
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  accountIds String[] @default([])      // empty = all accounts
+  id         String          @id @default(cuid())
+  companyId  String          @unique
+  company    Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  accountIds String[]        @default([]) // empty = all accounts
   cadence    ReminderCadence @default(monthly)
   dayOfMonth Int?
   dayOfWeek  Int?
   nextRunAt  DateTime
-  channel    String[] @default(["in_app"])
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  channel    String[]        @default(["in_app"])
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 }

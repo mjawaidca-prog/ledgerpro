@@ -7,10 +7,17 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
-  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers,
+  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark,
 } from 'lucide-react';
 
 const reports = [
+  {
+    title: 'Tax Workpapers',
+    description: 'Prepare and reconcile GST/HST, QST, PST, and RST schedules with filing evidence.',
+    href: '/reports/tax-workpapers',
+    icon: Landmark,
+    color: 'bg-[var(--primary-soft)] text-[var(--accent)]',
+  },
   {
     title: 'Trial Balance',
     description: 'All GL accounts with debit and credit balances — the foundation of double-entry accounting.',
