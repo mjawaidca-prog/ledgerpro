@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { db } from '@/lib/db';
 import { resolveRate } from '@/lib/fx/rate';
-import { postInvoicePayment } from '@/lib/journal';
+import { postInvoicePayment, reverseDocumentPayment } from '@/lib/journal';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'], requireOnboarding: true });
     if (error) return error;
 
     const body = await req.json();
@@ -101,5 +101,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
     return NextResponse.json({ error: err.message || 'Failed to record payment' }, { status: 500 });
+  }
+}
+
+/** DELETE records an auditable equal-and-opposite reversal of one payment. */
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'], requireOnboarding: true });
+    if (error) return error;
+    const body = await req.json();
+    const paymentEntryId = typeof body.paymentEntryId === 'string' ? body.paymentEntryId : '';
+    const reversalDate = typeof body.date === 'string' ? new Date(body.date) : new Date();
+    if (!paymentEntryId) return NextResponse.json({ error: 'A payment journal entry is required.' }, { status: 400 });
+    if (Number.isNaN(reversalDate.getTime())) return NextResponse.json({ error: 'A valid reversal date is required.' }, { status: 400 });
+    const guardError = await closedPeriodGuard(companyId, reversalDate);
+    if (guardError) return guardError;
+    const result = await reverseDocumentPayment({ documentId: params.id, paymentEntryId, companyId, documentType: 'invoice', reversalDate, userId: userId ?? undefined });
+    await auditLog(companyId, userId, 'invoice.payment.reverse', 'invoice', params.id, { paymentEntryId, reversalEntryId: result.reversal.id, reversalDate } as any);
+    return NextResponse.json({ data: { paymentEntryId, reversalEntryId: result.reversal.id } });
+  } catch (err: any) {
+    const status = err.message?.includes('already been reversed') ? 409 : err.message?.includes('not found') ? 404 : 400;
+    return NextResponse.json({ error: err.message || 'Failed to reverse payment' }, { status });
   }
 }
