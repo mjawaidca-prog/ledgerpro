@@ -893,7 +893,7 @@ model TaxReturnWorkpaper {
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
   remittances        TaxWorkpaperRemittance[]
-  @@unique([companyId, registrationId, periodStart, periodEnd, version])
+  @@unique([companyId, registrationId, periodStart, periodEnd, version], map: "TaxWorkpaper_period_version_key")
   @@unique([companyId, id])
   @@index([companyId, regime, periodStart, periodEnd])
   @@index([registrationId])
