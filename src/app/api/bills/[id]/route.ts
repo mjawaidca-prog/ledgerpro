@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { billUpdateSchema } from '@/lib/validators/bill';
 import { voidJournalEntry, postBillToLedger } from '@/lib/journal';
+import { reverseTaxPosting, TaxPostingError } from '@/lib/tax/posting-service';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -14,7 +15,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       where: { id: params.id, companyId },
       include: {
         vendor: true,
-        lineItems: { orderBy: { sortOrder: 'asc' } },
+        lineItems: {
+          orderBy: { sortOrder: 'asc' },
+          include: { taxSnapshot: { include: { components: true, taxCodeVersion: { include: { taxCode: true } } } } },
+        },
         paymentAccount: { select: { id: true, name: true, mask: true, kind: true } },
       },
     });
@@ -45,11 +49,38 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const existing = await db.bill.findUnique({ where: { id: params.id, companyId } });
     if (!existing) return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
 
-    const { lineItems, ...billData } = parsed.data;
+    const { lineItems, taxDecision: _taxDecision, ...billData } = parsed.data;
     const isVoidTransition = billData.status === 'void' && existing.status !== 'void';
     const isOnlyStatusChange = Object.keys(billData).every((k) => k === 'status') && !lineItems;
     const newTotal = billData.total !== undefined ? Number(billData.total) : Number(existing.total);
     const totalChanged = Math.abs(newTotal - Number(existing.total)) > 0.005;
+    const existingTaxPosting = await db.taxPosting.findFirst({
+      where: { companyId, journalEntry: { sourceId: params.id, sourceType: 'bill' }, reversalOfId: null },
+      include: { reversedBy: true },
+    });
+
+    if (existingTaxPosting) {
+      if (!isOnlyStatusChange || !['void', existing.status].includes(billData.status ?? '')) {
+        throw new TaxPostingError('tax_document_immutable', 'Posted tax documents cannot be edited or returned to draft. Void and recreate the document to correct it.', 409);
+      }
+      if (billData.status === existing.status) return NextResponse.json({ data: existing });
+      const updated = await db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM "Bill" WHERE id = ${params.id} AND "companyId" = ${companyId} FOR UPDATE`;
+        const current = await tx.bill.findUniqueOrThrow({ where: { id: params.id, companyId } });
+        if (current.status === 'void') return current;
+        const payment = await tx.journalEntry.findFirst({ where: { companyId, sourceId: params.id, sourceType: 'payment', voidedAt: null } });
+        if (Number(current.paidAmount) !== 0 || payment) {
+          throw new TaxPostingError('tax_settlement_reversal_required', 'Reverse the payments and bank matches before voiding this reviewed-tax document.', 409);
+        }
+        await reverseTaxPosting({ companyId, userId, postingId: existingTaxPosting.id, sourceKey: 'bill-void:' + params.id, reversalDate: new Date(), reason: 'bill voided by user' }, tx);
+        return tx.bill.update({ where: { id: params.id, companyId }, data: { status: 'void' } });
+      });
+      return NextResponse.json({ data: updated });
+    }
+    const taxConfiguration = await db.companyTaxConfiguration.findUnique({ where: { companyId }, select: { enabled: true } });
+    if (taxConfiguration?.enabled && !isVoidTransition) {
+      throw new TaxPostingError('legacy_tax_review_required', 'This document predates reviewed tax. Void it if posted, then create a new document with explicit line tax decisions.', 409);
+    }
 
     // Paid or voided bills are locked to status-only transitions (e.g. void)
     // — unwinding a payment or a void takes more than a field edit.
@@ -76,11 +107,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       const reversalGuard = await closedPeriodGuard(companyId, new Date());
       if (reversalGuard) return reversalGuard;
 
-      const entries = await db.journalEntry.findMany({
-        where: { companyId, sourceId: params.id, sourceType: { in: ['bill', 'payment'] }, voidedAt: null },
-      });
-      for (const entry of entries) {
-        await voidJournalEntry(entry.id, companyId, userId);
+      {
+        const entries = await db.journalEntry.findMany({
+          where: { companyId, sourceId: params.id, sourceType: { in: ['bill', 'payment'] }, voidedAt: null },
+        });
+        for (const entry of entries) await voidJournalEntry(entry.id, companyId, userId);
       }
     } else if (existingBillEntry && (totalChanged || lineItems)) {
       // Already posted and the total or categorization changed — void the
@@ -142,6 +173,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     return NextResponse.json({ data: updated });
   } catch (error) {
+    if (error instanceof TaxPostingError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
     console.error('PUT /api/bills/[id] error:', error);
     return NextResponse.json({ error: 'Failed to update bill' }, { status: 500 });
   }

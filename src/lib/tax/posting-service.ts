@@ -59,6 +59,7 @@ export interface PostTaxDocumentCommand {
   sourceId: string;
   description: string;
   lines: readonly TaxLineSelection[];
+  expectedTotals?: { netMinor: number; taxMinor: number; grossMinor: number; grossHomeMinor: number };
 }
 
 export interface ReverseTaxPostingCommand {
@@ -283,7 +284,7 @@ async function buildPlan(
       }
       if (document.direction === 'purchase' && component.recoveryAllowed) {
         if (!recovery || !Number.isSafeInteger(recovery.basisPoints) || recovery.basisPoints < 0 || recovery.basisPoints > 10_000 ||
-          !recovery.reason.trim() || !recovery.evidence || Object.keys(recovery.evidence).length === 0 || !authorizedReviewers.has(recovery.reviewedById)) {
+          !recovery.reason.trim() || !recovery.evidence || Object.keys(recovery.evidence).length === 0 || !authorizedReviewers.has(recovery.reviewedById) || recovery.reviewedById !== command.userId) {
           throw new TaxPostingError('recovery_decision_required', `An explicit recovery fraction, evidence, reason, and owner/admin review are required for ${kind}.`);
         }
       } else if (recovery?.basisPoints) {
@@ -341,11 +342,11 @@ function journalLines(plan: TaxPostingPlan) {
   }));
 }
 
-export async function postTaxDocument(command: PostTaxDocumentCommand) {
+export async function postTaxDocument(command: PostTaxDocumentCommand, transaction?: TransactionClient) {
   validateSourceKey(command.sourceKey);
   const requestHash = fingerprint(command);
   try {
-    return await db.$transaction(async tx => {
+    const execute = async (tx: TransactionClient) => {
       await authorize(tx, command.companyId, command.userId);
       const replay = await tx.taxPosting.findUnique({
         where: { companyId_sourceKey: { companyId: command.companyId, sourceKey: command.sourceKey } },
@@ -360,6 +361,9 @@ export async function postTaxDocument(command: PostTaxDocumentCommand) {
       await assertPeriodOpen(tx, command.companyId, document.date);
       const configuration = await readiness(tx, command.companyId, document.date);
       const plan = await buildPlan(tx, command, document, configuration);
+      if (command.expectedTotals && Object.entries(command.expectedTotals).some(([key, value]) => plan[key as keyof typeof command.expectedTotals] !== value)) {
+        throw new TaxPostingError('tax_preview_changed', 'Tax configuration changed after the preview. Refresh the preview and save again.', 409);
+      }
       const journal = await postJournalEntry({
         entryDate: document.date,
         description: command.description,
@@ -441,8 +445,10 @@ export async function postTaxDocument(command: PostTaxDocumentCommand) {
         },
       });
       return tx.taxPosting.findUniqueOrThrow({ where: { id: posting.id }, include: postingInclude });
-    });
+    };
+    return transaction ? await execute(transaction) : await db.$transaction(execute);
   } catch (error) {
+    if (transaction) throw error;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const replay = await db.taxPosting.findUnique({
         where: { companyId_sourceKey: { companyId: command.companyId, sourceKey: command.sourceKey } },
@@ -457,12 +463,12 @@ export async function postTaxDocument(command: PostTaxDocumentCommand) {
   }
 }
 
-export async function reverseTaxPosting(command: ReverseTaxPostingCommand) {
+export async function reverseTaxPosting(command: ReverseTaxPostingCommand, transaction?: TransactionClient) {
   validateSourceKey(command.sourceKey);
   if (!command.reason.trim()) throw new TaxPostingError('reversal_reason_required', 'A reversal reason is required.');
   const requestHash = fingerprint({ ...command, reversalDate: command.reversalDate.toISOString() });
   try {
-    return await db.$transaction(async tx => {
+    const execute = async (tx: TransactionClient) => {
     await authorize(tx, command.companyId, command.userId);
     const replay = await tx.taxPosting.findUnique({
       where: { companyId_sourceKey: { companyId: command.companyId, sourceKey: command.sourceKey } },
@@ -578,8 +584,10 @@ export async function reverseTaxPosting(command: ReverseTaxPostingCommand) {
       },
     });
       return tx.taxPosting.findUniqueOrThrow({ where: { id: posting.id }, include: postingInclude });
-    });
+    };
+    return transaction ? await execute(transaction) : await db.$transaction(execute);
   } catch (error) {
+    if (transaction) throw error;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const replay = await db.taxPosting.findUnique({
         where: { companyId_sourceKey: { companyId: command.companyId, sourceKey: command.sourceKey } },

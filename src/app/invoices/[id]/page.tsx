@@ -23,6 +23,7 @@ interface CategoryOption {
 
 interface LineItem {
   key: string; id?: string; description: string; quantity: number; unitPrice: number; amount: number; categoryId: string | null;
+  taxSnapshot?: { netAmount: number; taxAmount: number; grossAmount: number; taxCodeVersion: { taxCode: { code: string; name: string } }; components: Array<{ type: string; rate: number; taxAmount: number }> } | null;
 }
 
 let lineKey = 0;
@@ -47,7 +48,9 @@ export default function EditInvoicePage() {
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<string>('draft');
   const [lines, setLines] = useState<LineItem[]>([]);
+  const [documentCurrency, setDocumentCurrency] = useState('CAD');
   const [taxRate, setTaxRate] = useState(8.5);
+  const [savedTotals, setSavedTotals] = useState<{ subtotal: number; tax: number; total: number } | null>(null);
   const [paidAmount, setPaidAmount] = useState(0);
   const [paidAt, setPaidAt] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -75,7 +78,9 @@ export default function EditInvoicePage() {
         setTerms(inv.terms ?? 'Net 30');
         setNotes(inv.notes ?? '');
         setStatus(inv.status);
+        setDocumentCurrency(inv.currency ?? 'CAD');
         setTaxRate(Number(inv.taxRate ?? 0));
+        setSavedTotals({ subtotal: Number(inv.subtotal), tax: Number(inv.taxAmount), total: Number(inv.total) });
         setPaidAmount(Number(inv.paidAmount ?? 0));
         setPaidAt(inv.paidAt ? String(inv.paidAt) : null);
         setLines(
@@ -87,6 +92,7 @@ export default function EditInvoicePage() {
             unitPrice: Number(li.unitPrice),
             amount: Number(li.amount),
             categoryId: li.categoryId,
+            taxSnapshot: li.taxSnapshot,
           }))
         );
       } catch (err) {
@@ -98,10 +104,11 @@ export default function EditInvoicePage() {
     load();
   }, [id]);
 
-  const subtotal = lines.reduce((sum, l) => sum + l.amount, 0);
-  const taxAmount = subtotal * (taxRate / 100);
-  const total = subtotal + taxAmount;
-  const isLocked = status === 'paid' || status === 'void';
+  const hasReviewedTax = lines.some(line => Boolean(line.taxSnapshot));
+  const subtotal = hasReviewedTax && savedTotals ? savedTotals.subtotal : lines.reduce((sum, l) => sum + l.amount, 0);
+  const taxAmount = hasReviewedTax && savedTotals ? savedTotals.tax : subtotal * (taxRate / 100);
+  const total = hasReviewedTax && savedTotals ? savedTotals.total : subtotal + taxAmount;
+  const isLocked = status === 'paid' || status === 'void' || hasReviewedTax;
 
   function updateLine(key: string, field: keyof LineItem, value: any) {
     setLines((prev) => prev.map((l) => {
@@ -256,6 +263,10 @@ export default function EditInvoicePage() {
             Void
           </Button>
         )}
+        {hasReviewedTax && status !== 'void' && <>
+          <Button variant="secondary" onClick={() => window.open(`/pay/${id}`, '_blank')}><Printer size={14} /> Print / PDF</Button>
+          <Button variant="destructive" size="sm" onClick={handleVoid}>Void</Button>
+        </>}
       </div>
 
       {error && <Alert variant="danger" className="mb-4">{error}</Alert>}
@@ -298,7 +309,8 @@ export default function EditInvoicePage() {
             </div>
             <div className="divide-y divide-[var(--border)]">
               {lines.map((line) => (
-                <div key={line.key} className="flex items-center gap-4 px-5 py-3">
+                <div key={line.key} className="px-5 py-3">
+                  <div className="flex items-center gap-4">
                   <input
                     type="text" placeholder="Description" value={line.description}
                     onChange={(e) => updateLine(line.key, 'description', e.target.value)}
@@ -329,7 +341,7 @@ export default function EditInvoicePage() {
                     className="w-[120px] h-[34px] px-2 text-right rounded-md border border-transparent bg-transparent font-mono text-sm text-[var(--text-strong)] focus:outline-none focus:border-[var(--border-focus)] focus:bg-[var(--surface-2)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   <span className="w-[120px] text-right font-mono tabular-nums text-sm font-medium text-[var(--text-strong)]">
-                    {money(line.amount)}
+                    {money(Number(line.taxSnapshot?.netAmount ?? line.amount))}
                   </span>
                   {!isLocked && (
                     <button
@@ -339,6 +351,10 @@ export default function EditInvoicePage() {
                       <Trash2 size={14} />
                     </button>
                   )}
+                  </div>
+                  {line.taxSnapshot && <div className="mt-1 pl-2 text-xs text-[var(--text-muted)] print:text-gray-700">
+                    {line.taxSnapshot.taxCodeVersion.taxCode.code}: {line.taxSnapshot.components.map(component => `${component.type.toUpperCase()} ${Number(component.rate)}% (${money(Number(component.taxAmount))})`).join(' + ')}
+                  </div>}
                 </div>
               ))}
             </div>
@@ -399,7 +415,7 @@ export default function EditInvoicePage() {
                 <span className="text-[var(--text-muted)]">Subtotal</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(subtotal)}</span>
               </div>
-              <div className="flex justify-between items-center text-sm">
+              {!hasReviewedTax && <div className="flex justify-between items-center text-sm">
                 <span className="text-[var(--text-muted)]">Tax Rate</span>
                 <div className="flex items-center gap-2">
                   <input type="number" min="0" max="100" step="0.1" value={taxRate}
@@ -409,13 +425,13 @@ export default function EditInvoicePage() {
                   />
                   <span className="text-sm text-[var(--text-muted)]">%</span>
                 </div>
-              </div>
+              </div>}
               <div className="flex justify-between text-sm">
-                <span className="text-[var(--text-muted)]">Tax ({taxRate}%)</span>
+                <span className="text-[var(--text-muted)]">{hasReviewedTax ? 'GST/HST/QST/PST' : `Tax (${taxRate}%)`}</span>
                 <span className="font-mono tabular-nums text-[var(--text-strong)]">{money(taxAmount)}</span>
               </div>
               <div className="flex justify-between pt-3 border-t border-[var(--border)]">
-                <span className="text-sm font-semibold text-[var(--text-strong)]">Total (USD)</span>
+                <span className="text-sm font-semibold text-[var(--text-strong)]">Total ({documentCurrency})</span>
                 <span className="font-mono tabular-nums text-lg font-semibold text-[var(--text-strong)]">{money(total)}</span>
               </div>
               {status === 'paid' && (

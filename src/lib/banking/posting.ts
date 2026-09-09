@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { resolveRate } from '@/lib/fx/rate';
 import { buildPostingLines, computeSplitTaxes, round2 } from './splits';
 import { postJournalEntry, postTransactionToLedger } from '@/lib/journal';
+import { assertReviewedBankTaxAdapter } from '@/lib/tax/bank-adapter';
 
 export interface BankRow {
   id: string;
@@ -34,6 +35,17 @@ export interface BankRow {
  */
 export async function postBankRow(opts: { row: BankRow; companyId: string; homeCurrency: string }): Promise<string> {
   const { row, companyId, homeCurrency } = opts;
+
+  const reviewedTaxEnabled = Boolean((await db.companyTaxConfiguration.findUnique({ where: { companyId }, select: { enabled: true } }))?.enabled);
+  const storedTax = reviewedTaxEnabled ? await db.transaction.findFirst({
+    where: { id: row.id, companyId },
+    select: { taxCode: true, taxRate: true, taxAmount: true },
+  }) : null;
+  assertReviewedBankTaxAdapter({
+    reviewedTaxEnabled,
+    row: storedTax ? { taxCode: storedTax.taxCode, taxRate: Number(storedTax.taxRate ?? 0), taxAmount: Number(storedTax.taxAmount ?? 0) } : {},
+    splits: row.splits,
+  });
 
   const glCode = row.account?.glAccountCode;
   if (!glCode) {

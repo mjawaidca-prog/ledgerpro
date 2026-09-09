@@ -1,3 +1,4 @@
+import { isTaxDate } from '@/lib/tax/date';
 import { z } from 'zod';
 
 const lineItemSchema = z.object({
@@ -10,10 +11,30 @@ const lineItemSchema = z.object({
   sortOrder: z.coerce.number().int().default(0),
 });
 
+const recoveryDecisionSchema = z.object({
+  basisPoints: z.coerce.number().int().min(0).max(10000),
+  reason: z.string().min(1).max(500),
+  evidence: z.record(z.unknown()).refine((value) => Object.keys(value).length > 0, 'Recovery evidence is required'),
+  reviewedById: z.string().min(1),
+});
+
+const taxLineDecisionSchema = z.object({
+  lineIndex: z.coerce.number().int().min(0),
+  taxCodeVersionId: z.string().min(1),
+  jurisdictionEvidence: z.record(z.unknown()).refine((value) => Object.keys(value).length > 0, 'Jurisdiction evidence is required'),
+  jurisdictionOverrideReason: z.string().max(500).optional(),
+  recovery: z.record(recoveryDecisionSchema).optional(),
+});
+
+const taxDecisionSchema = z.object({
+  requestKey: z.string().min(8).max(200),
+  lines: z.array(taxLineDecisionSchema).min(1),
+});
+
 export const invoiceSchema = z.object({
   customerId: z.string().min(1, 'Customer is required'),
-  issueDate: z.string().min(1, 'Issue date is required'),
-  dueDate: z.string().min(1, 'Due date is required'),
+  issueDate: z.string().refine(isTaxDate, 'Enter a valid date (YYYY-MM-DD)'),
+  dueDate: z.string().refine(isTaxDate, 'Enter a valid date (YYYY-MM-DD)'),
   terms: z.string().max(50).nullable().optional(),
   currency: z.string().optional(), // set by the server from the contact — payload is informational
   subtotal: z.coerce.number().min(0),
@@ -28,6 +49,7 @@ export const invoiceSchema = z.object({
   fxRate: z.coerce.number().positive('Enter a positive rate.').nullable().optional(),
   fxRateConfirmed: z.boolean().optional(),
   lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
+  taxDecision: taxDecisionSchema.optional(),
 });
 
 export type InvoiceInput = z.infer<typeof invoiceSchema>;

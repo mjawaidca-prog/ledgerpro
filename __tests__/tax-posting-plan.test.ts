@@ -40,6 +40,12 @@ const totals = (lines: ReturnType<typeof buildTaxPostingPlan>['journalLines']) =
 });
 
 describe('P1-C tax posting plan', () => {
+  test('freezes the purchase recovery reviewer and evidence and retains them on reversal', () => {
+    const decision = { recoveryBasisPoints: 5000, recoveryReason: 'Half commercial use', recoveryEvidence: { receipt: 'test-001' }, recoveryReviewedById: 'owner-1' };
+    const plan = buildTaxPostingPlan({ ...base, direction: 'purchase', lines: [{ ...base.lines[0], components: [component('HST', 13000, decision)] }] });
+    expect(plan.snapshots[0].components[0]).toMatchObject({ ...decision, recoverableMinor: 650, nonRecoverableMinor: 650 });
+    expect(reverseTaxPostingPlan(plan).snapshots[0].components[0]).toMatchObject({ ...decision, recoverableMinor: -650, nonRecoverableMinor: -650 });
+  });
   test('posts an Ontario sale to AR, revenue, and the mapped HST output account', () => {
     const plan = buildTaxPostingPlan({ ...base, direction: 'sale' });
     expect(plan).toMatchObject({ netMinor: 10_000, taxMinor: 1_300, grossMinor: 11_300 });
