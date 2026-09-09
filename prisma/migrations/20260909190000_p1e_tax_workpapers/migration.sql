@@ -57,4 +57,12 @@ ALTER TABLE "TaxWorkpaperRemittance" ADD CONSTRAINT "TaxWorkpaperRemittance_jour
 ALTER TABLE "TaxWorkpaperRemittance" ADD CONSTRAINT "TaxWorkpaperRemittance_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "TaxReturnWorkpaper" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "TaxWorkpaperRemittance" ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE "TaxReturnWorkpaper", "TaxWorkpaperRemittance" FROM anon, authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON TABLE "TaxReturnWorkpaper", "TaxWorkpaperRemittance" FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON TABLE "TaxReturnWorkpaper", "TaxWorkpaperRemittance" FROM authenticated;
+  END IF;
+END $$;
