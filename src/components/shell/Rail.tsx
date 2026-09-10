@@ -21,6 +21,7 @@ import {
   Briefcase,
   Target,
   ArrowLeftRight,
+  CircleHelp,
 } from 'lucide-react';
 
 interface RailProps {
@@ -88,6 +89,8 @@ export function Rail({ companyName, companyPlan, companyId, userName, userEmail,
 
       {/* User footer */}
       <div className="s-foot">
+        {renderLink({ href: '/help', label: 'Help Center', icon: CircleHelp })}
+        <div style={{ height: 1, background: 'var(--side-border)', margin: '6px 8px' }} />
         <div className="s-user">
           <div className="av">{userName?.charAt(0) || '?'}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
