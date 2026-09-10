@@ -10,6 +10,11 @@ function isPublicPath(pathname: string) {
     pathname === '/onboarding' ||
     pathname.startsWith('/register/verify') ||
     pathname.startsWith('/api/auth') ||
+    // /api/v1 authenticates with API keys, not the dashboard session. It must
+    // stay outside withAuth AND outside the /api/ header injection below, so
+    // v1 routes never receive x-company-id/x-user-id derived from the
+    // dashboard's active-company cookie.
+    pathname.startsWith('/api/v1') ||
     PUBLIC_MARKETING_PATHS.includes(pathname)
   );
 }
