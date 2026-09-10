@@ -37,9 +37,8 @@ The unit suite covers:
 
 ## Completion decision
 
-(To be completed when the PR CI run finishes — the dated line and run number are filled from the run, then this section is updated before merge.)
-
-- CI run [number] passed all gates: secret scan, migration safety, schema validation, migration deploy/status/drift on PostgreSQL 16, typecheck, unit suite and build.
-- Migration `20260910120000_api_a_keys` applied to staging with zero drift.
-- Staging has exactly one API key, `read` permission, on the synthetic staging company only.
-- Production has zero API keys and `apiAccessEnabled = false` everywhere.
+- **2026-09-10 — CI run 31 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift against PostgreSQL 16, typecheck, the full unit suite (228 tests, 219 run) and the production build. Vercel preview deployment succeeded.
+- Migration `20260910120000_api_a_keys` deploys cleanly with zero drift (verified by CI against a fresh PostgreSQL 16 database).
+- Staging rehearsal (pending — smoke tests against the preview deployment): one API key with `read` permission on the synthetic staging company, positive `GET /api/v1/company`, and the negative suite — no key, bogus key, revoked key, cookie-injection and the company kill switch.
+- Production has zero API keys and `apiAccessEnabled = false` everywhere (the column default). No external party can authenticate until an owner opts in.
+- Rollback: set `LEDGERPRO_API_DISABLED=1` (platform) or toggle the company switch; no code rollback required to stop traffic.
