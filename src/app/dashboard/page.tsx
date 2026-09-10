@@ -18,6 +18,7 @@ import {
   ArrowUpRight, Loader2, Building2, Scale, Receipt, Upload, BookOpen,
   Clock, AlertTriangle, CheckCircle2, ArrowRight, Sparkles,
   Landmark, Banknote, Wallet, Zap, BarChart3,
+  CircleHelp,
 } from 'lucide-react';
 
 type DateRange = 'month' | 'quarter' | 'year';
@@ -120,7 +121,7 @@ export default function DashboardPage() {
   return (
     <AppShell>
       {/* ── Header ── */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-5">
         <div>
           <h1 className="text-[22px] font-bold text-[var(--text-strong)] tracking-tight flex items-center gap-2">
             <span className="w-1.5 h-6 rounded-full bg-gradient-to-b from-[var(--primary)] to-[var(--primary-hover)]" />
@@ -130,7 +131,7 @@ export default function DashboardPage() {
             Here's your financial overview for <span className="font-medium text-[var(--text-strong)]">{rangeLabel}</span>.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 md:w-auto md:overflow-visible md:pb-0">
           {/* Date range — colorful toggle */}
           <div className="flex items-center gap-1 bg-[var(--surface)] border border-[var(--border)] rounded-xl p-1 shadow-[var(--shadow-xs)]">
             {([
@@ -142,7 +143,7 @@ export default function DashboardPage() {
                 key={key}
                 onClick={() => setDateRange(key)}
                 className={cn(
-                  'px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5',
+                  'px-3 py-2 md:px-4 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5',
                   dateRange === key
                     ? 'text-white shadow-sm'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--surface-3)]'
@@ -158,6 +159,9 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
+          <Button variant="secondary" onClick={() => router.push('/help')} className="shadow-[var(--shadow-xs)]">
+            <CircleHelp size={16} /> Help
+          </Button>
           <Button onClick={() => router.push('/invoices/new')} className="shadow-[var(--shadow-xs)]">
             <Plus size={16} /> New Invoice
           </Button>
