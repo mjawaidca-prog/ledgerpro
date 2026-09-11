@@ -51,9 +51,19 @@ export interface TaxLineSelection {
   recovery?: Partial<Record<TaxKind, RecoveryDecision>>;
 }
 
+// Public API (v1) writes authenticate with an API key instead of a dashboard
+// session. The key's write permission is enforced at the route boundary; this
+// actor carries the key's identity into the engine so it skips the membership
+// role lookup (there is no user) while every other control stays identical.
+export interface ApiKeyActor {
+  kind: 'api_key';
+  keyId: string;
+}
+
 export interface PostTaxDocumentCommand {
   companyId: string;
-  userId: string;
+  userId: string | null;
+  actor?: ApiKeyActor;
   sourceKey: string;
   sourceType: 'invoice' | 'bill';
   sourceId: string;
@@ -64,7 +74,8 @@ export interface PostTaxDocumentCommand {
 
 export interface ReverseTaxPostingCommand {
   companyId: string;
-  userId: string;
+  userId: string | null;
+  actor?: ApiKeyActor;
   postingId: string;
   sourceKey: string;
   reversalDate: Date;
@@ -119,8 +130,18 @@ function evidenceObject(value: Record<string, unknown>): Prisma.InputJsonObject 
   return value as Prisma.InputJsonObject;
 }
 
-async function authorize(tx: TransactionClient, companyId: string, userId: string): Promise<void> {
-  const membership = await tx.membership.findUnique({ where: { userId_companyId: { userId, companyId } } });
+async function authorize(
+  tx: TransactionClient,
+  companyId: string,
+  userId: string | null,
+  actor?: ApiKeyActor
+): Promise<void> {
+  if (actor?.kind === 'api_key') {
+    // v1 API keys carry their own permission checks at the route boundary;
+    // the engine only needs the key identity for the audit trail.
+    return;
+  }
+  const membership = await tx.membership.findUnique({ where: { userId_companyId: { userId: userId!, companyId } } });
   assertTaxMutationRole(membership?.role);
 }
 
@@ -347,7 +368,7 @@ export async function postTaxDocument(command: PostTaxDocumentCommand, transacti
   const requestHash = fingerprint(command);
   try {
     const execute = async (tx: TransactionClient) => {
-      await authorize(tx, command.companyId, command.userId);
+      await authorize(tx, command.companyId, command.userId, command.actor);
       const replay = await tx.taxPosting.findUnique({
         where: { companyId_sourceKey: { companyId: command.companyId, sourceKey: command.sourceKey } },
         include: postingInclude,
@@ -369,7 +390,7 @@ export async function postTaxDocument(command: PostTaxDocumentCommand, transacti
         description: command.description,
         sourceType: command.sourceType,
         sourceId: command.sourceId,
-        createdBy: command.userId,
+        createdBy: command.userId ?? undefined,
         lines: journalLines(plan),
       }, command.companyId, tx);
       const posting = await tx.taxPosting.create({
@@ -469,7 +490,7 @@ export async function reverseTaxPosting(command: ReverseTaxPostingCommand, trans
   const requestHash = fingerprint({ ...command, reversalDate: command.reversalDate.toISOString() });
   try {
     const execute = async (tx: TransactionClient) => {
-    await authorize(tx, command.companyId, command.userId);
+    await authorize(tx, command.companyId, command.userId, command.actor);
     const replay = await tx.taxPosting.findUnique({
       where: { companyId_sourceKey: { companyId: command.companyId, sourceKey: command.sourceKey } },
       include: postingInclude,
@@ -494,7 +515,7 @@ export async function reverseTaxPosting(command: ReverseTaxPostingCommand, trans
       description: `Reversal: ${command.reason}`,
       sourceType: original.journalEntry.sourceType,
       sourceId: original.journalEntry.sourceId ?? undefined,
-      createdBy: command.userId,
+      createdBy: command.userId ?? undefined,
       lines: original.journalEntry.lines.map(line => ({
         glAccountCode: line.glAccountCode,
         description: line.description ?? undefined,
