@@ -7,6 +7,7 @@ import { journalCreateSchema, validationErrorResponse, parseDateField } from '@/
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { postJournalEntry } from '@/lib/journal';
 import { closedPeriodGuard, auditLog } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -127,6 +128,15 @@ export async function POST(req: NextRequest) {
   await auditLog(context!.companyId, undefined, 'api.journal.create', 'journal_entry', (outcome.body as any)?.data?.id ?? null, undefined, {
     apiKeyId: context!.apiKeyId,
     apiKeyName: context!.apiKeyName,
+  });
+
+  await emitWebhookEvent({
+    companyId: context!.companyId,
+    eventType: 'journal.posted',
+    payload: {
+      id: (outcome.body as any)?.data?.id,
+      occurredAt: new Date().toISOString(),
+    },
   });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });

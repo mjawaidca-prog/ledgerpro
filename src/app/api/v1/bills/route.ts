@@ -7,6 +7,7 @@ import { moneyString, isoDate } from '@/lib/api/serialize';
 import { billDraftSchema, validationErrorResponse, parseDateField } from '@/lib/api/validation';
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { auditLog } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -192,6 +193,16 @@ export async function POST(req: NextRequest) {
     apiKeyId: context!.apiKeyId,
     apiKeyName: context!.apiKeyName,
     status: 'draft',
+  });
+
+  await emitWebhookEvent({
+    companyId: context!.companyId,
+    eventType: 'bill.created',
+    payload: {
+      id: (outcome.body as any)?.data?.id,
+      status: 'draft',
+      occurredAt: new Date().toISOString(),
+    },
   });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });

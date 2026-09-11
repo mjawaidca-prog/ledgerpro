@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 import { billSchema } from '@/lib/validators/bill';
 import { postBillToLedger } from '@/lib/journal';
 import { resolveDocumentFx, FxValidationError } from '@/lib/fx/document';
@@ -247,11 +248,22 @@ export async function POST(req: NextRequest) {
           taxPosting: await client.taxPosting.findFirst({ where: { companyId, journalEntry: { sourceType: 'bill', sourceId: id }, reversalOfId: null }, include: { journalEntry: { include: { lines: true } }, snapshots: { include: { components: true } } } }),
         }),
       );
+      await emitWebhookEvent({
+        companyId,
+        eventType: 'bill.created',
+        payload: { id: (result as any).data?.id, status: (result as any).data?.status, occurredAt: new Date().toISOString() },
+      });
       return NextResponse.json(result, { status: 201 });
     }
     const { data: bill, taxPosting } = await saveDocument(db, generateBillId(billData.kind));
 
     await auditLog(companyId, userId, 'bill.create', 'bill', bill.id, { after: bill });
+
+    await emitWebhookEvent({
+      companyId,
+      eventType: 'bill.created',
+      payload: { id: bill.id, status: bill.status, occurredAt: new Date().toISOString() },
+    });
 
     return NextResponse.json({ data: bill, taxPosting }, { status: 201 });
   } catch (error: any) {

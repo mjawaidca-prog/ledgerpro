@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 import { invoiceSchema } from '@/lib/validators/invoice';
 import { postInvoiceToLedger } from '@/lib/journal';
 import { notifyBillDue } from '@/lib/notifications';
@@ -260,6 +261,11 @@ export async function POST(req: NextRequest) {
           taxPosting: await client.taxPosting.findFirst({ where: { companyId, journalEntry: { sourceType: 'invoice', sourceId: id }, reversalOfId: null }, include: { journalEntry: { include: { lines: true } }, snapshots: { include: { components: true } } } }),
         }),
       );
+      await emitWebhookEvent({
+        companyId,
+        eventType: 'invoice.created',
+        payload: { id: (result as any).data?.id, status: (result as any).data?.status, occurredAt: new Date().toISOString() },
+      });
       return NextResponse.json(result, { status: 201 });
     }
     const { data: invoice, taxPosting } = await saveDocument(db, generateInvoiceId());
@@ -268,6 +274,12 @@ export async function POST(req: NextRequest) {
     if (requestedStatus === 'sent') {
       notifyBillDue(companyId, invoice.id, customer?.name || 'Customer').catch(() => {});
     }
+
+    await emitWebhookEvent({
+      companyId,
+      eventType: 'invoice.created',
+      payload: { id: invoice.id, status: invoice.status, occurredAt: new Date().toISOString() },
+    });
 
     return NextResponse.json({ data: invoice, taxPosting }, { status: 201 });
   } catch (error: any) {

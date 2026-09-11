@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 import { db } from '@/lib/db';
 import { resolveRate } from '@/lib/fx/rate';
 import { postInvoicePayment, reverseDocumentPayment } from '@/lib/journal';
@@ -93,6 +94,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       settlementRate,
       rateSource,
     } as any);
+
+    await emitWebhookEvent({
+      companyId,
+      eventType: 'payment.recorded',
+      payload: { id: entry.id, documentType: 'invoice', documentId: params.id, occurredAt: new Date().toISOString() },
+    });
 
     return NextResponse.json({ data: { entry, settlementRate, rateSource } }, { status: 201 });
   } catch (err: any) {

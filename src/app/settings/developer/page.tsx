@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft, KeyRound, Plus, Trash2, Copy, Check, Loader2, ShieldAlert, CalendarClock,
+  ArrowLeft, KeyRound, Plus, Trash2, Copy, Check, Loader2, ShieldAlert, CalendarClock, Webhook,
 } from 'lucide-react';
 
 interface ApiKeyRow {
@@ -22,6 +22,34 @@ interface ApiKeyRow {
   revokedAt: string | null;
   createdAt: string;
 }
+
+interface WebhookRow {
+  id: string;
+  url: string;
+  description: string | null;
+  events: string[];
+  enabled: boolean;
+  createdAt: string;
+  deliveries: {
+    id: string;
+    eventType: string;
+    eventId: string;
+    status: string;
+    attempts: number;
+    lastError: string | null;
+    deliveredAt: string | null;
+    createdAt: string;
+  }[];
+}
+
+const WEBHOOK_EVENT_OPTIONS = [
+  'invoice.created',
+  'invoice.posted',
+  'bill.created',
+  'bill.updated',
+  'payment.recorded',
+  'journal.posted',
+];
 
 function keyStatus(key: ApiKeyRow): { label: string; badge: 'paid' | 'pending' | 'info' | 'neutral' } {
   if (key.revokedAt) return { label: 'Revoked', badge: 'neutral' };
@@ -43,6 +71,15 @@ export default function DeveloperPage() {
   const [copied, setCopied] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
+  const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
+  const [webhooksLoading, setWebhooksLoading] = useState(true);
+  const [showWebhookCreate, setShowWebhookCreate] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(['invoice.created']);
+  const [creatingWebhook, setCreatingWebhook] = useState(false);
+  const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [webhookCopied, setWebhookCopied] = useState(false);
+  const [retryingDelivery, setRetryingDelivery] = useState<string | null>(null);
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -59,6 +96,88 @@ export default function DeveloperPage() {
   }, []);
 
   useEffect(() => { fetchKeys(); }, [fetchKeys]);
+
+  const fetchWebhooks = useCallback(async () => {
+    try {
+      const res = await fetch('/api/webhooks');
+      const json = await res.json();
+      if (res.ok) setWebhooks(json.data || []);
+    } catch {}
+    setWebhooksLoading(false);
+  }, []);
+
+  useEffect(() => { fetchWebhooks(); }, [fetchWebhooks]);
+
+  async function handleCreateWebhook(e: React.FormEvent) {
+    e.preventDefault();
+    if (!webhookUrl.trim() || !webhookEvents.length) return;
+    setCreatingWebhook(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: webhookUrl.trim(), events: webhookEvents }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to create webhook endpoint');
+      setWebhookSecret(json.data.secret);
+      setWebhookUrl('');
+      setShowWebhookCreate(false);
+      fetchWebhooks();
+    } catch (err: any) {
+      setMessage({ type: 'danger', text: err.message });
+    } finally {
+      setCreatingWebhook(false);
+    }
+  }
+
+  async function handleDeleteWebhook(w: WebhookRow) {
+    if (!window.confirm(`Remove the webhook endpoint at ${w.url}?`)) return;
+    try {
+      const res = await fetch(`/api/webhooks/${w.id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to remove webhook endpoint');
+      setMessage({ type: 'success', text: 'Webhook endpoint removed.' });
+      fetchWebhooks();
+    } catch (err: any) {
+      setMessage({ type: 'danger', text: err.message });
+    }
+  }
+
+  async function handleTestWebhook(w: WebhookRow) {
+    try {
+      const res = await fetch(`/api/webhooks/${w.id}/test`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to send test event');
+      setMessage({ type: 'success', text: `Test event queued (${json.data.eventType}).` });
+      setTimeout(fetchWebhooks, 1500);
+    } catch (err: any) {
+      setMessage({ type: 'danger', text: err.message });
+    }
+  }
+
+  async function handleRetryDelivery(w: WebhookRow, deliveryId: string) {
+    setRetryingDelivery(deliveryId);
+    try {
+      const res = await fetch(`/api/webhooks/deliveries/${deliveryId}/retry`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to requeue delivery');
+      setMessage({ type: 'success', text: 'Delivery requeued.' });
+      fetchWebhooks();
+    } catch (err: any) {
+      setMessage({ type: 'danger', text: err.message });
+    } finally {
+      setRetryingDelivery(null);
+    }
+  }
+
+  async function handleCopyWebhookSecret() {
+    if (!webhookSecret) return;
+    await navigator.clipboard.writeText(webhookSecret);
+    setWebhookCopied(true);
+    setTimeout(() => setWebhookCopied(false), 2000);
+  }
 
   async function handleToggleAccess() {
     setToggling(true);
@@ -295,6 +414,140 @@ export default function DeveloperPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </CardBody>
+        </Card>
+
+        {webhookSecret && (
+          <Alert variant="warning">
+            <div className="space-y-2">
+              <div className="font-medium flex items-center gap-2">
+                <ShieldAlert size={16} /> Copy your webhook signing secret now — it will never be shown again.
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-background/50 px-3 py-2 text-sm break-all">{webhookSecret}</code>
+                <Button variant="secondary" onClick={handleCopyWebhookSecret}>
+                  {webhookCopied ? <Check size={14} /> : <Copy size={14} />} {webhookCopied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <p className="text-xs">Events are signed HMAC-SHA256 over <code>timestamp.payload</code> and delivered with x-ledgerpro-* headers.</p>
+            </div>
+          </Alert>
+        )}
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-medium">Webhooks</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Signed notifications for invoice.created, invoice.posted, bill.created, bill.updated, payment.recorded and journal.posted.
+                </p>
+              </div>
+              <Button variant="primary" onClick={() => setShowWebhookCreate(!showWebhookCreate)}>
+                <Plus size={14} /> New endpoint
+              </Button>
+            </div>
+          </CardHeader>
+          <CardBody>
+            {showWebhookCreate && (
+              <form onSubmit={handleCreateWebhook} className="space-y-3 border rounded-lg p-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Destination URL</label>
+                  <input
+                    type="url"
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                    placeholder="https://example.com/ledgerpro-events"
+                    required
+                    className="w-full rounded border px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Events</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {WEBHOOK_EVENT_OPTIONS.map((evt) => (
+                      <label key={evt} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={webhookEvents.includes(evt)}
+                          onChange={(e) =>
+                            setWebhookEvents(
+                              e.target.checked ? [...webhookEvents, evt] : webhookEvents.filter((x) => x !== evt)
+                            )
+                          }
+                        />
+                        <code className="text-xs">{evt}</code>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="ghost" onClick={() => setShowWebhookCreate(false)}>Cancel</Button>
+                  <Button type="submit" variant="primary" disabled={creatingWebhook}>
+                    {creatingWebhook ? <Loader2 size={14} className="animate-spin" /> : <Webhook size={14} />}
+                    Create endpoint
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {webhooksLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" /> Loading endpoints…
+              </div>
+            ) : webhooks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No webhook endpoints yet. Add one to receive signed LedgerPro events.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {webhooks.map((w) => (
+                  <div key={w.id} className="rounded border px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{w.url}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {w.events.join(', ')}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <Button variant="ghost" onClick={() => handleTestWebhook(w)}>
+                          <Webhook size={14} /> Test
+                        </Button>
+                        <Button variant="ghost" className="text-red-600" onClick={() => handleDeleteWebhook(w)}>
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                    {w.deliveries.length > 0 && (
+                      <div className="mt-2 border-t pt-2 space-y-1">
+                        {w.deliveries.map((d) => (
+                          <div key={d.id} className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Badge variant={d.status === 'success' ? 'paid' : d.status === 'dead' ? 'overdue' : d.status === 'failed' ? 'pending' : 'info'}>
+                                {d.status}
+                              </Badge>
+                              <span className="truncate">{d.eventType} · {d.attempts} attempts</span>
+                              {d.lastError && <span className="text-red-600 truncate">{d.lastError}</span>}
+                            </div>
+                            {d.status !== 'success' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRetryDelivery(w, d.id)}
+                                disabled={retryingDelivery === d.id}
+                              >
+                                {retryingDelivery === d.id ? <Loader2 size={12} className="animate-spin" /> : null} Retry
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </CardBody>

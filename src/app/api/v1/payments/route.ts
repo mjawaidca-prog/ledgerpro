@@ -7,6 +7,7 @@ import { paymentCreateSchema, validationErrorResponse, parseDateField } from '@/
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { postInvoicePayment, postBillPayment } from '@/lib/journal';
 import { closedPeriodGuard, auditLog } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -188,6 +189,17 @@ export async function POST(req: NextRequest) {
     apiKeyName: context!.apiKeyName,
     documentType,
     documentId,
+  });
+
+  await emitWebhookEvent({
+    companyId: context!.companyId,
+    eventType: 'payment.recorded',
+    payload: {
+      id: (outcome.body as any)?.data?.id,
+      documentType,
+      documentId,
+      occurredAt: new Date().toISOString(),
+    },
   });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
