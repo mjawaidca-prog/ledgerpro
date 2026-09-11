@@ -24,6 +24,7 @@ export const HELP_CATEGORIES = [
   'Canadian tax',
   'Reporting and groups',
   'Security and support',
+  'Developer API',
 ] as const;
 
 export const HELP_ARTICLES: HelpArticle[] = [
@@ -570,6 +571,208 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'Tax snapshot: frozen line and component facts stored when a reviewed-tax document posts.',
           'Trial balance: listing of GL balances used to confirm total debits equal total credits.',
           'Workpaper: evidence-backed schedule used to prepare, reconcile, review, and record external filing.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'developer-api-overview',
+    title: 'Developer API overview',
+    category: 'Developer API',
+    summary: 'What the public API is, what it can do, and how to get started.',
+    keywords: ['api', 'developer', 'integration', 'openapi', 'rest'],
+    sections: [
+      {
+        heading: 'What the API is',
+        text: 'LedgerPro has a versioned public API at https://ledger.nexvarlab.com/api/v1 for authorized applications and accountants. "Public" means documented access for approved integrations — it never opens customer financial data to unauthenticated callers.',
+      },
+      {
+        heading: 'What it covers',
+        notes: [
+          'Read-only: company profile, chart of accounts, contacts, invoices, bills, payments, bank transactions, journal entries, approved tax codes, and the five core reports.',
+          'Controlled writes: draft documents, reviewed-tax posting, recorded payments, balanced journals, and controlled voids/reversals.',
+          'Webhooks: signed notifications (invoice.created/posted, bill.created/updated, payment.recorded, journal.posted).',
+        ],
+      },
+      {
+        heading: 'Get started',
+        steps: [
+          'Open Settings → Developer / API Access (owners only).',
+          'Enable API access for the company and create a key with the permissions your integration needs.',
+          'Copy the secret once — only its SHA-256 hash is stored.',
+          'Call https://ledger.nexvarlab.com/api/v1/company with Authorization: Bearer lp_live_… to confirm.',
+          'The full endpoint reference is at /api/v1/openapi.json.',
+        ],
+      },
+    ],
+    action: { label: 'Open API settings', href: '/settings/developer' },
+  },
+  {
+    slug: 'developer-api-auth',
+    title: 'API authentication and permissions',
+    category: 'Developer API',
+    summary: 'API keys, permission scopes, expiry, revocation and rate limits.',
+    keywords: ['api', 'key', 'bearer', 'permissions', 'rate limit', 'scopes'],
+    sections: [
+      {
+        heading: 'Authentication',
+        text: 'Every request authenticates with Authorization: Bearer lp_live_<32 hex chars>. Keys belong to exactly one company — an accountant serving several clients holds separately authorized keys per client. The dashboard session cookie grants nothing on /api/v1.',
+      },
+      {
+        heading: 'Permissions',
+        notes: [
+          'read — all GET endpoints.',
+          'write_draft — create/update contacts; create draft invoices and bills.',
+          'write_posting — post documents, record payments, create journals, void and reverse.',
+        ],
+      },
+      {
+        heading: 'Rate limits',
+        notes: [
+          'Default: 120 requests/minute and 5,000/day per key.',
+          'Reports: 10 requests/minute and 500/day (stricter class).',
+          '429 responses carry retryAfterSeconds. Limits are shared across all server instances.',
+        ],
+      },
+      {
+        heading: 'Lifecycle',
+        notes: [
+          'Keys expire on their expiry date, and owners can revoke them instantly.',
+          'Revoked and expired keys return 401 with codes api_key_revoked / api_key_expired.',
+          'The company-level switch and the platform switch disable access immediately without deleting history.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'developer-api-pagination',
+    title: 'API pagination and change sync',
+    category: 'Developer API',
+    summary: 'Cursor pagination, the updatedAfter sync filter, and decimal-string money.',
+    keywords: ['api', 'pagination', 'cursor', 'sync', 'updatedAfter', 'decimal'],
+    sections: [
+      {
+        heading: 'Pagination',
+        text: 'List endpoints are cursor-paginated: limit (default 50, max 100) and cursor. Responses carry pagination: { nextCursor, hasMore }. Pass nextCursor back as cursor to fetch the next page; the cursor is opaque and stable.',
+      },
+      {
+        heading: 'Change sync',
+        notes: [
+          'updatedAfter (ISO datetime) returns records changed since a point in time.',
+          'Append-only posted facts (payments, journal entries) use createdAfter instead.',
+          'Voided and reversed records are included with their status/voidedAt so synchronizing clients can mirror them.',
+        ],
+      },
+      {
+        heading: 'Money',
+        text: 'Financial values are decimal strings ("100.50", tax rates "0.130", FX "1.34567890") with explicit currencies. Never parse them as floats. Reports include meta with reportingPeriod, accountingBasis ("accrual") and generatedAt.',
+      },
+    ],
+  },
+  {
+    slug: 'developer-api-errors',
+    title: 'API error codes',
+    category: 'Developer API',
+    summary: 'The error envelope and the codes your integration should handle.',
+    keywords: ['api', 'errors', 'codes', 'troubleshooting'],
+    sections: [
+      {
+        heading: 'Envelope',
+        text: 'Failures return { error: { code, message, fields?, retryAfterSeconds? } }. Build retry logic on code, never on message text.',
+      },
+      {
+        heading: 'Common codes',
+        notes: [
+          'invalid_api_key — missing, malformed or unknown key (401).',
+          'api_key_revoked / api_key_expired — key lifecycle (401).',
+          'insufficient_permissions — the key lacks the required scope (403).',
+          'api_access_disabled — the company switch is off (403).',
+          'rate_limited — over a limit window; honor retryAfterSeconds (429).',
+          'validation_error — field-level problems; see fields (400).',
+          'not_found — the id does not exist in this company (404).',
+          'idempotency_key_required — writes need an Idempotency-Key header (400).',
+          'closed_period / document_not_draft / document_not_posted / tax_decision_required / tax_settlement_reversal_required — accounting controls (409).',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'developer-api-tax-fx',
+    title: 'API tax and FX restrictions',
+    category: 'Developer API',
+    summary: 'The accounting controls the API can never bypass.',
+    keywords: ['api', 'tax', 'fx', 'closed period', 'controls'],
+    sections: [
+      {
+        heading: 'Tax',
+        text: 'Posting drafts runs the same reviewed-tax engine as the dashboard: company tax configuration must be ready, every line needs a decision referencing an approved tax-code version with jurisdiction evidence, and recovery selections must reference existing reviewed decisions.',
+      },
+      {
+        heading: 'Foreign currency',
+        notes: [
+          'Foreign-currency drafts must freeze an fxRate at creation; it is never recomputed later.',
+          'Payments settle at the document’s frozen rate; settlementRate overrides are validated.',
+          'Home-currency documents derive 1.00 — a missing rate is never treated as zero.',
+        ],
+      },
+      {
+        heading: 'Periods and journals',
+        notes: [
+          'Posting, payments and journals are blocked inside closed periods (409).',
+          'Journals must balance; every line needs an active GL account from the company.',
+          'Voiding a posted document requires no unreversed payments remain.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'developer-api-webhooks',
+    title: 'API webhooks: verify and dedupe',
+    category: 'Developer API',
+    summary: 'Signature verification, retries, replay and duplicate handling.',
+    keywords: ['api', 'webhooks', 'signature', 'hmac', 'retry', 'replay'],
+    sections: [
+      {
+        heading: 'Verifying a delivery',
+        steps: [
+          'Concatenate the x-ledgerpro-timestamp header, a dot, and the raw request body.',
+          'Compute HMAC-SHA256 with your endpoint secret.',
+          'Compare (constant-time) against x-ledgerpro-signature after stripping the sha256= prefix.',
+          'Reject deliveries whose signature does not match.',
+        ],
+      },
+      {
+        heading: 'Dedupe and retries',
+        notes: [
+          'Every event has a stable x-ledgerpro-event-id — dedupe on it.',
+          'Failed deliveries retry on a fixed ladder (1m → 5m → 30m → 2h → 6h) then stop.',
+          'Replays reuse the same event id; successes are never re-sent.',
+          'Destinations must resolve to public addresses only — private/internal URLs are rejected.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'developer-api-sandbox',
+    title: 'API sandbox and pilot',
+    category: 'Developer API',
+    summary: 'Testing on synthetic data before touching real books.',
+    keywords: ['api', 'sandbox', 'test', 'synthetic', 'pilot', 'staging'],
+    sections: [
+      {
+        heading: 'Sandbox',
+        notes: [
+          'Approved developers receive separate credentials against an isolated environment with synthetic companies (e.g. the P1-F Synthetic Ontario Pilot) and synthetic chart of accounts.',
+          'Sandbox keys never authenticate against production data.',
+          'The sandbox runs the same reviewed-tax engine and the same controls as production.',
+        ],
+      },
+      {
+        heading: 'Pilot',
+        notes: [
+          'Launch starts with the test company and one accountant pilot before broader access.',
+          'Production API access is available on Pro and Enterprise plans; sandbox access is granted to approved developers on any plan.',
+          'There is no per-call billing initially; published usage allowances apply.',
         ],
       },
     ],

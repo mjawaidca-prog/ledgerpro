@@ -176,6 +176,10 @@ model Plan {
   customReports   Boolean @default(false)
   prioritySupport Boolean @default(false)
   whiteLabel      Boolean @default(false)
+  // Public API (v1): production API access on Pro and Enterprise per the
+  // API-E launch policy; sandbox access is granted separately to approved
+  // developers on any plan.
+  apiAccess       Boolean @default(false)
 
   features Json?
 
