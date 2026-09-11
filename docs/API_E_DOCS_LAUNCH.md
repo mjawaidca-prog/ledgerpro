@@ -37,6 +37,6 @@ API-E closes the public API program: the OpenAPI endpoint reference, in-app deve
 
 ## Completion decision
 
+- **2026-09-11 — CI run 53 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift on PostgreSQL 16, typecheck, the full unit suite (298 tests, 289 run) and the production build.
 - **2026-09-11 — staging rehearsal passed** (evidence above).
-- CI run [number] to be recorded after PR #15 gates pass.
 - Launch checkpoint (external): an approved developer completes one integration against the sandbox using only these documents — the program-level acceptance test.
