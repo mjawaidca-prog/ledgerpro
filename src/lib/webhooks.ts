@@ -85,10 +85,14 @@ export async function emitWebhookEvent(opts: {
 
     // Piggyback sweep: deliver this company's due deliveries now. Vercel's
     // Hobby plan limits crons to one run per day, so retries ride along with
-    // real activity; the daily cron is the catch-all. Best-effort only.
-    sweepDueDeliveries(opts.companyId, 10).catch((e) => {
+    // real activity; the daily cron is the catch-all. AWAITED (bounded): a
+    // fire-and-forget promise would be frozen the moment this request's
+    // response returns on serverless, and the deliveries would never go out.
+    try {
+      await sweepDueDeliveries(opts.companyId, 5);
+    } catch (e) {
       console.error('[webhooks] Piggyback sweep failed:', e);
-    });
+    }
   } catch (e) {
     console.error('[webhooks] Failed to emit event:', e);
   }
@@ -212,6 +216,8 @@ export async function deliverWebhook(deliveryId: string): Promise<WebhookDeliver
         'x-ledgerpro-signature': `sha256=${signature}`,
       },
       body,
+      // Bound each attempt so one slow endpoint can't stall the sweep.
+      signal: AbortSignal.timeout(5000),
     });
 
     if (res.ok) {
