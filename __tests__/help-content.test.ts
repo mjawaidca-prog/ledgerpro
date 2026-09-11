@@ -2,8 +2,8 @@ import { HELP_ARTICLES, HELP_CATEGORIES } from '@/lib/help-content';
 
 describe('LedgerPro help content', () => {
   it('publishes the complete manual topic set with unique slugs', () => {
-    expect(HELP_ARTICLES).toHaveLength(23);
-    expect(new Set(HELP_ARTICLES.map((article) => article.slug)).size).toBe(23);
+    expect(HELP_ARTICLES).toHaveLength(30);
+    expect(new Set(HELP_ARTICLES.map((article) => article.slug)).size).toBe(30);
   });
 
   it('assigns every article to a visible category', () => {
