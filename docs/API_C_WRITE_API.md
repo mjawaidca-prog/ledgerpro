@@ -48,5 +48,5 @@ Drafts carry no tax decisions — reviewed tax is applied at posting, exactly li
 
 ## Completion decision
 
+- **2026-09-11 — CI run 43 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift on PostgreSQL 16, typecheck, the full unit suite (273 tests, 264 run) and the production build.
 - **2026-09-11 — staging rehearsal passed** (evidence above) on the synthetic staging company.
-- CI run [number] to be recorded after PR #13 gates pass.
