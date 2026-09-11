@@ -39,6 +39,7 @@ model User {
   taxWorkpapersPrepared    TaxReturnWorkpaper[]       @relation("TaxWorkpaperPreparer")
   taxWorkpapersReviewed    TaxReturnWorkpaper[]       @relation("TaxWorkpaperReviewer")
   taxWorkpaperRemittances  TaxWorkpaperRemittance[]   @relation("TaxWorkpaperRemittanceCreator")
+  apiKeysCreated           ApiKey[]                   @relation("ApiKeyCreator")
 }
 
 model Company {
@@ -100,6 +101,12 @@ model Company {
   taxPostings         TaxPosting[]
   taxWorkpapers       TaxReturnWorkpaper[]
   taxWorkpaperRemittances TaxWorkpaperRemittance[]
+
+  // ── Public API (v1) ──
+  // Company-level emergency disable switch. Off by default: a company must
+  // opt in to API access before any of its keys authenticate.
+  apiAccessEnabled Boolean    @default(false)
+  apiKeys           ApiKey[]
 }
 
 enum BusinessType {
@@ -1680,4 +1687,54 @@ model ImportReminder {
   channel    String[]        @default(["in_app"])
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
+}
+
+// ─── PUBLIC API (v1) ────────────────────────────────────────
+
+// API keys authenticate /api/v1 requests. The secret is shown exactly once
+// at creation; only its SHA-256 hash is stored. Tenant isolation comes from
+// the key's own companyId — the dashboard's active-company cookie is never
+// consulted by v1 routes.
+model ApiKey {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name        String
+  keyPrefix   String // "lp_live_ab12cd34" — displayed for recognition, never used for lookup
+  keyHash     String  @unique // sha256 hex of the full secret
+  permissions ApiKeyPermission[] // granted scopes; "read" until API-C adds write scopes
+
+  expiresAt    DateTime?
+  lastUsedAt   DateTime?
+  requestCount Int      @default(0)
+  revokedAt    DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  rateCounters ApiRateCounter[]
+
+  @@index([companyId])
+}
+
+enum ApiKeyPermission {
+  read // API-B read-only endpoints
+  write_draft // API-C release 1: create drafts (future)
+  write_posting // API-C release 2: post, record payments, journals (future)
+}
+
+// PostgreSQL-backed sliding-window rate counters. Vercel serverless instances
+// share no memory, so per-instance counters would be trivially bypassable.
+// One row per (key, scope, window); increments are atomic upserts.
+model ApiRateCounter {
+  id          String   @id @default(cuid())
+  apiKeyId    String
+  apiKey      ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  scope       String // "minute" | "day" — checked against the request's permission class
+  windowStart DateTime // UTC boundary of the fixed window
+  count       Int      @default(0)
+
+  @@unique([apiKeyId, scope, windowStart])
 }

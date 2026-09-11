@@ -22,6 +22,7 @@ import {
   Target,
   ArrowLeftRight,
   CircleHelp,
+  KeyRound,
 } from 'lucide-react';
 
 interface RailProps {
@@ -53,6 +54,7 @@ const settingsNavItems = [
   { href: '/settings/exchange-rates',  label: 'FX Rates',           icon: ArrowLeftRight },
   { href: '/settings/period-close',    label: 'Period Close',       icon: Shield },
   { href: '/settings/audit-log',       label: 'Audit Log',          icon: FileText },
+  { href: '/settings/developer',       label: 'Developer / API',    icon: KeyRound },
 ];
 
 export function Rail({ companyName, companyPlan, companyId, userName, userEmail, className }: RailProps) {
