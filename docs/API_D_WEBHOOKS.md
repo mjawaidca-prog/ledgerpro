@@ -36,5 +36,5 @@ API-D delivers signed, retried, visible and replayable event notifications to co
 
 ## Completion decision
 
+- **2026-09-11 — CI run 49 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift on PostgreSQL 16, typecheck, the full unit suite (292 tests, 283 run) and the production build.
 - **2026-09-11 — staging rehearsal passed** (evidence above).
-- CI run [number] to be recorded after PR #14 gates pass.
