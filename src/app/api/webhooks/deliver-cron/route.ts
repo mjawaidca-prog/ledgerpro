@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { deliverWebhook } from '@/lib/webhooks';
+import { sweepDueDeliveries } from '@/lib/webhooks';
 export const dynamic = 'force-dynamic';
 
-// GET /api/webhooks/deliver-cron — Vercel cron entrypoint. Sends due
-// webhook deliveries (pending or failed with an elapsed backoff window).
+// GET /api/webhooks/deliver-cron — Vercel cron entrypoint (daily catch-all;
+// Vercel Hobby limits crons to one run per day). Sends every due delivery —
+// retries normally ride along with real activity via piggyback sweeps.
 // Guarded by CRON_SECRET like the other cron routes.
 export async function GET(req: NextRequest) {
   const secret = req.headers.get('authorization')?.replace('Bearer ', '');
@@ -14,22 +14,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const due = await db.webhookDelivery.findMany({
-      where: {
-        status: { in: ['pending', 'failed'] },
-        nextAttemptAt: { lte: new Date() },
-      },
-      orderBy: { nextAttemptAt: 'asc' },
-      take: 50, // bounded batch per cron tick
-    });
-
-    let sent = 0;
-    for (const delivery of due) {
-      const status = await deliverWebhook(delivery.id);
-      if (status === 'success') sent += 1;
-    }
-
-    return NextResponse.json({ data: { processed: due.length, delivered: sent } });
+    const result = await sweepDueDeliveries(null, 50);
+    return NextResponse.json({ data: result });
   } catch (error) {
     console.error('GET /api/webhooks/deliver-cron error:', error);
     return NextResponse.json({ error: 'Webhook delivery run failed' }, { status: 500 });

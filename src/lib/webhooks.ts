@@ -82,9 +82,39 @@ export async function emitWebhookEvent(opts: {
         }
       }
     }
+
+    // Piggyback sweep: deliver this company's due deliveries now. Vercel's
+    // Hobby plan limits crons to one run per day, so retries ride along with
+    // real activity; the daily cron is the catch-all. Best-effort only.
+    sweepDueDeliveries(opts.companyId, 10).catch((e) => {
+      console.error('[webhooks] Piggyback sweep failed:', e);
+    });
   } catch (e) {
     console.error('[webhooks] Failed to emit event:', e);
   }
+}
+
+/**
+ * Delivers up to `limit` due deliveries for one company (or every company
+ * when companyId is null — the daily cron's catch-all mode).
+ */
+export async function sweepDueDeliveries(companyId: string | null, limit: number): Promise<{ processed: number; delivered: number }> {
+  const due = await db.webhookDelivery.findMany({
+    where: {
+      status: { in: ['pending', 'failed'] },
+      nextAttemptAt: { lte: new Date() },
+      ...(companyId ? { endpoint: { companyId } } : {}),
+    },
+    orderBy: { nextAttemptAt: 'asc' },
+    take: limit,
+  });
+
+  let delivered = 0;
+  for (const d of due) {
+    const status = await deliverWebhook(d.id);
+    if (status === 'success') delivered += 1;
+  }
+  return { processed: due.length, delivered };
 }
 
 // ── SSRF protection ─────────────────────────────────────────

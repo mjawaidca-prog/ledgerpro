@@ -12,6 +12,7 @@ jest.mock('node:dns/promises', () => ({
 const mockDeliveryFindUnique = jest.fn();
 const mockDeliveryUpdate = jest.fn();
 const mockDeliveryCreate = jest.fn();
+const mockDeliveryFindMany = jest.fn();
 const mockEndpointFindMany = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
@@ -19,6 +20,7 @@ jest.mock('@/lib/db', () => ({
       findUnique: (...a: unknown[]) => mockDeliveryFindUnique(...a),
       update: (...a: unknown[]) => mockDeliveryUpdate(...a),
       create: (...a: unknown[]) => mockDeliveryCreate(...a),
+      findMany: (...a: unknown[]) => mockDeliveryFindMany(...a),
     },
     webhookEndpoint: { findMany: (...a: unknown[]) => mockEndpointFindMany(...a) },
   },
@@ -202,5 +204,29 @@ describe('event emission', () => {
   test('emission never throws on database failure', async () => {
     mockEndpointFindMany.mockRejectedValue(new Error('db down'));
     await expect(emitWebhookEvent({ companyId: 'co-1', eventType: 'invoice.created', payload: {} })).resolves.toBeUndefined();
+  });
+
+  test('emission piggybacks a sweep of due deliveries for the company', async () => {
+    mockEndpointFindMany.mockResolvedValue([{ id: 'e-1' }]);
+    mockDeliveryFindMany.mockResolvedValue([
+      { id: 'due-1', status: 'pending' },
+    ]);
+    mockDeliveryFindUnique.mockResolvedValue({
+      id: 'due-1', eventType: 'bill.updated', eventId: 'evt-old', payload: {}, attempts: 0, status: 'pending',
+      lastError: null, deliveredAt: null, createdAt: new Date(), updatedAt: new Date(),
+      endpoint: { url: 'https://public.test/x', secret: 'whsec_test' },
+    });
+    global.fetch = jest.fn().mockResolvedValue(new Response('ok', { status: 200 })) as any;
+
+    await emitWebhookEvent({ companyId: 'co-1', eventType: 'invoice.created', payload: { id: 'INV-1' } });
+    // give the fire-and-forget sweep a tick
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(mockDeliveryFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ endpoint: { companyId: 'co-1' } }) })
+    );
+    expect(mockDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'success' }) })
+    );
   });
 });
