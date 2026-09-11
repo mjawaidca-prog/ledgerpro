@@ -54,6 +54,6 @@ The report builders share the dashboard's GL primitives (`getGLActivity`, `norma
 
 ## Completion decision
 
-- **2026-09-11 — staging rehearsal passed** against the API-B preview deployment on the synthetic staging company (P1-F Synthetic Ontario Pilot): all list endpoints, all five reports, pagination, 401 path and live rate limiting verified.
-- CI run [number] to be recorded after PR #12 gates pass.
+- **2026-09-11 — CI run 36 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift on PostgreSQL 16, typecheck, the full unit suite (247 tests, 238 run) and the production build.
+- **2026-09-11 — staging rehearsal passed** against the API-B preview deployment (`ledgerpro-iqkefv12i`, branch-scoped env on `ledgerpro-staging`) on the synthetic staging company: all list endpoints, all five reports, pagination, 401 path and live rate limiting verified.
 - Production ships with zero keys and `apiAccessEnabled = false` everywhere — the read API is inert until an owner opts in.
