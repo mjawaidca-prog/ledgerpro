@@ -197,8 +197,16 @@ export async function voidReviewedDocument(input: VoidDocumentInput): Promise<Vo
           : await tx.bill.findUniqueOrThrow({ where: { id: input.id } });
       if (current.status === 'void') return;
 
+      // Only an UNREVERSED payment blocks voiding: the reversal entry copies
+      // the original's sourceType/sourceId, so it must be excluded here.
       const payment = await tx.journalEntry.findFirst({
-        where: { companyId: input.companyId, sourceId: input.id, sourceType: 'payment', voidedAt: null },
+        where: {
+          companyId: input.companyId,
+          sourceId: input.id,
+          sourceType: 'payment',
+          voidedAt: null,
+          reversalOfId: null,
+        },
       });
       if (Number(current.paidAmount) !== 0 || payment) {
         throw new TaxPostingError('tax_settlement_reversal_required', 'Reverse the payments and bank matches before voiding this reviewed-tax document.', 409);
