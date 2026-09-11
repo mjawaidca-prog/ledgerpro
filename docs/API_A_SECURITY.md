@@ -37,8 +37,12 @@ The unit suite covers:
 
 ## Completion decision
 
-- **2026-09-10 — CI run 31 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift against PostgreSQL 16, typecheck, the full unit suite (228 tests, 219 run) and the production build. Vercel preview deployment succeeded.
-- Migration `20260910120000_api_a_keys` deploys cleanly with zero drift (verified by CI against a fresh PostgreSQL 16 database).
-- Staging rehearsal (pending — smoke tests against the preview deployment): one API key with `read` permission on the synthetic staging company, positive `GET /api/v1/company`, and the negative suite — no key, bogus key, revoked key, cookie-injection and the company kill switch.
+- **2026-09-10 — CI run 31 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift against PostgreSQL 16, typecheck, the full unit suite (228 tests, 219 run) and the production build.
+- **2026-09-11 — staging rehearsal passed against a live preview deployment** (`ledgerpro-c1vq7i6ml`, branch-scoped Preview env pointing at the isolated `ledgerpro-staging` Supabase project):
+  - Migration `20260910120000_api_a_keys` applied to staging with zero drift (7 prior migrations adopted per `DEPLOYMENT.md`, migration history now complete).
+  - Staging has exactly one API key, `read` permission, on `p1f-staging-ontario`.
+  - Positive: `GET /api/v1/company` with the key → 200, returns the key's own company.
+  - Negative suite: no key → 401 `invalid_api_key`; bogus key → 401 `invalid_api_key`; revoked key → 401 `api_key_revoked`; dashboard cookie alone → 401; key + a different company's cookie → 200 with the **key's** company (cookie ignored); company kill switch off → 403 `api_access_disabled`, restored → 200.
+- **Platform fixes made during this stage:** the Vercel build command no longer runs `prisma db push --accept-data-loss` (it is now `prisma generate && next build`); builds can no longer modify any database. A branch-scoped Preview env override routes `codex/api-a-security` deployments to the staging database.
 - Production has zero API keys and `apiAccessEnabled = false` everywhere (the column default). No external party can authenticate until an owner opts in.
 - Rollback: set `LEDGERPRO_API_DISABLED=1` (platform) or toggle the company switch; no code rollback required to stop traffic.
