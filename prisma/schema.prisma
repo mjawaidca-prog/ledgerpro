@@ -1715,6 +1715,7 @@ model ApiKey {
   createdAt   DateTime @default(now())
 
   rateCounters ApiRateCounter[]
+  idempotencyRecords ApiIdempotencyRecord[]
 
   @@index([companyId])
 }
@@ -1737,4 +1738,26 @@ model ApiRateCounter {
   count       Int      @default(0)
 
   @@unique([apiKeyId, scope, windowStart])
+}
+
+// API-C: one record per (key, Idempotency-Key header) for every v1 write.
+// Replayed requests return the stored response instead of executing again,
+// so retries can never duplicate an invoice, payment or journal entry.
+// Records are created inside the same transaction as the mutation.
+model ApiIdempotencyRecord {
+  id           String   @id @default(cuid())
+  apiKeyId     String
+  apiKey       ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  companyId    String
+  requestKey   String // caller-supplied Idempotency-Key header value
+  method       String // "POST" | "PATCH"
+  path         String // canonical route, e.g. "/api/v1/invoices"
+  resourceType String // "contact" | "invoice" | "bill" | "payment" | "journal_entry"
+  resourceId   String?
+  statusCode   Int
+  response     Json
+  createdAt    DateTime @default(now())
+
+  @@unique([apiKeyId, requestKey])
+  @@index([companyId, createdAt])
 }

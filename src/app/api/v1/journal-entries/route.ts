@@ -3,6 +3,10 @@ import { db } from '@/lib/db';
 import { authenticateApiRequest } from '@/lib/api/auth';
 import { pageParamsFrom, cursorPage, prismaCursor } from '@/lib/api/pagination';
 import { moneyString, isoDate } from '@/lib/api/serialize';
+import { journalCreateSchema, validationErrorResponse, parseDateField } from '@/lib/api/validation';
+import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
+import { postJournalEntry } from '@/lib/journal';
+import { closedPeriodGuard, auditLog } from '@/lib/api-helpers';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -68,4 +72,62 @@ export async function GET(req: NextRequest) {
     })),
     pagination: result.pagination,
   });
+}
+
+// POST /api/v1/journal-entries — create and post a balanced journal
+// (write_posting). Balance, active accounts and closed periods are enforced
+// server-side. Idempotency-Key required.
+export async function POST(req: NextRequest) {
+  const { context, error } = await authenticateApiRequest(req, { permission: 'write_posting' });
+  if (error) return error;
+
+  const parsed = journalCreateSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return validationErrorResponse(parsed.error);
+
+  const entryDate = parseDateField(parsed.data.entryDate);
+  const guard = await closedPeriodGuard(context!.companyId, entryDate);
+  if (guard) return guard;
+
+  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId });
+  if ('error' in idem) return idem.error;
+
+  let outcome;
+  try {
+    outcome = await withIdempotency(idem.context, async (tx) => {
+      const entry = await postJournalEntry(
+        {
+          entryDate,
+          description: parsed.data.description,
+          sourceType: 'manual',
+          lines: parsed.data.lines.map((line) => ({
+            glAccountCode: line.glAccountCode,
+            description: line.description ?? undefined,
+            debit: line.debit,
+            credit: line.credit,
+          })),
+        },
+        context!.companyId,
+        tx
+      );
+
+      return {
+        resourceType: 'journal_entry',
+        resourceId: entry.id,
+        statusCode: 201,
+        body: { data: { id: entry.id, entryDate: entryDate.toISOString(), description: parsed.data.description, sourceType: 'manual' } },
+      };
+    });
+  } catch (err: any) {
+    const message = err?.message ?? '';
+    const code = /balanced/i.test(message) ? 'journal_unbalanced' : /account/i.test(message) ? 'invalid_account' : 'journal_failed';
+    const status = code === 'journal_failed' ? 400 : 400;
+    return NextResponse.json({ error: { code, message: message || 'Failed to create journal entry.' } }, { status });
+  }
+
+  await auditLog(context!.companyId, undefined, 'api.journal.create', 'journal_entry', (outcome.body as any)?.data?.id ?? null, undefined, {
+    apiKeyId: context!.apiKeyId,
+    apiKeyName: context!.apiKeyName,
+  });
+
+  return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }
