@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 import { postJournalEntry } from '@/lib/journal';
 import { suggestMirror } from '@/lib/intercompany/detect';
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,12 @@ export async function POST(req: NextRequest) {
 
     // Check if this entry hits a control account — suggest a mirror
     const mirrorSuggestion = await suggestMirror(entry.id).catch(() => null);
+
+    await emitWebhookEvent({
+      companyId,
+      eventType: 'journal.posted',
+      payload: { id: entry.id, occurredAt: new Date().toISOString() },
+    });
 
     return NextResponse.json({ data: entry, mirrorSuggestion }, { status: 201 });
   } catch (error: any) {

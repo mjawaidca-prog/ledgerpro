@@ -107,6 +107,7 @@ model Company {
   // opt in to API access before any of its keys authenticate.
   apiAccessEnabled Boolean    @default(false)
   apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
 }
 
 enum BusinessType {
@@ -1718,6 +1719,62 @@ model ApiKey {
   idempotencyRecords ApiIdempotencyRecord[]
 
   @@index([companyId])
+}
+
+// ─── PUBLIC API (v1) — WEBHOOKS ─────────────────────────────
+
+// A destination for signed LedgerPro integration events (API-D). Separate
+// from Stripe payment webhooks. The signing secret is shown once at creation;
+// it is stored here because the signer needs it to compute HMACs.
+model WebhookEndpoint {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  url         String
+  description String?
+  secret      String // HMAC signing secret (server-side only, never returned)
+  events      String[] // subscribed event types, e.g. "invoice.created"
+  enabled     Boolean  @default(true)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  @@index([companyId, enabled])
+}
+
+enum WebhookDeliveryStatus {
+  pending
+  success
+  failed
+  dead
+}
+
+// One durable record per (endpoint, event): the full payload, attempt count,
+// backoff state and delivery history. Replay resets the attempts in place —
+// a given event is delivered at most once per attempt, and duplicates from
+// retries are distinguishable by the stable event id.
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  endpointId String
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  eventType String
+  eventId   String // stable per event — consumers dedupe on this
+  payload   Json
+  attempts  Int      @default(0)
+  status    WebhookDeliveryStatus @default(pending)
+  lastError String?
+  nextAttemptAt DateTime?
+  deliveredAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([endpointId, eventId])
+  @@index([status, nextAttemptAt])
 }
 
 enum ApiKeyPermission {

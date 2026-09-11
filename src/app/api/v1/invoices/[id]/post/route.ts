@@ -4,6 +4,7 @@ import { taxDecisionSchema, validationErrorResponse } from '@/lib/api/validation
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { postReviewedDocument } from '@/lib/api/posting';
 import { auditLog } from '@/lib/api-helpers';
+import { emitWebhookEvent } from '@/lib/webhooks';
 export const dynamic = 'force-dynamic';
 
 // POST /api/v1/invoices/[id]/post — post a draft invoice through the
@@ -57,6 +58,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   await auditLog(context!.companyId, undefined, 'api.invoice.post', 'invoice', params.id, undefined, {
     apiKeyId: context!.apiKeyId,
     apiKeyName: context!.apiKeyName,
+  });
+
+  await emitWebhookEvent({
+    companyId: context!.companyId,
+    eventType: 'invoice.posted',
+    payload: {
+      id: params.id,
+      status: (outcome.body as any)?.data?.status,
+      occurredAt: new Date().toISOString(),
+    },
   });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });

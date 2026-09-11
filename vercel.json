@@ -23,6 +23,10 @@
     {
       "path": "/api/import-reminders/check",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/webhooks/deliver-cron",
+      "schedule": "0 12 * * *"
     }
   ]
 }
