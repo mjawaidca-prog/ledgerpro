@@ -4,9 +4,9 @@ import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { generateApiKeyToken } from '@/lib/api-keys';
 export const dynamic = 'force-dynamic';
 
-// Only "read" exists until API-C ships write scopes. The whitelist lives
-// server-side: a client cannot invent a permission.
-const AVAILABLE_PERMISSIONS = ['read'];
+// The whitelist lives server-side: a client cannot invent a permission.
+// write_draft and write_posting shipped with API-C.
+const AVAILABLE_PERMISSIONS = ['read', 'write_draft', 'write_posting'];
 
 const keyListSelect = {
   id: true,
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     const unknown = permissions.filter((p: unknown) => !AVAILABLE_PERMISSIONS.includes(p as string));
-    if (unknown.length || !permissions.includes('read')) {
+    if (unknown.length || !permissions.length) {
       return NextResponse.json(
         { error: `Invalid permissions. Available scopes: ${AVAILABLE_PERMISSIONS.join(', ')}.` },
         { status: 400 }
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
         name,
         keyPrefix: prefix,
         keyHash: hash,
-        permissions: permissions as ('read')[],
+        permissions: permissions as ('read' | 'write_draft' | 'write_posting')[],
         expiresAt,
         createdById: session.userId ?? null,
       },

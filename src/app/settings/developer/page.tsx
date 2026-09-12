@@ -65,6 +65,7 @@ export default function DeveloperPage() {
   const [toggling, setToggling] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [keyName, setKeyName] = useState('');
+  const [keyPermissions, setKeyPermissions] = useState<string[]>(['read']);
   const [expiresAt, setExpiresAt] = useState('');
   const [creating, setCreating] = useState(false);
   const [newSecret, setNewSecret] = useState<string | null>(null);
@@ -206,7 +207,7 @@ export default function DeveloperPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!keyName.trim()) return;
+    if (!keyName.trim() || !keyPermissions.length) return;
     setCreating(true);
     setMessage(null);
     try {
@@ -215,7 +216,7 @@ export default function DeveloperPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: keyName.trim(),
-          permissions: ['read'],
+          permissions: keyPermissions,
           expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
         }),
       });
@@ -341,9 +342,29 @@ export default function DeveloperPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium mb-1">Permissions</label>
-                    <div className="rounded border px-3 py-2 text-sm flex items-center gap-2">
-                      <Badge variant="info">read</Badge>
-                      <span className="text-xs text-muted-foreground">Read-only (write scopes arrive with a later release)</span>
+                    <div className="space-y-1.5">
+                      {(
+                        [
+                          ['read', 'Read — all GET endpoints and reports'],
+                          ['write_draft', 'Write drafts — contacts and draft invoices/bills'],
+                          ['write_posting', 'Write posting — post, record payments, journals, void/reverse'],
+                        ] as [string, string][]
+                      ).map(([scope, label]) => (
+                        <label key={scope} className="flex items-start gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={keyPermissions.includes(scope)}
+                            onChange={(e) =>
+                              setKeyPermissions(
+                                e.target.checked ? [...keyPermissions, scope] : keyPermissions.filter((s) => s !== scope)
+                              )
+                            }
+                          />
+                          <span className="text-xs leading-tight">
+                            <code className="text-[11px]">{scope}</code> — {label}
+                          </span>
+                        </label>
+                      ))}
                     </div>
                   </div>
                   <div>
