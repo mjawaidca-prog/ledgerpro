@@ -99,13 +99,22 @@ describe('/api/keys management routes', () => {
     expect(mockAuditLog).toHaveBeenCalledWith('company-a', 'owner-1', 'api_key.create', 'api_key', 'key-2', undefined, expect.any(Object));
   });
 
+  test('POST accepts the write scopes shipped with API-C', async () => {
+    mockCreate.mockImplementation(async ({ data }) => ({ id: 'key-3', name: data.name, keyPrefix: data.keyPrefix, permissions: data.permissions, expiresAt: null, createdAt: new Date(), lastUsedAt: null, requestCount: 0, revokedAt: null }));
+    const res = await POST(request({ name: 'Full access', permissions: ['read', 'write_draft', 'write_posting'] }));
+    expect(res.status).toBe(201);
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ permissions: ['read', 'write_draft', 'write_posting'] }) })
+    );
+  });
+
   test('POST rejects permissions that are not on the server whitelist', async () => {
-    const res = await POST(request({ name: 'Sneaky', permissions: ['write_posting'] }));
+    const res = await POST(request({ name: 'Sneaky', permissions: ['write_everything'] }));
     expect(res.status).toBe(400);
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  test('POST rejects a key with no read permission', async () => {
+  test('POST rejects a key with no permissions at all', async () => {
     const res = await POST(request({ name: 'Odd', permissions: [] }));
     expect(res.status).toBe(400);
     expect(mockCreate).not.toHaveBeenCalled();
