@@ -597,10 +597,11 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Get started',
         steps: [
+          'Make sure the company has an active Pro or Enterprise subscription — production API access is a plan entitlement.',
           'Open Settings → Developer / API Access (owners only).',
           'Enable API access for the company and create a key with the permissions your integration needs.',
           'Copy the secret once — only its SHA-256 hash is stored.',
-          'Call https://ledger.nexvarlab.com/api/v1/company with Authorization: Bearer lp_live_… to confirm.',
+          'Call https://ledger.nexvarlab.com/api/v1/company with Authorization: Bearer lp_live_… to confirm (the root /api/v1 returns a JSON index).',
           'The full endpoint reference is at /api/v1/openapi.json.',
         ],
       },
@@ -637,6 +638,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Lifecycle',
         notes: [
+          'Production API access requires an active or trialing Pro or Enterprise subscription — other plans are rejected with 403 api_plan_required, and key creation is gated the same way.',
           'Keys expire on their expiry date, and owners can revoke them instantly.',
           'Revoked and expired keys return 401 with codes api_key_revoked / api_key_expired.',
           'The company-level switch and the platform switch disable access immediately without deleting history.',
@@ -687,6 +689,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'api_key_revoked / api_key_expired — key lifecycle (401).',
           'insufficient_permissions — the key lacks the required scope (403).',
           'api_access_disabled — the company switch is off (403).',
+          'api_plan_required — the company has no active Pro/Enterprise subscription (403).',
           'rate_limited — over a limit window; honor retryAfterSeconds (429).',
           'validation_error — field-level problems; see fields (400).',
           'not_found — the id does not exist in this company (404).',
@@ -771,7 +774,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
         heading: 'Pilot',
         notes: [
           'Launch starts with the test company and one accountant pilot before broader access.',
-          'Production API access is available on Pro and Enterprise plans; sandbox access is granted to approved developers on any plan.',
+          'Production API access is enforced on Pro and Enterprise plans (403 api_plan_required otherwise); sandbox access is granted to approved developers on any plan.',
           'There is no per-call billing initially; published usage allowances apply.',
         ],
       },

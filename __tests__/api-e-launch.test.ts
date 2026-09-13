@@ -81,6 +81,27 @@ describe('API-E pricing reconciliation', () => {
   });
 });
 
+describe('API-E landing page API section', () => {
+  test('advertises the API with the plan badge and docs CTA', () => {
+    const page = readFileSync(resolve('src/app/(marketing)/home/page.tsx'), 'utf8');
+    expect(page).toContain('Powerful REST API for Developers &amp; Accountants');
+    expect(page).toContain('Automate financial workflows, sync transactions, and manage draft documents');
+    expect(page).toContain('signed webhooks, and sandbox testing');
+    expect(page).toContain('Available on Pro &amp; Enterprise Plans');
+    expect(page).toContain('View API Docs');
+    expect(page).toContain('href="/help"');
+  });
+});
+
+describe('API-E help content reflects the enforced plan gate', () => {
+  test('documentation mentions the plan entitlement enforcement and its error code', () => {
+    const articles = readFileSync(resolve('src/lib/help-content.ts'), 'utf8');
+    expect(articles).toContain('api_plan_required');
+    expect(articles).toContain('Production API access is enforced on Pro and Enterprise plans');
+    expect(articles).toContain('production API access is a plan entitlement');
+  });
+});
+
 describe('API-E plan migration', () => {
   test('adds the entitlement column and enables Pro and Enterprise only', () => {
     const migration = readFileSync(
