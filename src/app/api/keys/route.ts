@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { generateApiKeyToken } from '@/lib/api-keys';
+import { hasApiPlanAccess } from '@/lib/api/auth';
 export const dynamic = 'force-dynamic';
 
 // The whitelist lives server-side: a client cannot invent a permission.
@@ -68,6 +69,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: `Invalid permissions. Available scopes: ${AVAILABLE_PERMISSIONS.join(', ')}.` },
         { status: 400 }
+      );
+    }
+
+    if (!(await hasApiPlanAccess(session.companyId!))) {
+      return NextResponse.json(
+        { error: { code: 'api_plan_required', message: 'API access requires a Pro or Enterprise plan.' } },
+        { status: 403 }
       );
     }
 

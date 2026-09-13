@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { hasApiPlanAccess } from '@/lib/api/auth';
 export const dynamic = 'force-dynamic';
 
 // POST — the company-level emergency disable switch. Turning it off makes
@@ -14,6 +15,15 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     if (typeof body?.enabled !== 'boolean') {
       return NextResponse.json({ error: 'Body must include an "enabled" boolean.' }, { status: 400 });
+    }
+
+    // Enabling requires the plan entitlement; disabling is always allowed
+    // (the emergency switch must never be gated).
+    if (body.enabled && !(await hasApiPlanAccess(session.companyId!))) {
+      return NextResponse.json(
+        { error: { code: 'api_plan_required', message: 'API access requires a Pro or Enterprise plan.' } },
+        { status: 403 }
+      );
     }
 
     await db.company.update({

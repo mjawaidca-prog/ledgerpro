@@ -69,7 +69,7 @@ Signed webhooks notify connected applications of `invoice.created`, `invoice.pos
 - Versioning and deprecation policy
 - Sandbox instructions using synthetic data and separate credentials
 
-Launch sequence: test company and one accountant pilot first, then broader access. Starting policy: sandbox access for approved developers, production API access on Pro and Enterprise, no per-call billing initially, published usage allowances with stricter limits for expensive reports and writes, and owner visibility into integration usage, failures and revoked keys.
+Launch sequence: test company and one accountant pilot first, then broader access. Starting policy: sandbox access for approved developers, production API access on Pro and Enterprise (enforced in the auth pipeline — `403 api_plan_required` without an entitled active/trialing subscription), no per-call billing initially, published usage allowances with stricter limits for expensive reports and writes, and owner visibility into integration usage, failures and revoked keys.
 
 ## Pre-launch test gates
 

@@ -104,7 +104,10 @@ const validKey = {
   requestCount: 0,
   revokedAt: null,
   createdAt: new Date(),
-  company: { apiAccessEnabled: true },
+  company: {
+    apiAccessEnabled: true,
+    subscriptions: [{ plan: { apiAccess: true } }],
+  },
 };
 
 describe('authenticateApiRequest', () => {
@@ -164,10 +167,33 @@ describe('authenticateApiRequest', () => {
   });
 
   test('the company-level switch blocks every key immediately', async () => {
-    mockFindUnique.mockResolvedValue({ ...validKey, company: { apiAccessEnabled: false } });
+    mockFindUnique.mockResolvedValue({
+      ...validKey,
+      company: { apiAccessEnabled: false, subscriptions: [{ plan: { apiAccess: true } }] },
+    });
     const res = await authenticateApiRequest(request({ authorization: `Bearer ${validToken}` }));
     expect(res.error?.status).toBe(403);
     expect(await res.error!.json()).toMatchObject({ error: { code: 'api_access_disabled' } });
+  });
+
+  test('a company without an entitled plan is rejected even when the switch is on', async () => {
+    mockFindUnique.mockResolvedValue({
+      ...validKey,
+      company: { apiAccessEnabled: true, subscriptions: [] },
+    });
+    const res = await authenticateApiRequest(request({ authorization: `Bearer ${validToken}` }));
+    expect(res.error?.status).toBe(403);
+    expect(await res.error!.json()).toMatchObject({ error: { code: 'api_plan_required' } });
+  });
+
+  test('a Basic-plan company is rejected', async () => {
+    mockFindUnique.mockResolvedValue({
+      ...validKey,
+      company: { apiAccessEnabled: true, subscriptions: [{ plan: { apiAccess: false } }] },
+    });
+    const res = await authenticateApiRequest(request({ authorization: `Bearer ${validToken}` }));
+    expect(res.error?.status).toBe(403);
+    expect(await res.error!.json()).toMatchObject({ error: { code: 'api_plan_required' } });
   });
 
   test('a key without the required permission is rejected', async () => {
