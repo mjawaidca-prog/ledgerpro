@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import {
   FileText, Receipt, Landmark, Scale, Building2, ShieldCheck,
-  ArrowRight, Check, MapPin,
+  ArrowRight, Check, MapPin, Code2,
 } from 'lucide-react';
 
 export const metadata = {
@@ -101,6 +101,57 @@ export default function MarketingHomePage() {
             <Scale size={40} className="mx-auto text-[var(--primary)] mb-4" />
             <p className="text-sm text-[var(--text-muted)]">
               Every province's GST/HST/PST rate, current and ready to apply — no manual tax table maintenance.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Public API section ─── */}
+      <section className="max-w-6xl mx-auto px-5 py-16">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-8 md:p-12 grid md:grid-cols-2 gap-10 items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--primary)] bg-[var(--primary-soft)] rounded-full px-3 py-1.5 mb-5">
+              Available on Pro &amp; Enterprise Plans
+            </div>
+            <h2 className="text-2xl md:text-3xl font-bold text-[var(--text-strong)] mb-4">
+              Powerful REST API for Developers &amp; Accountants
+            </h2>
+            <p className="text-[var(--text-muted)] leading-relaxed mb-5">
+              Automate financial workflows, sync transactions, and manage draft documents with enterprise-grade
+              controls. Fully documented with REST endpoints, signed webhooks, and sandbox testing.
+            </p>
+            <ul className="space-y-3 mb-7">
+              {[
+                'Read access to companies, invoices, bills, journals, and core reports',
+                'Controlled writes with reviewed-tax posting, idempotency, and closed-period enforcement',
+                'Signed webhooks with retries, replay, and duplicate-safe delivery',
+                'Sandbox testing on synthetic data with separate credentials',
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-3 text-sm text-[var(--text)]">
+                  <Check size={16} className="text-[var(--success)] mt-0.5 flex-none" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+            <Link
+              href="/help"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)] rounded-md px-6 py-3 no-underline transition-colors"
+            >
+              View API Docs <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Code2 size={18} className="text-[var(--primary)]" />
+              <span className="text-xs font-semibold text-[var(--text-strong)]">One line to your books</span>
+            </div>
+            <pre className="text-xs text-[var(--text-muted)] leading-relaxed overflow-x-auto">{`curl https://ledger.nexvarlab.com/api/v1/company \\
+  -H "Authorization: Bearer lp_live_…"
+
+{ "id": "…", "name": "Acme Ltd.",
+  "currency": "CAD", "onboardingComplete": true }`}</pre>
+            <p className="text-xs text-[var(--text-faint)] mt-4">
+              Decimal-string money, bounded pagination, and OpenAPI at <code>/api/v1/openapi.json</code>.
             </p>
           </div>
         </div>
