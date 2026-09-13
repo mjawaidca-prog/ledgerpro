@@ -39,6 +39,22 @@ describe('API-E OpenAPI document', () => {
       }
     }
   });
+
+  test('documents the root index, permission scopes and the enforced plan gate', () => {
+    const doc: any = openapiDocument();
+    expect(doc.paths['/']).toBeDefined();
+
+    const scheme = doc.components.securitySchemes.apiKey;
+    expect(scheme.description).toContain('write_draft');
+    expect(scheme.description).toContain('write_posting');
+    expect(scheme.description).toContain('api_plan_required');
+
+    const codes = doc.components.schemas.ErrorCodes.properties;
+    expect(codes.api_plan_required).toBeDefined();
+    expect(codes.rate_limited).toBeDefined();
+    expect(codes.idempotency_key_required).toBeDefined();
+    expect(codes.tax_settlement_reversal_required).toBeDefined();
+  });
 });
 
 describe('API-E help center', () => {

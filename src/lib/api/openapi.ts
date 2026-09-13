@@ -38,6 +38,9 @@ export function openapiDocument(): object {
     servers: [{ url: 'https://ledger.nexvarlab.com/api/v1' }],
     security: [{ apiKey: [] }],
     paths: {
+      '/': {
+        get: { operationId: 'getApiIndex', summary: 'API index — name, version, OpenAPI and webhook pointers (public).', responses: { '200': { description: 'Index' } } },
+      },
       '/company': {
         get: { operationId: 'getCompany', summary: 'Company profile', responses: { '200': { description: 'Company profile' } } },
       },
@@ -307,13 +310,39 @@ export function openapiDocument(): object {
         apiKey: {
           type: 'http',
           scheme: 'bearer',
-          description: 'API key created in Settings → Developer / API Access. Format: lp_live_ + 32 hex chars.',
+          description:
+            'API key created in Settings → Developer / API Access. Format: lp_live_ + 32 hex chars. Permission scopes: read (all GET endpoints and reports), write_draft (contacts, draft invoices/bills), write_posting (posting, payments, journals, void/reverse). Production access requires an active or trialing Pro/Enterprise subscription (otherwise 403 api_plan_required).',
         },
       },
       schemas: {
         Money: money,
         Pagination: pagination,
         Error: errorEnvelope,
+        ErrorCodes: {
+          type: 'object',
+          description: 'The stable error codes. Build retry logic on code, never on message text.',
+          properties: {
+            invalid_api_key: { type: 'string', description: '401 — missing, malformed or unknown key.' },
+            api_key_revoked: { type: 'string', description: '401 — the key was revoked.' },
+            api_key_expired: { type: 'string', description: '401 — the key has expired.' },
+            insufficient_permissions: { type: 'string', description: '403 — the key lacks the required scope.' },
+            api_access_disabled: { type: 'string', description: '403 — the company-level switch is off.' },
+            api_plan_required: { type: 'string', description: '403 — no active/trialing Pro or Enterprise subscription.' },
+            api_unavailable: { type: 'string', description: '503 — the platform-level switch is on.' },
+            rate_limited: { type: 'string', description: '429 — over a limit window; honor retryAfterSeconds.' },
+            validation_error: { type: 'string', description: '400 — field-level problems; see fields.' },
+            idempotency_key_required: { type: 'string', description: '400 — writes need an Idempotency-Key header.' },
+            not_found: { type: 'string', description: '404 — the id does not exist in this company.' },
+            invalid_parameter: { type: 'string', description: '400 — a query parameter is malformed.' },
+            closed_period: { type: 'string', description: '409 — the date falls inside a closed period.' },
+            document_not_draft: { type: 'string', description: '409 — only drafts can be posted.' },
+            document_not_posted: { type: 'string', description: '409 — payments require a posted document.' },
+            tax_decision_required: { type: 'string', description: '400 — every line needs a reviewed tax decision.' },
+            tax_settlement_reversal_required: { type: 'string', description: '409 — unreversed payments block voiding.' },
+            journal_unbalanced: { type: 'string', description: '400 — debits do not equal credits.' },
+            invalid_account: { type: 'string', description: '400 — a GL account is missing or inactive.' },
+          },
+        },
         WebhookSignature: {
           type: 'object',
           description:
