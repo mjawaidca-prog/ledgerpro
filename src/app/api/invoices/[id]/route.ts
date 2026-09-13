@@ -84,7 +84,13 @@ export async function PUT(
         await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${params.id} AND "companyId" = ${companyId} FOR UPDATE`;
         const current = await tx.invoice.findUniqueOrThrow({ where: { id: params.id, companyId } });
         if (current.status === 'void') return current;
-        const payment = await tx.journalEntry.findFirst({ where: { companyId, sourceId: params.id, sourceType: 'payment', voidedAt: null } });
+        // Only an UNREVERSED payment blocks voiding: the reversal entry copies
+        // the original's sourceType/sourceId, so it must be excluded here —
+        // otherwise a document can never be voided after its payment was
+        // reversed (the same fix the public API received in API-C).
+        const payment = await tx.journalEntry.findFirst({
+          where: { companyId, sourceId: params.id, sourceType: 'payment', voidedAt: null, reversalOfId: null },
+        });
         if (Number(current.paidAmount) !== 0 || payment) {
           throw new TaxPostingError('tax_settlement_reversal_required', 'Reverse the payments and bank matches before voiding this reviewed-tax document.', 409);
         }
