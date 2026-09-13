@@ -83,13 +83,16 @@ describe('API-E pricing reconciliation', () => {
 
 describe('API-E landing page API section', () => {
   test('advertises the API with the plan badge and docs CTA', () => {
-    const page = readFileSync(resolve('src/app/(marketing)/home/page.tsx'), 'utf8');
-    expect(page).toContain('Powerful REST API for Developers &amp; Accountants');
-    expect(page).toContain('Automate financial workflows, sync transactions, and manage draft documents');
-    expect(page).toContain('signed webhooks, and sandbox testing');
-    expect(page).toContain('Available on Pro &amp; Enterprise Plans');
-    expect(page).toContain('View API Docs');
-    expect(page).toContain('href="/help"');
+    const page = readFileSync(resolve('src/app/page.tsx'), 'utf8');
+    expect(page).toContain('<ApiSection />');
+
+    const section = readFileSync(resolve('src/components/landing/ApiSection.tsx'), 'utf8');
+    expect(section).toContain('Powerful REST API for Developers &amp; Accountants');
+    expect(section).toContain('Automate financial workflows, sync transactions, and manage draft documents');
+    expect(section).toContain('signed webhooks, and sandbox testing');
+    expect(section).toContain('Available on Pro &amp; Enterprise Plans');
+    expect(section).toContain('View API Docs');
+    expect(section).toContain('href="/help"');
   });
 });
 
