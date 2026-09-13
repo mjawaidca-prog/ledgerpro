@@ -23,6 +23,20 @@ export type ApiAuthResult =
   | { context: ApiAuthContext; error: null }
   | { context: null; error: NextResponse };
 
+/**
+ * Plan entitlement check shared by the auth pipeline and the key-management
+ * routes: the company must hold an active or trialing subscription on a
+ * plan with apiAccess (Pro or Enterprise per the launch policy).
+ */
+export async function hasApiPlanAccess(companyId: string): Promise<boolean> {
+  const subscription = await db.subscription.findFirst({
+    where: { companyId, status: { in: ['trialing', 'active'] } },
+    orderBy: { createdAt: 'desc' },
+    select: { plan: { select: { apiAccess: true } } },
+  });
+  return subscription?.plan.apiAccess === true;
+}
+
 // v1 error envelope: every failure carries a stable machine-readable code.
 function errorResponse(
   status: number,
@@ -68,7 +82,22 @@ export async function authenticateApiRequest(
 
   const apiKey = await db.apiKey.findUnique({
     where: { keyHash: hashApiKey(token) },
-    include: { company: { select: { apiAccessEnabled: true } } },
+    include: {
+      company: {
+        select: {
+          apiAccessEnabled: true,
+          // Plan entitlement: production API access is a Pro/Enterprise
+          // feature (Plan.apiAccess). An active or trialing subscription on
+          // an entitled plan unlocks the gate; anything else is rejected.
+          subscriptions: {
+            where: { status: { in: ['trialing', 'active'] } },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { plan: { select: { apiAccess: true } } },
+          },
+        },
+      },
+    },
   });
 
   // Unknown keys share the generic message so responses never reveal which
@@ -94,6 +123,13 @@ export async function authenticateApiRequest(
     return {
       context: null,
       error: errorResponse(403, 'api_access_disabled', 'API access is disabled for this company.'),
+    };
+  }
+  // Plan entitlement gate — API access is included in Pro and Enterprise.
+  if (!apiKey.company.subscriptions[0]?.plan.apiAccess) {
+    return {
+      context: null,
+      error: errorResponse(403, 'api_plan_required', 'API access requires a Pro or Enterprise plan.'),
     };
   }
 

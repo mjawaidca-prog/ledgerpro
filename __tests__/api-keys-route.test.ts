@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 const mockCreate = jest.fn();
 const mockFindMany = jest.fn();
 const mockCompanyFind = jest.fn();
+const mockSubscriptionFindFirst = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
     apiKey: {
@@ -10,6 +11,7 @@ jest.mock('@/lib/db', () => ({
       findMany: (...args: unknown[]) => mockFindMany(...args),
     },
     company: { findUnique: (...args: unknown[]) => mockCompanyFind(...args) },
+    subscription: { findFirst: (...args: unknown[]) => mockSubscriptionFindFirst(...args) },
   },
 }));
 
@@ -36,6 +38,7 @@ describe('/api/keys management routes', () => {
     jest.clearAllMocks();
     mockRequireCompany.mockResolvedValue({ companyId: 'company-a', userId: 'owner-1', error: null });
     mockCompanyFind.mockResolvedValue({ apiAccessEnabled: false });
+    mockSubscriptionFindFirst.mockResolvedValue({ plan: { apiAccess: true } });
   });
 
   const request = (body?: unknown) =>
@@ -123,6 +126,15 @@ describe('/api/keys management routes', () => {
   test('POST rejects empty names and past expiry dates', async () => {
     expect((await POST(request({ name: '   ', permissions: ['read'] }))).status).toBe(400);
     expect((await POST(request({ name: 'X', permissions: ['read'], expiresAt: '2020-01-01' }))).status).toBe(400);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('POST is rejected when the plan lacks the API entitlement', async () => {
+    mockSubscriptionFindFirst.mockResolvedValue(null);
+    const res = await POST(request({ name: 'Basic user', permissions: ['read'] }));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe('api_plan_required');
     expect(mockCreate).not.toHaveBeenCalled();
   });
 });
