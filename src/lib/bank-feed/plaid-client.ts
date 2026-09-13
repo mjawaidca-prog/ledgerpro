@@ -116,3 +116,57 @@ export async function getItem(accessToken: string): Promise<ProviderItem> {
 export async function removeItem(accessToken: string): Promise<void> {
   await client().itemRemove({ access_token: accessToken });
 }
+
+export interface SyncedTransaction {
+  providerTransactionId: string;
+  providerAccountId: string;
+  pendingTransactionId: string | null;
+  date: string; // ISO date
+  description: string;
+  amount: number; // signed, account currency
+  currency: string;
+}
+
+/** One page of a Plaid transactions/sync call. */
+export async function syncTransactionsPage(opts: {
+  accessToken: string;
+  cursor?: string | null;
+  count?: number;
+}): Promise<{
+  added: SyncedTransaction[];
+  modified: SyncedTransaction[];
+  removed: { transactionId: string }[];
+  nextCursor: string;
+  hasMore: boolean;
+}> {
+  const res = await client().transactionsSync({
+    access_token: opts.accessToken,
+    cursor: opts.cursor ?? undefined,
+    count: opts.count ?? 500,
+    options: { include_personal_finance_category: false },
+  });
+  const map = (t: any): SyncedTransaction => ({
+    providerTransactionId: t.transaction_id,
+    providerAccountId: t.account_id,
+    pendingTransactionId: t.pending_transaction_id ?? null,
+    date: t.date ?? t.authorized_date ?? new Date().toISOString().slice(0, 10),
+    description: t.name ?? t.original_description ?? 'Transaction',
+    amount: t.amount ?? 0,
+    currency: t.iso_currency_code ?? 'CAD',
+  });
+  return {
+    added: res.data.added.map(map),
+    modified: res.data.modified.map(map),
+    removed: res.data.removed.map((r: any) => ({ transactionId: r.transaction_id ?? '' })),
+    nextCursor: res.data.next_cursor,
+    hasMore: res.data.has_more ?? false,
+  };
+}
+
+/** Fetches the JWK used to verify this item's webhook signatures. */
+export async function getWebhookVerificationKey(accessToken: string, keyId: string): Promise<object> {
+  // The SDK's request type omits access_token, but the API accepts it (and
+  // prefers it over client_id+secret); pass it through explicitly.
+  const res = await client().webhookVerificationKeyGet({ access_token: accessToken, key_id: keyId } as any);
+  return res.data.key as unknown as object;
+}

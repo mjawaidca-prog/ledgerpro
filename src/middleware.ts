@@ -15,6 +15,9 @@ function isPublicPath(pathname: string) {
     // v1 routes never receive x-company-id/x-user-id derived from the
     // dashboard's active-company cookie.
     pathname.startsWith('/api/v1') ||
+    // The Plaid webhook authenticates with its own signature verification
+    // JWT — no dashboard session involved.
+    pathname.startsWith('/api/plaid/webhook') ||
     PUBLIC_MARKETING_PATHS.includes(pathname)
   );
 }
