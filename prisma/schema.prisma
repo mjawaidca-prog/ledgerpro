@@ -108,6 +108,7 @@ model Company {
   apiAccessEnabled Boolean    @default(false)
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
+  bankConnections   BankConnection[]
 }
 
 enum BusinessType {
@@ -320,6 +321,7 @@ model FinancialAccount {
   columnMappings   ColumnMapping[]
   invoicePayments  Invoice[]         @relation("InvoicePaymentAccount")
   journalPayments  JournalEntry[]    @relation("JournalPaymentAccount")
+  bankFeedAccounts BankFeedAccount[]
 
   @@unique([companyId, id])
   @@index([companyId])
@@ -1821,4 +1823,103 @@ model ApiIdempotencyRecord {
 
   @@unique([apiKeyId, requestKey])
   @@index([companyId, createdAt])
+}
+
+// ─── DIRECT BANK FEEDS (BF-1) ───────────────────────────────
+
+// A provider (Plaid) connection authorized by an owner. The access token
+// is envelope-encrypted at rest and never returned by any route. Consent
+// expiry is provider-reported, never invented. Billing follows the owner
+// who authorized the connection.
+model BankConnection {
+  id        String @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  provider      String @default("plaid")
+  itemId        String @unique // provider item id
+  institutionId String?
+  institutionName String
+  status        BankConnectionStatus @default(active)
+
+  accessTokenEncrypted String // envelope-encrypted (AES-256-GCM, wrapped DEK)
+  consentExpiresAt     DateTime?
+  billableOwnerId      String? // the user who authorized and pays for this connection
+  lastSyncAt           DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  accounts BankFeedAccount[]
+  syncRuns BankSyncRun[]
+
+  @@index([companyId, status])
+  @@index([billableOwnerId])
+}
+
+enum BankConnectionStatus {
+  active
+  login_required
+  pending_expiration
+  revoked
+  error
+}
+
+// One provider account inside a connection, mapped (or deliberately not
+// mapped) to a LedgerPro FinancialAccount. Unmapped accounts are stored so
+// they can be enabled later without reconnecting.
+model BankFeedAccount {
+  id           String          @id @default(cuid())
+  connectionId String
+  connection   BankConnection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  providerAccountId String
+  name              String
+  mask              String?
+  subtype           String // provider subtype, e.g. "checking", "credit card"
+  currency          String
+  currentBalance    Decimal? @db.Decimal(14, 2)
+  availableBalance  Decimal? @db.Decimal(14, 2)
+
+  financialAccountId String?
+  financialAccount   FinancialAccount? @relation(fields: [financialAccountId], references: [id], onDelete: Restrict)
+  isFeeding          Boolean           @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([connectionId, providerAccountId])
+  @@index([financialAccountId])
+}
+
+// One sync attempt per connection: trigger, outcome, and row counts.
+// Durable history for the sync log and for duplicate investigations.
+model BankSyncRun {
+  id           String         @id @default(cuid())
+  connectionId String
+  connection   BankConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  trigger    BankSyncTrigger
+  status     BankSyncStatus
+  addedCount Int   @default(0)
+  dedupedCount Int @default(0)
+  error      String?
+
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+
+  @@index([connectionId, startedAt])
+}
+
+enum BankSyncTrigger {
+  webhook
+  manual
+  cron
+}
+
+enum BankSyncStatus {
+  running
+  success
+  failed
 }
