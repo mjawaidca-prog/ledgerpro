@@ -436,6 +436,7 @@ model Transaction {
   transferMatch       TransferMatch? @relation("Transfers")
   inflowTransferMatch TransferMatch? @relation("TransferInflow")
   transferMatchId     String? // set by transfer matching engine
+  bankFeedTransaction BankFeedTransaction?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1845,13 +1846,15 @@ model BankConnection {
   accessTokenEncrypted String // envelope-encrypted (AES-256-GCM, wrapped DEK)
   consentExpiresAt     DateTime?
   billableOwnerId      String? // the user who authorized and pays for this connection
+  transactionsCursor   String? // Plaid sync cursor — advances only after rows commit
   lastSyncAt           DateTime?
 
   createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  accounts BankFeedAccount[]
+  accounts    BankFeedAccount[]
+  transactions BankFeedTransaction[]
   syncRuns BankSyncRun[]
 
   @@index([companyId, status])
@@ -1922,4 +1925,30 @@ enum BankSyncStatus {
   running
   success
   failed
+}
+
+// ─── DIRECT BANK FEEDS (BF-2) ───────────────────────────────
+
+// Links provider transactions to LedgerPro review rows. The provider id is
+// the dedupe authority for repeat syncs; the link survives settlement and
+// provider corrections so BF-3 can reconcile them without data loss.
+model BankFeedTransaction {
+  id           String         @id @default(cuid())
+  connectionId String
+  connection   BankConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  providerAccountId      String
+  providerTransactionId  String
+  pendingTransactionId   String?
+  transactionId          String? @unique
+  transaction            Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  settledAt           DateTime?
+  removedByProviderAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([providerAccountId, providerTransactionId])
+  @@index([connectionId, createdAt])
 }
