@@ -35,6 +35,12 @@ The unit suite covers:
 - **Database rollback is a forward correction.** The migration is additive; reverting is a later reviewed migration, not a destructive one.
 - Production ships with `apiAccessEnabled = false` for every company, so no external party can authenticate until an owner opts in. No production keys are created as part of this stage.
 
+## Later additions
+
+- **2026-09-13 — plan gate enforcement**: production API access is a Pro/Enterprise entitlement and is now enforced in the auth pipeline (`403 api_plan_required` for companies without an active or trialing entitled subscription); key creation and the API-enable switch are gated the same way, while the emergency disable switch stays ungated. Documented in `API_E_DOCS_LAUNCH.md` and `API_PROGRAM.md`.
+- **2026-09-12 — API root index**: `GET /api/v1` returns a public JSON index (name, version, OpenAPI and webhook pointers) instead of 404.
+- **2026-09-12 — write scopes in key creation**: the Settings → Developer form offers `read`, `write_draft` and `write_posting`; the server whitelist accepts all three (shipped with API-C).
+
 ## Completion decision
 
 - **2026-09-10 — CI run 31 passed all gates:** secret scan (GitGuardian + local), migration safety, schema validation, migration deploy/status/drift against PostgreSQL 16, typecheck, the full unit suite (228 tests, 219 run) and the production build.
