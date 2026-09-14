@@ -65,6 +65,7 @@ import { syncConnection } from '@/lib/bank-feed/sync';
 
 const connection = {
   id: 'conn-1', companyId: 'co-1', status: 'active', transactionsCursor: null,
+  cadence: 'daily', autoCategorize: true, notifyOnFailure: true,
   accessTokenEncrypted: 'v1.x', institutionName: 'RBC Royal Bank',
 };
 const feedAccount = { providerAccountId: 'pa-1', financialAccountId: 'fa-1', isFeeding: true, financialAccount: { lockedThrough: null } };

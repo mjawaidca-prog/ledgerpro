@@ -72,6 +72,9 @@ const connection = {
   companyId: 'co-1',
   status: 'active',
   transactionsCursor: null,
+  cadence: 'daily',
+  autoCategorize: true,
+  notifyOnFailure: true,
   accessTokenEncrypted: 'v1.whatever',
 };
 

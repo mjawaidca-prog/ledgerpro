@@ -53,6 +53,21 @@ export async function exchangePublicToken(publicToken: string): Promise<{ access
   return { accessToken: res.data.access_token, itemId: res.data.item_id };
 }
 
+/** Re-opens Link in update mode for reconnect and consent-renewal flows. */
+export async function updateLinkToken(opts: { accessToken: string; userId: string }): Promise<LinkTokenResult> {
+  const res = await client().linkTokenCreate({
+    user: { client_user_id: opts.userId },
+    client_name: 'LedgerPro',
+    language: 'en',
+    country_codes: [CountryCode.Ca],
+    access_token: opts.accessToken,
+  });
+  if (!res.data.link_token) {
+    throw new Error('Plaid returned no link token.');
+  }
+  return { linkToken: res.data.link_token, expiration: res.data.expiration };
+}
+
 export interface ProviderAccount {
   providerAccountId: string;
   name: string;

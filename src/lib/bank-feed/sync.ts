@@ -303,12 +303,15 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
             continue;
           }
 
-          // ── 4. Create the row through the same rule path as imports.
-          const hit = applyRules(rules, {
-            description: item.description,
-            amount,
-            accountId: feedAccount.financialAccountId!,
-          });
+          // ── 4. Create the row through the same rule path as imports
+          // (skipped entirely when the connection's autoCategorize is off).
+          const hit = connection.autoCategorize
+            ? applyRules(rules, {
+                description: item.description,
+                amount,
+                accountId: feedAccount.financialAccountId!,
+              })
+            : null;
           let categoryId: string | null = null;
           let appliedRuleId: string | null = null;
           if (hit) {
@@ -369,6 +372,13 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
         });
       } catch (markError) {
         console.error('[bf-sync] failed to mark run failed:', markError);
+      }
+      if (connection.notifyOnFailure) {
+        await notifyCompany(
+          connection.companyId,
+          'Bank feed: sync failed',
+          `${connection.institutionName} could not be synchronized. The next webhook or the daily check will retry automatically.`
+        );
       }
       throw error;
     }

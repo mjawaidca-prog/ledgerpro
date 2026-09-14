@@ -2,15 +2,39 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { createLinkToken } from '@/lib/bank-feed/plaid-client';
+import { decryptToken } from '@/lib/bank-feed/crypto';
+import { updateLinkToken } from '@/lib/bank-feed/plaid-client';
 export const dynamic = 'force-dynamic';
 
 // POST /api/plaid/link-token — mints a Plaid Link token for the signed-in
-// user. The token only opens Plaid's hosted consent modal; provider
-// credentials go to the bank, never to LedgerPro.
+// user. Pass { connectionId } to re-open Link in update mode for reconnect
+// and consent-renewal flows. Provider credentials go to the bank, never to
+// LedgerPro.
 export async function POST(req: NextRequest) {
   try {
     const session = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
     if (session.error) return session.error;
+
+    const body = await req.json().catch(() => null);
+    const connectionId = typeof body?.connectionId === 'string' && body.connectionId ? body.connectionId : null;
+
+    if (connectionId) {
+      const connection = await db.bankConnection.findFirst({
+        where: { id: connectionId, companyId: session.companyId! },
+        select: { id: true, accessTokenEncrypted: true },
+      });
+      if (!connection) {
+        return NextResponse.json({ error: 'Bank connection not found' }, { status: 404 });
+      }
+      const { linkToken, expiration } = await updateLinkToken({
+        accessToken: decryptToken(connection.accessTokenEncrypted),
+        userId: session.userId!,
+      });
+      await auditLog(session.companyId!, session.userId, 'bank_feed.link_token.update', 'bank_connection', connectionId, undefined, {
+        expiresAt: expiration,
+      });
+      return NextResponse.json({ data: { linkToken, expiration, updateMode: true } });
+    }
 
     const company = await db.company.findUniqueOrThrow({
       where: { id: session.companyId! },
@@ -26,7 +50,7 @@ export async function POST(req: NextRequest) {
       expiresAt: expiration,
     });
 
-    return NextResponse.json({ data: { linkToken, expiration } });
+    return NextResponse.json({ data: { linkToken, expiration, updateMode: false } });
   } catch (error: any) {
     console.error('POST /api/plaid/link-token error:', error);
     return NextResponse.json(
