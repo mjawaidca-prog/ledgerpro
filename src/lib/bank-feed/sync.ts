@@ -68,9 +68,17 @@ export interface SyncOutcome {
 export async function syncConnection(connectionId: string, trigger: 'webhook' | 'manual' | 'cron'): Promise<SyncOutcome> {
   const started = Date.now();
   const lockTag = `bfsync:${connectionId}`;
+  let syncRunId: string | null = null;
 
-  return db.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockTag}, 0))`;
+  try {
+    // The provider HTTP call runs inside this transaction, so the default
+    // 5s Prisma timeout would kill slower syncs mid-flight (P2028). Give
+    // the whole sync a generous budget; the advisory lock still serializes
+    // overlapping runs.
+    return await db.$transaction(async (tx) => {
+    // pg_advisory_xact_lock returns void — cast so the Prisma driver can
+    // deserialize it. The lock releases when this transaction ends.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockTag}, 0))::text`;
 
     const connection = await tx.bankConnection.findUniqueOrThrow({ where: { id: connectionId } });
     if (connection.status === 'revoked' || connection.status === 'error') {
@@ -87,6 +95,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
     const syncRun = await tx.bankSyncRun.create({
       data: { connectionId, trigger, status: 'running' },
     });
+    syncRunId = syncRun.id;
 
     const accounts = await tx.bankFeedAccount.findMany({ where: { connectionId, isFeeding: true } });
     const byProviderId = new Map(accounts.map((a) => [a.providerAccountId, a]));
@@ -217,10 +226,17 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
         if (pages >= MAX_PAGES_PER_RUN) break;
       }
     } catch (error: any) {
-      await tx.bankSyncRun.update({
-        where: { id: syncRun.id },
-        data: { status: 'failed', error: error?.message?.slice(0, 500) ?? 'Sync failed', finishedAt: new Date(), addedCount: added, dedupedCount: deduped },
-      });
+      // The transaction is dead here — mark the run failed from OUTSIDE the
+      // transaction (a write inside it would be rejected with P2028 and mask
+      // the real error).
+      try {
+        await db.bankSyncRun.update({
+          where: { id: syncRun.id },
+          data: { status: 'failed', error: error?.message?.slice(0, 500) ?? 'Sync failed', finishedAt: new Date(), addedCount: added, dedupedCount: deduped },
+        });
+      } catch (markError) {
+        console.error('[bf-sync] failed to mark run failed:', markError);
+      }
       throw error;
     }
 
@@ -230,7 +246,10 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
     });
 
     return { syncRunId: syncRun.id, skipped: false, added, deduped, updated, removedMarked, blockedUpdates, pages };
-  });
+    }, { maxWait: 15000, timeout: 60000 });
+  } catch (error) {
+    throw error;
+  }
 }
 
 /** Cron safety net: sync every active connection (webhooks are the primary trigger). */
