@@ -21,10 +21,12 @@ import { decryptToken } from '@/lib/bank-feed/crypto';
 import { syncTransactionsPage } from '@/lib/bank-feed/plaid-client';
 import { makeDedupeKey } from '@/lib/banking/dedupe';
 import { applyRules, type BankRuleLike } from '@/lib/banking/rules';
+import { classifyOverlap } from '@/lib/bank-feed/overlap';
 
 const PAGE_SIZE = 500;
 const MAX_PAGES_PER_RUN = 8; // bounded per invocation; the next trigger continues
 const SYNC_CUTOFF_SECONDS = 20; // serverless budget guard
+const DAY_MS = 86_400_000;
 
 function directionFor(amount: number): 'in' | 'out' {
   return amount > 0 ? 'in' : 'out';
@@ -55,10 +57,41 @@ export interface SyncOutcome {
   skipped: boolean;
   added: number;
   deduped: number;
+  settled: number;
+  held: number;
   updated: number;
   removedMarked: number;
   blockedUpdates: number;
   pages: number;
+}
+
+const ZERO_OUTCOME: SyncOutcome = {
+  syncRunId: '', skipped: false, added: 0, deduped: 0, settled: 0, held: 0,
+  updated: 0, removedMarked: 0, blockedUpdates: 0, pages: 0,
+};
+
+/** Feed amounts stay exactly as the provider sent them — no sign flips
+ *  (the signMultiplier behavior was deliberately removed in BUG-1) — and
+ *  are rounded to cents to drop float noise. */
+export function normalizeFeedAmount(amount: number): number {
+  if (!Number.isFinite(amount)) return 0;
+  return Math.round(amount * 100) / 100;
+}
+
+async function notifyCompany(companyId: string, title: string, body: string, actor?: string): Promise<void> {
+  try {
+    const members = await db.membership.findMany({
+      where: { companyId, role: { in: ['owner', 'admin'] } },
+      select: { userId: true },
+    });
+    for (const m of members) {
+      await db.notification.create({
+        data: { userId: m.userId, companyId, type: 'system', title, body },
+      });
+    }
+  } catch (e) {
+    console.error('[bf-sync] notification failed:', e);
+  }
 }
 
 /**
@@ -89,7 +122,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
       where: { connectionId, status: 'running', startedAt: { gt: new Date(Date.now() - 15 * 60_000) } },
     });
     if (running) {
-      return { syncRunId: running.id, skipped: true, added: 0, deduped: 0, updated: 0, removedMarked: 0, blockedUpdates: 0, pages: 0 };
+      return { ...ZERO_OUTCOME, syncRunId: running.id, skipped: true };
     }
 
     const syncRun = await tx.bankSyncRun.create({
@@ -97,16 +130,15 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
     });
     syncRunId = syncRun.id;
 
-    const accounts = await tx.bankFeedAccount.findMany({ where: { connectionId, isFeeding: true } });
+    const accounts = await tx.bankFeedAccount.findMany({
+      where: { connectionId, isFeeding: true },
+      include: { financialAccount: { select: { lockedThrough: true } } },
+    });
     const byProviderId = new Map(accounts.map((a) => [a.providerAccountId, a]));
     const rules = await loadRules(connection.companyId);
     const accessToken = decryptToken(connection.accessTokenEncrypted);
 
-    let added = 0;
-    let deduped = 0;
-    let updated = 0;
-    let removedMarked = 0;
-    let blockedUpdates = 0;
+    const counts = { ...ZERO_OUTCOME };
     let pages = 0;
     let cursor = connection.transactionsCursor;
 
@@ -123,58 +155,158 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
             where: { providerTransactionId: item.transactionId, removedByProviderAt: null },
             data: { removedByProviderAt: new Date() },
           });
-          removedMarked += marked.count;
+          counts.removedMarked += marked.count;
+          // Review-stage rows are kept (deletion is a human decision in
+          // BF-4's UI); owners get a notification so nothing is lost.
+          if (marked.count > 0) {
+            await notifyCompany(
+              connection.companyId,
+              'Bank feed: provider removed a transaction',
+              `${connection.institutionName} removed a transaction that is still waiting in Review & match. It has been kept for your decision.`
+            );
+          }
         }
 
         for (const item of page.modified) {
+          const feedAccount = byProviderId.get(item.providerAccountId);
           const link = await tx.bankFeedTransaction.findUnique({
             where: { providerAccountId_providerTransactionId: { providerAccountId: item.providerAccountId, providerTransactionId: item.providerTransactionId } },
-            include: { transaction: { select: { id: true, status: true, reconciledInId: true, voidedAt: true } } },
+            include: { transaction: { select: { id: true, status: true, reconciledInId: true, voidedAt: true, date: true } } },
           });
           if (!link?.transaction) continue;
           const row = link.transaction;
-          // Only review-queue rows update in place; posted or reconciled
-          // facts are never silently rewritten.
-          if (row.reconciledInId || row.voidedAt || !['toreview', 'categorized'].includes(row.status)) {
-            blockedUpdates += 1;
+          const accountLockedThrough = feedAccount?.financialAccount?.lockedThrough ?? null;
+          // Only review-queue rows update in place; posted, reconciled, or
+          // locked-account facts are never silently rewritten.
+          if (
+            row.reconciledInId ||
+            row.voidedAt ||
+            !['toreview', 'categorized'].includes(row.status) ||
+            (accountLockedThrough && row.date <= accountLockedThrough)
+          ) {
+            counts.blockedUpdates += 1;
+            await notifyCompany(
+              connection.companyId,
+              'Bank feed: correction blocked',
+              `${connection.institutionName} changed a transaction that has already been posted or reconciled. Review it manually in the banking screen.`
+            );
             continue;
           }
           await tx.transaction.update({
             where: { id: row.id },
-            data: { date: new Date(item.date), description: item.description, amount: item.amount },
+            data: { date: new Date(item.date), description: item.description, amount: normalizeFeedAmount(item.amount) },
           });
-          updated += 1;
+          counts.updated += 1;
         }
 
         for (const item of page.added) {
           const feedAccount = byProviderId.get(item.providerAccountId);
           if (!feedAccount || !feedAccount.financialAccountId) continue; // unmapped accounts never feed
 
+          const amount = normalizeFeedAmount(item.amount);
+          const providerIdKey = {
+            providerAccountId: item.providerAccountId,
+            providerTransactionId: item.providerTransactionId,
+          };
+
+          // ── 1. Pending → settled: update the pending row in place, keeping
+          // the user's categorization — never create a duplicate.
+          if (item.pendingTransactionId) {
+            const pendingLink = await tx.bankFeedTransaction.findUnique({
+              where: {
+                providerAccountId_providerTransactionId: {
+                  providerAccountId: item.providerAccountId,
+                  providerTransactionId: item.pendingTransactionId,
+                },
+              },
+              include: { transaction: { select: { id: true, status: true, reconciledInId: true, voidedAt: true, categoryId: true, appliedRuleId: true } } },
+            });
+            if (pendingLink?.transaction) {
+              const row = pendingLink.transaction;
+              if (row.reconciledInId || row.voidedAt || !['toreview', 'categorized'].includes(row.status)) {
+                counts.blockedUpdates += 1;
+                await notifyCompany(
+                  connection.companyId,
+                  'Bank feed: settlement blocked',
+                  `${connection.institutionName} settled a transaction that has already been posted or reconciled. Review it manually.`
+                );
+              } else {
+                try {
+                  // Keep the user's categorization; update amounts/date only.
+                  await tx.transaction.update({
+                    where: { id: row.id },
+                    data: { date: new Date(item.date), description: item.description, amount },
+                  });
+                  await tx.bankFeedTransaction.update({
+                    where: {
+                      providerAccountId_providerTransactionId: {
+                        providerAccountId: item.providerAccountId,
+                        providerTransactionId: item.pendingTransactionId,
+                      },
+                    },
+                    data: { providerTransactionId: item.providerTransactionId, settledAt: new Date() },
+                  });
+                  counts.settled += 1;
+                } catch (e: any) {
+                  if (e?.code === 'P2002') counts.deduped += 1; // settled id already seen
+                  else throw e;
+                }
+                continue;
+              }
+            }
+          }
+
           const dedupeHash = makeDedupeKey({
             date: item.date,
-            amount: item.amount,
+            amount,
             description: item.description,
             fitid: item.providerTransactionId,
           });
+
+          // ── 2. Exact dedupe against the shared hash (feeds AND imports).
           const existing = await tx.transaction.findFirst({
             where: { companyId: connection.companyId, financialAccountId: feedAccount.financialAccountId, dedupeHash },
             select: { id: true },
           });
           if (existing) {
-            deduped += 1;
-            // Still record the provider link so settlement/corrections can
-            // resolve against the existing row in BF-3.
+            counts.deduped += 1;
             await tx.bankFeedTransaction.upsert({
-              where: { providerAccountId_providerTransactionId: { providerAccountId: item.providerAccountId, providerTransactionId: item.providerTransactionId } },
-              create: { connectionId, providerAccountId: item.providerAccountId, providerTransactionId: item.providerTransactionId, pendingTransactionId: item.pendingTransactionId, transactionId: existing.id },
+              where: { providerAccountId_providerTransactionId: providerIdKey },
+              create: { connectionId, ...providerIdKey, pendingTransactionId: item.pendingTransactionId, transactionId: existing.id },
               update: { transactionId: existing.id },
             });
             continue;
           }
 
+          // ── 3. Statement-overlap comparison (same account, amount and a
+          // small date window). High-confidence matches dedupe; ambiguous
+          // matches are created but flagged for human review.
+          const overlapCandidates = await tx.transaction.findMany({
+            where: {
+              companyId: connection.companyId,
+              financialAccountId: feedAccount.financialAccountId,
+              date: { gte: new Date(new Date(item.date).getTime() - 2 * DAY_MS), lte: new Date(new Date(item.date).getTime() + 2 * DAY_MS) },
+            },
+            select: { id: true, date: true, amount: true, description: true },
+          });
+          const overlap = classifyOverlap(
+            { date: new Date(item.date), amount, description: item.description },
+            overlapCandidates.map((c) => ({ ...c, amount: Number(c.amount) }))
+          );
+          if (overlap.verdict === 'duplicate' && overlap.matchId) {
+            counts.deduped += 1;
+            await tx.bankFeedTransaction.upsert({
+              where: { providerAccountId_providerTransactionId: providerIdKey },
+              create: { connectionId, ...providerIdKey, pendingTransactionId: item.pendingTransactionId, transactionId: overlap.matchId, overlapCandidate: true },
+              update: { transactionId: overlap.matchId },
+            });
+            continue;
+          }
+
+          // ── 4. Create the row through the same rule path as imports.
           const hit = applyRules(rules, {
             description: item.description,
-            amount: item.amount,
+            amount,
             accountId: feedAccount.financialAccountId!,
           });
           let categoryId: string | null = null;
@@ -197,7 +329,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
               date: new Date(item.date),
               description: item.description,
               rawStatementText: item.description,
-              amount: item.amount,
+              amount,
               currency: item.currency,
               dedupeHash,
               categoryId,
@@ -209,13 +341,14 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
           await tx.bankFeedTransaction.create({
             data: {
               connectionId,
-              providerAccountId: item.providerAccountId,
-              providerTransactionId: item.providerTransactionId,
+              ...providerIdKey,
               pendingTransactionId: item.pendingTransactionId,
               transactionId: row.id,
+              overlapCandidate: overlap.verdict === 'ambiguous',
             },
           });
-          added += 1;
+          counts.added += 1;
+          if (overlap.verdict === 'ambiguous') counts.held += 1;
         }
 
         // Cursor commits with the page's rows — a crash here re-reads the page.
@@ -232,7 +365,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
       try {
         await db.bankSyncRun.update({
           where: { id: syncRun.id },
-          data: { status: 'failed', error: error?.message?.slice(0, 500) ?? 'Sync failed', finishedAt: new Date(), addedCount: added, dedupedCount: deduped },
+          data: { status: 'failed', error: error?.message?.slice(0, 500) ?? 'Sync failed', finishedAt: new Date(), addedCount: counts.added, dedupedCount: counts.deduped },
         });
       } catch (markError) {
         console.error('[bf-sync] failed to mark run failed:', markError);
@@ -242,10 +375,10 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
 
     await tx.bankSyncRun.update({
       where: { id: syncRun.id },
-      data: { status: 'success', finishedAt: new Date(), addedCount: added, dedupedCount: deduped },
+      data: { status: 'success', finishedAt: new Date(), addedCount: counts.added, dedupedCount: counts.deduped },
     });
 
-    return { syncRunId: syncRun.id, skipped: false, added, deduped, updated, removedMarked, blockedUpdates, pages };
+    return { ...counts, syncRunId: syncRun.id, pages };
     }, { maxWait: 15000, timeout: 60000 });
   } catch (error) {
     throw error;

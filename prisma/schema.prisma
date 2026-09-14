@@ -1945,6 +1945,7 @@ model BankFeedTransaction {
 
   settledAt           DateTime?
   removedByProviderAt DateTime?
+  overlapCandidate    Boolean  @default(false) // ambiguous statement-overlap match, held for review
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
