@@ -105,6 +105,7 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           image: user.image,
+          mfaEnabled: user.mfaEnabled,
           activeCompanyId: primaryMembership?.company?.id || null,
           activeCompanyName: primaryMembership?.company?.name || null,
           availableCompanies: user.memberships.map((m) => ({
@@ -120,6 +121,7 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
+        token.mfaEnabled = (user as any).mfaEnabled === true;
         token.activeCompanyId = (user as any).activeCompanyId;
         token.activeCompanyName = (user as any).activeCompanyName;
         token.availableCompanies = (user as any).availableCompanies || [];
@@ -146,6 +148,7 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       session.user.id = token.id as string;
+      (session.user as any).mfaEnabled = token.mfaEnabled === true;
       session.user.activeCompanyId = (token.activeCompanyId || token.companyId) as string | null;
       session.user.activeCompanyName = (token.activeCompanyName || token.companyName) as string | null;
       session.user.availableCompanies = (token.availableCompanies as any[]) || [];

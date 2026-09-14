@@ -7,7 +7,7 @@ import { cn } from '@/lib/cn';
 import { Rail } from './Rail';
 import { Topbar } from './Topbar';
 import { NotificationsPanel } from './NotificationsPanel';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ShieldCheck } from 'lucide-react';
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
@@ -40,6 +40,25 @@ export function AppShell({
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showMfaNudge, setShowMfaNudge] = useState(false);
+
+  // MFA rollout nudge: show for signed-in users without MFA, unless they
+  // dismissed it in this browser. Dismissing hides it until the next
+  // session where it would still be true (they simply haven't enabled it).
+  useEffect(() => {
+    const sessionUser = session?.user as any;
+    if (sessionUser && sessionUser.mfaEnabled === false) {
+      const dismissed = typeof localStorage !== 'undefined' && localStorage.getItem('lp-mfa-nudge-dismissed') === '1';
+      setShowMfaNudge(!dismissed);
+    } else {
+      setShowMfaNudge(false);
+    }
+  }, [session]);
+
+  const dismissMfaNudge = useCallback(() => {
+    localStorage.setItem('lp-mfa-nudge-dismissed', '1');
+    setShowMfaNudge(false);
+  }, []);
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
   const [trialInfo, setTrialInfo] = useState<{ status: string; daysLeft: number | null } | null>(null);
 
@@ -167,6 +186,29 @@ export function AppShell({
           onNotificationsClick={() => setNotificationsOpen(true)}
           onMenuClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
+        {/* MFA rollout nudge — prompts users without two-factor to enable it.
+            Dismissible once; reappears after sign-in if still not enabled. */}
+        {showMfaNudge && (
+          <div className="flex items-center gap-3 mx-4 mt-4 px-4 py-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm">
+            <ShieldCheck size={18} className="text-[var(--primary)] flex-none" />
+            <span className="flex-1 text-[var(--text)]">
+              <strong>Add a second layer of protection.</strong> Enable two-factor authentication for your account — it takes a minute.
+            </span>
+            <a
+              href="/settings/security"
+              className="flex-none px-4 py-1.5 rounded-md bg-[var(--primary)] text-white text-sm font-semibold hover:brightness-[0.95] transition-colors no-underline"
+            >
+              Enable
+            </a>
+            <button
+              onClick={dismissMfaNudge}
+              className="flex-none px-2 py-1.5 text-[var(--text-faint)] hover:text-[var(--text)] text-xs font-medium"
+              aria-label="Dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {/* Onboarding incomplete banner — hidden on onboarding/settings pages */}
         {onboardingComplete === false &&
           pathname !== '/onboarding' &&
