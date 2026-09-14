@@ -10,8 +10,11 @@ const mockSyncRunCreate = jest.fn();
 const mockSyncRunUpdate = jest.fn();
 const mockFeedAccountFindMany = jest.fn();
 const mockTxFindFirst = jest.fn();
+const mockTxFindMany = jest.fn();
 const mockTxCreate = jest.fn();
 const mockTxUpdate = jest.fn();
+const mockMembershipFindMany = jest.fn();
+const mockNotificationCreate = jest.fn();
 const mockLinkFindUnique = jest.fn();
 const mockLinkUpsert = jest.fn();
 const mockLinkCreate = jest.fn();
@@ -22,6 +25,10 @@ const mockJournalCreate = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
     bankRule: { findMany: (...a: unknown[]) => mockBankRuleFindMany(...a) },
+    membership: { findMany: (...a: unknown[]) => mockMembershipFindMany(...a) },
+    notification: { create: (...a: unknown[]) => mockNotificationCreate(...a) },
+    // Failure marking runs outside the transaction on the db-level client.
+    bankSyncRun: { update: (...a: unknown[]) => mockSyncRunUpdate(...a) },
     $transaction: (fn: unknown) =>
       fn({
         $queryRaw: (...a: unknown[]) => mockTxQueryRaw(...a),
@@ -34,6 +41,7 @@ jest.mock('@/lib/db', () => ({
         bankFeedAccount: { findMany: (...a: unknown[]) => mockFeedAccountFindMany(...a) },
         transaction: {
           findFirst: (...a: unknown[]) => mockTxFindFirst(...a),
+          findMany: (...a: unknown[]) => mockTxFindMany(...a),
           create: (...a: unknown[]) => mockTxCreate(...a),
           update: (...a: unknown[]) => mockTxUpdate(...a),
         },
@@ -80,6 +88,9 @@ describe('BF-2 sync', () => {
     mockFeedAccountFindMany.mockResolvedValue([feedAccount]);
     mockBankRuleFindMany.mockResolvedValue([]);
     mockTxFindFirst.mockResolvedValue(null);
+    mockTxFindMany.mockResolvedValue([]);
+    mockMembershipFindMany.mockResolvedValue([]);
+    mockNotificationCreate.mockResolvedValue({});
     mockTxCreate.mockImplementation(async ({ data }: any) => ({ ...data, id: 'tx-1' }));
     mockLinkFindUnique.mockResolvedValue(null);
     mockLinkUpdateMany.mockResolvedValue({ count: 0 });
