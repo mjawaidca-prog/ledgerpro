@@ -12,6 +12,8 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [step, setStep] = useState<'password' | 'code'>('password');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -23,12 +25,21 @@ export default function LoginPage() {
     const result = await signIn('credentials', {
       email,
       password,
+      code: step === 'code' ? code : undefined,
       redirect: false,
     });
 
     setLoading(false);
 
     if (result?.error) {
+      if (result.error === 'MFA_REQUIRED') {
+        setStep('code');
+        return;
+      }
+      if (step === 'code') {
+        setError('That authentication code is not valid. Try again, or use a backup code.');
+        return;
+      }
       setError('Invalid email or password. Please try again.');
       return;
     }
@@ -87,11 +98,29 @@ export default function LoginPage() {
               />
             </div>
 
+            {step === 'code' && (
+              <div className="field">
+                <label>Authentication code</label>
+                <input
+                  type="text"
+                  className="input font-mono"
+                  placeholder="6-digit code or backup code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                  autoComplete="one-time-code"
+                />
+                <p className="text-xs text-[var(--text-muted)] mt-1.5">
+                  Enter the 6-digit code from your authenticator app, or one of your backup codes.
+                </p>
+              </div>
+            )}
+
             <Button type="submit" className="w-full mt-2" size="lg" disabled={loading}>
               {loading ? (
                 <Loader2 size={18} className="animate-spin" />
               ) : (
-                'Sign In'
+                step === 'code' ? 'Verify & Sign In' : 'Sign In'
               )}
             </Button>
           </form>

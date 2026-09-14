@@ -3,6 +3,9 @@ import { PrismaAdapter } from '@auth/prisma-adapter';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { db } from '@/lib/db';
 import { compare } from 'bcryptjs';
+import { verifyTotp } from '@/lib/mfa/totp';
+import { decryptTotpSecret } from '@/lib/mfa/secret-crypto';
+import { consumeBackupCode } from '@/lib/mfa/backup-codes';
 
 // Extend the built-in session types for multi-company
 declare module 'next-auth' {
@@ -42,6 +45,7 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
+        code: { label: 'Authentication code (MFA)', type: 'text' },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
@@ -64,6 +68,33 @@ export const authOptions: NextAuthOptions = {
         const isValid = await compare(credentials.password, user.passwordHash);
         if (!isValid) {
           throw new Error('Invalid email or password');
+        }
+
+        // ── MFA: a second step after a correct password ──
+        const code = typeof credentials.code === 'string' ? credentials.code.trim() : '';
+        if (user.mfaEnabled) {
+          if (!code) {
+            // The login page catches this and shows the code step. It does
+            // NOT reveal MFA status for wrong passwords — we are here only
+            // after a correct password.
+            throw new Error('MFA_REQUIRED');
+          }
+          let authorized: boolean;
+          let remainingHashes = user.mfaBackupCodes;
+          if (/^\d{6}$/.test(code)) {
+            if (!user.mfaSecretEncrypted) throw new Error('MFA data is missing. Contact support.');
+            authorized = verifyTotp(decryptTotpSecret(user.mfaSecretEncrypted), code) !== null;
+          } else {
+            const consumed = consumeBackupCode(user.mfaBackupCodes, code);
+            authorized = consumed.valid;
+            remainingHashes = consumed.remainingHashes;
+          }
+          if (!authorized) {
+            throw new Error('Invalid authentication code');
+          }
+          if (remainingHashes.length !== user.mfaBackupCodes.length) {
+            await db.user.update({ where: { id: user.id }, data: { mfaBackupCodes: remainingHashes } });
+          }
         }
 
         // Get first company (or null if no memberships)
