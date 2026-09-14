@@ -36,5 +36,6 @@ BF-2 pulls provider transactions into the same review queue statement imports fe
 
 ## Completion decision
 
-- **2026-09-13 — CI run 72 passed all gates** for the stage; the two rehearsal fixes shipped on `fe407dd` with CI green on the main push.
+- **2026-09-13 — CI run 72 passed all gates** for the stage.
 - **2026-09-13 — live staging rehearsal passed** (evidence above).
+- **Correction (2026-09-14):** the two rehearsal fixes shipped directly to main on `fe407dd`; its main-push CI (runs 74–75) failed on a test-mock gap (the failure-path mock predated the db-level `bankSyncRun.update` call), not on the code itself. The test fix landed with BF-3 (PR #25, CI run 76 green), and current main passes the full suite.
