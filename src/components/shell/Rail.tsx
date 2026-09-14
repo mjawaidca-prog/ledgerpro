@@ -19,6 +19,7 @@ import {
   LogOut,
   Settings,
   Shield,
+  ShieldCheck,
   Briefcase,
   Target,
   ArrowLeftRight,
@@ -57,6 +58,7 @@ const settingsNavItems = [
   { href: '/settings/period-close',    label: 'Period Close',       icon: Shield },
   { href: '/settings/audit-log',       label: 'Audit Log',          icon: FileText },
   { href: '/settings/developer',       label: 'Developer / API',    icon: KeyRound },
+  { href: '/settings/security',        label: 'Security',           icon: ShieldCheck },
 ];
 
 export function Rail({ companyName, companyPlan, companyId, userName, userEmail, className }: RailProps) {
