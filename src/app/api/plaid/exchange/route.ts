@@ -20,6 +20,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'publicToken is required.' }, { status: 400 });
     }
 
+    // Plan entitlement: bank feeds are a Pro/Enterprise add-on (Plan.bankFeeds).
+    const subscription = await db.subscription.findFirst({
+      where: { companyId: session.companyId!, status: { in: ['trialing', 'active'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { plan: { select: { bankFeeds: true } } },
+    });
+    if (!subscription?.plan.bankFeeds) {
+      return NextResponse.json(
+        { error: 'Bank feeds require a Pro or Enterprise plan.' },
+        { status: 403 }
+      );
+    }
+
     const { accessToken, itemId } = await exchangePublicToken(publicToken);
     try {
       const [item, accounts] = await Promise.all([getItem(accessToken), getItemAccounts(accessToken)]);

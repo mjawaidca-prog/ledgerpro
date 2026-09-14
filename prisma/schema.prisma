@@ -1847,6 +1847,9 @@ model BankConnection {
   consentExpiresAt     DateTime?
   billableOwnerId      String? // the user who authorized and pays for this connection
   transactionsCursor   String? // Plaid sync cursor — advances only after rows commit
+  cadence             String  @default("daily") // daily (hourly and twice-daily are later work)
+  autoCategorize      Boolean @default(true) // run the bank-rules engine on sync
+  notifyOnFailure     Boolean @default(true) // notify owners when a sync run fails
   lastSyncAt           DateTime?
 
   createdById String?

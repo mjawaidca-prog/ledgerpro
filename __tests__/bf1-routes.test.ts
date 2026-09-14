@@ -8,6 +8,7 @@ const mockConnectionDelete = jest.fn();
 const mockFeedAccountUpdate = jest.fn();
 const mockFeedAccountFindFirst = jest.fn();
 const mockCompanyFindUniqueOrThrow = jest.fn();
+const mockSubscriptionFindFirst = jest.fn();
 const mockFinancialAccountFindFirst = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
@@ -21,6 +22,7 @@ jest.mock('@/lib/db', () => ({
       findFirst: (...a: unknown[]) => mockFeedAccountFindFirst(...a),
     },
     company: { findUniqueOrThrow: (...a: unknown[]) => mockCompanyFindUniqueOrThrow(...a) },
+    subscription: { findFirst: (...a: unknown[]) => mockSubscriptionFindFirst(...a) },
     financialAccount: { findFirst: (...a: unknown[]) => mockFinancialAccountFindFirst(...a) },
   },
 }));
@@ -55,6 +57,7 @@ describe('BF-1 exchange route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRequireCompany.mockResolvedValue(session);
+    mockSubscriptionFindFirst.mockResolvedValue({ plan: { bankFeeds: true } });
     mockExchange.mockResolvedValue({ accessToken: 'access-token-123', itemId: 'item-1' });
     mockGetItem.mockResolvedValue({
       itemId: 'item-1',

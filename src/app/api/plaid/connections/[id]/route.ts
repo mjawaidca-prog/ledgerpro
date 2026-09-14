@@ -36,13 +36,42 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       );
     }
 
+    // Review work is retained by default. The explicit option removes only
+    // eligible UNTOUCHED feed rows: still to review, never categorized,
+    // matched, or reconciled — posted ledger entries are always kept.
+    const { searchParams } = new URL(req.url);
+    let removedRows = 0;
+    if (searchParams.get('removeUnreviewed') === '1') {
+      const linkIds = await db.bankFeedTransaction.findMany({
+        where: { connectionId: params.id, transactionId: { not: null } },
+        select: { transactionId: true },
+      });
+      const ids = linkIds.map((l) => l.transactionId as string);
+      if (ids.length) {
+        const deleted = await db.transaction.deleteMany({
+          where: {
+            id: { in: ids },
+            companyId: session.companyId!,
+            status: 'toreview',
+            categoryId: null,
+            contactId: null,
+            reconciledInId: null,
+            voidedAt: null,
+            source: 'feed',
+          },
+        });
+        removedRows = deleted.count;
+      }
+    }
+
     await db.bankConnection.delete({ where: { id: params.id } });
 
     await auditLog(session.companyId!, session.userId, 'bank_feed.connection.disconnect', 'bank_connection', params.id, undefined, {
       institutionName: connection.institutionName,
+      removedUnreviewedRows: removedRows,
     });
 
-    return NextResponse.json({ data: { id: params.id, disconnected: true } });
+    return NextResponse.json({ data: { id: params.id, disconnected: true, removedRows } });
   } catch (error) {
     console.error('DELETE /api/plaid/connections/[id] error:', error);
     return NextResponse.json({ error: 'Failed to disconnect the bank feed' }, { status: 500 });

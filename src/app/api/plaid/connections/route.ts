@@ -27,6 +27,9 @@ export async function GET(req: NextRequest) {
         status: c.status,
         consentExpiresAt: c.consentExpiresAt,
         lastSyncAt: c.lastSyncAt,
+        cadence: c.cadence,
+        autoCategorize: c.autoCategorize,
+        notifyOnFailure: c.notifyOnFailure,
         createdAt: c.createdAt,
         accounts: c.accounts.map((a) => ({
           providerAccountId: a.providerAccountId,
