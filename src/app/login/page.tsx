@@ -127,7 +127,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-[var(--text-muted)] mt-4">
-          <a href="#" className="text-[var(--text-faint)] hover:text-[var(--accent)]">
+          <a href="/forgot-password" className="text-[var(--text-faint)] hover:text-[var(--accent)]">
             Forgot password?
           </a>
           <span className="mx-2 text-[var(--border)]">|</span>

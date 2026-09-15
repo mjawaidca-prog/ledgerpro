@@ -26,6 +26,10 @@ export default function SecurityPage() {
   const [disablePassword, setDisablePassword] = useState('');
   const [disableCode, setDisableCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNext, setPwNext] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [changingPw, setChangingPw] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
 
   const fetchStatus = useCallback(async () => {
@@ -101,6 +105,35 @@ export default function SecurityPage() {
       setMessage({ type: 'danger', text: err.message });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setMessage(null);
+    if (pwNext.length < 8) {
+      setMessage({ type: 'danger', text: 'New password must be at least 8 characters.' });
+      return;
+    }
+    if (pwNext !== pwConfirm) {
+      setMessage({ type: 'danger', text: 'Passwords do not match.' });
+      return;
+    }
+    setChangingPw(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: pwCurrent, newPassword: pwNext }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Could not change password.');
+      setPwCurrent(''); setPwNext(''); setPwConfirm('');
+      setMessage({ type: 'success', text: 'Password changed.' });
+    } catch (err: any) {
+      setMessage({ type: 'danger', text: err.message });
+    } finally {
+      setChangingPw(false);
     }
   }
 
@@ -243,6 +276,52 @@ export default function SecurityPage() {
                 </div>
               </form>
             )}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader><h2 className="font-medium">Change password</h2></CardHeader>
+          <CardBody>
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Current password</label>
+                <input
+                  type="password"
+                  className="w-full rounded border px-3 py-2 text-sm"
+                  value={pwCurrent}
+                  onChange={(e) => setPwCurrent(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">New password</label>
+                  <input
+                    type="password"
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    value={pwNext}
+                    onChange={(e) => setPwNext(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Confirm new password</label>
+                  <input
+                    type="password"
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    value={pwConfirm}
+                    onChange={(e) => setPwConfirm(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" variant="primary" disabled={changingPw}>
+                  {changingPw ? <Loader2 size={14} className="animate-spin" /> : null} Change password
+                </Button>
+              </div>
+            </form>
           </CardBody>
         </Card>
       </div>

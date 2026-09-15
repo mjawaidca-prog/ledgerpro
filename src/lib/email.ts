@@ -161,3 +161,26 @@ export async function sendPaymentConfirmation(
     html,
   });
 }
+
+export async function sendPasswordReset(to: string, resetUrl: string) {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: Inter, system-ui, sans-serif; color: #364150; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
+      <h1 style="font-size: 22px; color: #131a24; margin: 0 0 12px;">Reset your LedgerPro password</h1>
+      <p style="font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
+        We received a request to reset your password. This link is valid for 30 minutes and works once:
+      </p>
+      <p style="margin: 0 0 24px;">
+        <a href="${resetUrl}" style="display: inline-block; background: #b3261e; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600;">Reset password</a>
+      </p>
+      <p style="font-size: 13px; color: #9aa6b8; margin: 0 0 8px;">
+        If you did not request this, you can safely ignore this email — your password will not change.
+      </p>
+      <p style="font-size: 13px; color: #9aa6b8; margin: 0;">LedgerPro by NexvarLab</p>
+    </body>
+    </html>
+  `;
+  return sendWithProvider({ to, subject: 'Reset your LedgerPro password', html });
+}
