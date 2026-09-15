@@ -28,6 +28,11 @@ model User {
   // ── MFA (TOTP) ──
   // The TOTP secret is AES-256-GCM encrypted with the deployment MFA_SECRET
   // key; backup codes are stored as SHA-256 hashes and shown exactly once.
+  // Password reset (forgot-password flow): a single-use, hashed token
+  // with a 30-minute expiry. Never stored in plaintext.
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
+
   mfaSecretEncrypted String?
   mfaEnabled         Boolean  @default(false)
   mfaEnabledAt       DateTime?
