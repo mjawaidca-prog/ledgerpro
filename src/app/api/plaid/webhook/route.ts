@@ -8,13 +8,15 @@ export const dynamic = 'force-dynamic';
 // the primary sync trigger; other codes are acknowledged without action.
 export async function POST(req: NextRequest) {
   const verification = req.headers.get('plaid-verification');
-  const body = await req.json().catch(() => null);
+  const rawBody = await req.text();
+  let body;
+  try { body = JSON.parse(rawBody); } catch { return NextResponse.json({ error: 'Invalid webhook.' }, { status: 400 }); }
   const itemId = body?.item_id as string | undefined;
   const webhookCode = body?.webhook_code as string | undefined;
   const webhookType = body?.webhook_type as string | undefined;
 
   // Unverified payloads are rejected before anything else runs.
-  const verified = await verifyPlaidWebhook({ verificationHeader: verification, itemId: itemId ?? '' });
+  const verified = await verifyPlaidWebhook({ verificationHeader: verification, itemId: typeof itemId === 'string' ? itemId : '', rawBody });
   if (!verified) {
     return NextResponse.json({ error: 'Unverified webhook.' }, { status: 400 });
   }
@@ -25,7 +27,8 @@ export async function POST(req: NextRequest) {
     try {
       await syncConnection(verified.connectionId, 'webhook');
     } catch (error) {
-      console.error('[plaid-webhook] sync failed:', error);
+      console.error('[plaid-webhook] sync failed');
+      return NextResponse.json({ error: 'Sync failed; retry delivery.' }, { status: 503 });
     }
   }
 

@@ -28,7 +28,7 @@ jest.mock('@/lib/db', () => ({
     membership: { findMany: (...a: unknown[]) => mockMembershipFindMany(...a) },
     notification: { create: (...a: unknown[]) => mockNotificationCreate(...a) },
     // Failure marking runs outside the transaction on the db-level client.
-    bankSyncRun: { update: (...a: unknown[]) => mockSyncRunUpdate(...a) },
+    bankSyncRun: { update: (...a: unknown[]) => mockSyncRunUpdate(...a), create: (...a: unknown[]) => mockSyncRunCreate(...a) },
     $transaction: (fn: unknown) =>
       fn({
         $queryRaw: (...a: unknown[]) => mockTxQueryRaw(...a),
@@ -225,7 +225,7 @@ describe('BF-2 sync', () => {
   test('a failed page marks the run failed and rethrows', async () => {
     mockSyncPage.mockRejectedValue(new Error('provider boom'));
     await expect(syncConnection('conn-1', 'webhook')).rejects.toThrow('provider boom');
-    expect(mockSyncRunUpdate).toHaveBeenCalledWith(
+    expect(mockSyncRunCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
     );
   });

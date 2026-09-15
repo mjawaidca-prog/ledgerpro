@@ -22,6 +22,7 @@ import { syncTransactionsPage } from '@/lib/bank-feed/plaid-client';
 import { makeDedupeKey } from '@/lib/banking/dedupe';
 import { applyRules, type BankRuleLike } from '@/lib/banking/rules';
 import { classifyOverlap } from '@/lib/bank-feed/overlap';
+import { bankFeedPilotAllowed } from '@/lib/bank-feed/pilot';
 
 const PAGE_SIZE = 500;
 const MAX_PAGES_PER_RUN = 8; // bounded per invocation; the next trigger continues
@@ -70,9 +71,8 @@ const ZERO_OUTCOME: SyncOutcome = {
   updated: 0, removedMarked: 0, blockedUpdates: 0, pages: 0,
 };
 
-/** Feed amounts stay exactly as the provider sent them — no sign flips
- *  (the signMultiplier behavior was deliberately removed in BUG-1) — and
- *  are rounded to cents to drop float noise. */
+/** Provider adapters supply LedgerPro's inflow-positive convention.
+ *  Round to cents here; do not apply a second sign conversion. */
 export function normalizeFeedAmount(amount: number): number {
   if (!Number.isFinite(amount)) return 0;
   return Math.round(amount * 100) / 100;
@@ -102,6 +102,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
   const started = Date.now();
   const lockTag = `bfsync:${connectionId}`;
   let syncRunId: string | null = null;
+  let failureCompany: { companyId: string; institutionName: string; notifyOnFailure: boolean } | null = null;
 
   try {
     // The provider HTTP call runs inside this transaction, so the default
@@ -114,10 +115,12 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockTag}, 0))::text`;
 
     const connection = await tx.bankConnection.findUniqueOrThrow({ where: { id: connectionId } });
+    if (!bankFeedPilotAllowed(connection.companyId)) return { ...ZERO_OUTCOME, skipped: true };
     if (connection.status === 'revoked' || connection.status === 'error') {
       throw new Error(`Connection is ${connection.status}.`);
     }
 
+    failureCompany = connection;
     const running = await tx.bankSyncRun.findFirst({
       where: { connectionId, status: 'running', startedAt: { gt: new Date(Date.now() - 15 * 60_000) } },
     });
@@ -144,7 +147,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
 
     try {
       for (;;) {
-        if (Date.now() - started > SYNC_CUTOFF_SECONDS * 1000) break;
+        if (Date.now() - started > SYNC_CUTOFF_SECONDS * 1000) throw new Error('Sync exceeded pilot time budget; cursor unchanged.');
 
         const page = await syncTransactionsPage({ accessToken, cursor });
         pages += 1;
@@ -359,27 +362,10 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
         await tx.bankConnection.update({ where: { id: connectionId }, data: { transactionsCursor: cursor, lastSyncAt: new Date() } });
 
         if (!page.hasMore) break;
-        if (pages >= MAX_PAGES_PER_RUN) break;
+        if (pages >= MAX_PAGES_PER_RUN) throw new Error('Sync exceeded pilot page budget; cursor unchanged.');
       }
-    } catch (error: any) {
-      // The transaction is dead here — mark the run failed from OUTSIDE the
-      // transaction (a write inside it would be rejected with P2028 and mask
-      // the real error).
-      try {
-        await db.bankSyncRun.update({
-          where: { id: syncRun.id },
-          data: { status: 'failed', error: error?.message?.slice(0, 500) ?? 'Sync failed', finishedAt: new Date(), addedCount: counts.added, dedupedCount: counts.deduped },
-        });
-      } catch (markError) {
-        console.error('[bf-sync] failed to mark run failed:', markError);
-      }
-      if (connection.notifyOnFailure) {
-        await notifyCompany(
-          connection.companyId,
-          'Bank feed: sync failed',
-          `${connection.institutionName} could not be synchronized. The next webhook or the daily check will retry automatically.`
-        );
-      }
+    } catch (error) {
+      // Let the complete batch roll back, including its cursor, before recording failure.
       throw error;
     }
 
@@ -391,6 +377,20 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
     return { ...counts, syncRunId: syncRun.id, pages };
     }, { maxWait: 15000, timeout: 60000 });
   } catch (error) {
+    // The transaction has now rolled back: its running row no longer exists.
+    // Create the failure evidence outside it; do not update an uncommitted row.
+    if (syncRunId && failureCompany) {
+      const company = failureCompany as { companyId: string; institutionName: string; notifyOnFailure: boolean };
+      try {
+        await db.bankSyncRun.create({ data: {
+          connectionId, trigger, status: 'failed', startedAt: new Date(started),
+          finishedAt: new Date(), error: 'Sync failed; no batch rows or cursor changes committed.',
+          addedCount: 0, dedupedCount: 0,
+        } });
+      } catch { console.error('[bf-sync] could not persist failure record'); }
+      if (company.notifyOnFailure) await notifyCompany(company.companyId, 'Bank feed: sync failed',
+        'The bank feed could not synchronize. No batch changes were committed. Retry or contact support.');
+    }
     throw error;
   }
 }

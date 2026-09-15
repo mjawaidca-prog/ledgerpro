@@ -20,6 +20,8 @@ function isPublicPath(pathname: string) {
     // The Plaid webhook authenticates with its own signature verification
     // JWT — no dashboard session involved.
     pathname.startsWith('/api/plaid/webhook') ||
+    // Cron performs its own CRON_SECRET check; it has no dashboard cookie.
+    pathname === '/api/plaid/sync-cron' ||
     PUBLIC_MARKETING_PATHS.includes(pathname)
   );
 }

@@ -1,6 +1,51 @@
 # BF-5 controlled production pilot — runbook
 
-**Status: prepared and ready to execute.** The pilot cannot start until BF-0 closes: Plaid production access for Canadian `transactions` (requested by the owner in the Plaid dashboard; approval typically takes days). Everything below is scripted so the pilot runs in a single session once approval lands.
+**Status: NO-GO pending readiness fixes and provider confirmation (reviewed 2026-09-15).** Initial connection can be performed in a session, but acceptance requires five business days of evidence. BF-0 requires confirmed Canadian Transactions production access.
+
+## 2026-09-15 independent implementation review
+
+Latest reviewed main: `23a485c`. Vercel reports a READY production deployment.
+Production has the four bank-feed tables and zero feed transaction rows; real-bank
+pilot evidence is not established. Never treat staging sandbox rehearsal as
+production acceptance.
+
+Corrections prepared on `codex/bf5-pilot-review`:
+- ES256 webhook verification with five-minute issued-at validation and a
+  constant-time comparison of the SHA-256 of the exact raw request body.
+- Convert Plaid's outflow-positive amounts to LedgerPro's inflow-positive
+  convention once at the provider adapter. Existing stored rows are not rewritten.
+- Send redirect and webhook URLs in Link token requests.
+- Return HTTP 503 for failed webhook syncs to permit provider retry.
+- Restrict production Link/exchange/sync to explicit company IDs; add an
+  emergency stop that leaves provider disconnect available.
+- Let the bank-feed cron reach its own bearer-secret guard without a session.
+- Avoid printing Plaid error objects from connection and webhook routes.
+- Persist failed sync runs after the transaction rolls back.
+- Roll back the full update when pagination exceeds its time/page budget,
+  retaining the original cursor for retry rather than committing partial pages.
+- Use the exchange response's connection ID for account mapping; report first
+  sync failures instead of showing success unconditionally.
+
+Additional release checks still required:
+- Rehearse the selected institution's Link flow. Redirect return/resume is
+  not implemented; do not include mobile webview/OAuth redirect flows in this
+  pilot until implemented and tested. Plaid's current OAuth guide says Canadian
+  institutions do not currently use OAuth; confirm the selected institution.
+- Verify failure-run persistence with an actual PostgreSQL rollback.
+- Rehearse pagination retries; oversized updates currently fail closed after
+  eight pages or the time budget. Add a durable full-update staging mechanism
+  before admitting accounts whose initial history exceeds those limits.
+- Audit remaining provider error logging and disconnect/sync concurrency.
+- Confirm production credentials, KEK, provider approval and pilot company.
+- Agree pilot charges explicitly. `billableOwnerId` is attribution, not an
+  implemented charge/collection workflow.
+
+Required production settings: `PLAID_ENV=production`, configured credentials,
+`BANK_FEED_KEK`, `PLAID_REDIRECT_URI`, `PLAID_WEBHOOK_URL`,
+`BANK_FEED_PILOT_COMPANY_IDS=<approved exact company ID>` and
+`BANK_FEEDS_DISABLED=false`. Empty allowlist blocks all production syncs and
+new connections. `BANK_FEEDS_DISABLED=true` pauses sync; only successful provider
+item removal ends the connection. Do not broaden access until the matrix passes.
 
 The gate: a real bank connects, feed results reconcile against statements, billing and disconnect behave, and the decision to widen access is evidence-based.
 

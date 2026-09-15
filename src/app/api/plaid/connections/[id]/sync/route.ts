@@ -25,9 +25,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const outcome = await syncConnection(params.id, 'manual');
     return NextResponse.json({ data: outcome });
   } catch (error: any) {
-    console.error('POST /api/plaid/connections/[id]/sync error:', error);
+    console.error('POST /api/plaid/connections/[id]/sync failed');
     return NextResponse.json(
-      { error: error?.message?.slice(0, 300) ?? 'Sync failed. Check the sync log.' },
+      { error: 'Sync failed. Check the sync log or contact support.' },
       { status: 502 }
     );
   }

@@ -143,7 +143,7 @@ export default function BankFeedsPage() {
           const exJson = await exRes.json();
           if (!exRes.ok) throw new Error(exJson.error || 'Could not connect the bank.');
           await fetchConnections();
-          setPendingConnection({ ...exJson.data, accounts: exJson.data.accounts.map((a: any) => ({ ...a, financialAccountId: null })), recentSyncs: [], cadence: 'daily', autoCategorize: true, notifyOnFailure: true, lastSyncAt: null, consentExpiresAt: exJson.data.consentExpiresAt, createdAt: new Date().toISOString() } as Connection);
+          setPendingConnection({ ...exJson.data, id: exJson.data.connectionId, accounts: exJson.data.accounts.map((a: any) => ({ ...a, financialAccountId: null })), recentSyncs: [], cadence: 'daily', autoCategorize: true, notifyOnFailure: true, lastSyncAt: null, consentExpiresAt: exJson.data.consentExpiresAt, createdAt: new Date().toISOString() } as Connection);
           setMapping(Object.fromEntries(exJson.data.accounts.filter((a: any) => a.isFeeding).map((a: any) => [a.providerAccountId, { feeding: true, glId: bestGuessGlId(a) }])));
         } catch (err: any) {
           setMessage({ type: 'danger', text: err.message });
@@ -192,9 +192,12 @@ export default function BankFeedsPage() {
         throw new Error(first || json.error || 'Could not save the account mapping.');
       }
       // The mapping route does not auto-sync; run the first sync now.
-      await fetch(`/api/plaid/connections/${pendingConnection.id}/sync`, { method: 'POST' }).catch(() => {});
+      const syncResponse = await fetch(`/api/plaid/connections/${pendingConnection.id}/sync`, { method: 'POST' });
+      if (!syncResponse.ok) throw new Error('Account mapping saved, but the first sync failed. Retry Sync now or contact support.');
+      const syncResult = await syncResponse.json();
+      if (syncResult.data?.skipped) throw new Error('Account mapping saved, but sync was not started. Check pilot access or an existing sync before retrying.');
       setPendingConnection(null);
-      setMessage({ type: 'success', text: 'Feed started — the first sync is running.' });
+      setMessage({ type: 'success', text: 'Account mapping saved and the first sync completed.' });
       await fetchConnections();
     } catch (err: any) {
       setMessage({ type: 'danger', text: err.message });

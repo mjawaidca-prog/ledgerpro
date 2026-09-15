@@ -4,6 +4,7 @@ import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { createLinkToken } from '@/lib/bank-feed/plaid-client';
 import { decryptToken } from '@/lib/bank-feed/crypto';
 import { updateLinkToken } from '@/lib/bank-feed/plaid-client';
+import { bankFeedPilotAllowed } from '@/lib/bank-feed/pilot';
 export const dynamic = 'force-dynamic';
 
 // POST /api/plaid/link-token — mints a Plaid Link token for the signed-in
@@ -12,8 +13,9 @@ export const dynamic = 'force-dynamic';
 // LedgerPro.
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
+    const session = await requireCompany(req, { roles: ['owner'] });
     if (session.error) return session.error;
+    if (!bankFeedPilotAllowed(session.companyId!)) return NextResponse.json({ error: 'Bank feeds are restricted to the approved production pilot.' }, { status: 403 });
 
     const body = await req.json().catch(() => null);
     const connectionId = typeof body?.connectionId === 'string' && body.connectionId ? body.connectionId : null;
@@ -52,7 +54,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data: { linkToken, expiration, updateMode: false } });
   } catch (error: any) {
-    console.error('POST /api/plaid/link-token error:', error);
+    console.error('POST /api/plaid/link-token failed');
     return NextResponse.json(
       { error: error?.message?.includes('not configured') ? 'Bank feeds are not configured in this environment.' : 'Failed to create a bank link session.' },
       { status: 500 }
