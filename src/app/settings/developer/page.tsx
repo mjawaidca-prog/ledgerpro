@@ -51,6 +51,14 @@ const WEBHOOK_EVENT_OPTIONS = [
   'journal.posted',
 ];
 
+/** Dashboard routes return string errors; be tolerant of structured ones. */
+function errText(json: any): string {
+  const e = json?.error;
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object') return e.message ?? e.code ?? 'Something went wrong.';
+  return 'Something went wrong.';
+}
+
 function keyStatus(key: ApiKeyRow): { label: string; badge: 'paid' | 'pending' | 'info' | 'neutral' } {
   if (key.revokedAt) return { label: 'Revoked', badge: 'neutral' };
   if (key.expiresAt && new Date(key.expiresAt).getTime() <= Date.now()) return { label: 'Expired', badge: 'pending' };
@@ -190,7 +198,7 @@ export default function DeveloperPage() {
         body: JSON.stringify({ enabled: !apiAccessEnabled }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to update API access');
+      if (!res.ok) throw new Error(errText(json));
       setApiAccessEnabled(json.data.apiAccessEnabled);
       setMessage({
         type: 'success',
@@ -221,7 +229,7 @@ export default function DeveloperPage() {
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to create API key');
+      if (!res.ok) throw new Error(errText(json));
       setNewSecret(json.data.secret);
       setKeyName('');
       setExpiresAt('');

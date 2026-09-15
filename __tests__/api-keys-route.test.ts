@@ -134,7 +134,8 @@ describe('/api/keys management routes', () => {
     const res = await POST(request({ name: 'Basic user', permissions: ['read'] }));
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body.error.code).toBe('api_plan_required');
+    // Dashboard routes return plain string errors (the page renders them).
+    expect(body.error).toContain('Pro or Enterprise');
     expect(mockCreate).not.toHaveBeenCalled();
   });
 });

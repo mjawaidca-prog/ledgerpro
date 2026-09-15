@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     // (the emergency switch must never be gated).
     if (body.enabled && !(await hasApiPlanAccess(session.companyId!))) {
       return NextResponse.json(
-        { error: { code: 'api_plan_required', message: 'API access requires a Pro or Enterprise plan.' } },
+        { error: 'API access requires a Pro or Enterprise plan.' },
         { status: 403 }
       );
     }
