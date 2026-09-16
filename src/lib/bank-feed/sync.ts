@@ -9,7 +9,7 @@
 // Safety rules:
 // - One sync per connection at a time (advisory lock + running-run guard).
 // - The cursor advances ONLY inside the same transaction that commits a
-//   page's rows — a partial failure re-reads from the last committed page.
+//   full batch's rows — a partial failure re-reads from the starting cursor.
 // - Modified rows update only rows still in review (never reconciled, never
 //   voided); anything else is recorded on the sync run, never silently
 //   changed (formal correction alerts arrive in BF-3).
@@ -25,7 +25,7 @@ import { classifyOverlap } from '@/lib/bank-feed/overlap';
 import { bankFeedPilotAllowed } from '@/lib/bank-feed/pilot';
 
 const PAGE_SIZE = 500;
-const MAX_PAGES_PER_RUN = 8; // bounded per invocation; the next trigger continues
+const MAX_PAGES_PER_RUN = 8; // exceeding this rolls back; pilot excludes larger histories
 const SYNC_CUTOFF_SECONDS = 20; // serverless budget guard
 const DAY_MS = 86_400_000;
 
@@ -74,7 +74,7 @@ const ZERO_OUTCOME: SyncOutcome = {
 /** Provider adapters supply LedgerPro's inflow-positive convention.
  *  Round to cents here; do not apply a second sign conversion. */
 export function normalizeFeedAmount(amount: number): number {
-  if (!Number.isFinite(amount)) return 0;
+  if (!Number.isFinite(amount)) throw new Error('Invalid feed amount');
   return Math.round(amount * 100) / 100;
 }
 
@@ -103,20 +103,24 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
   const lockTag = `bfsync:${connectionId}`;
   let syncRunId: string | null = null;
   let failureCompany: { companyId: string; institutionName: string; notifyOnFailure: boolean } | null = null;
+  const notifications: Array<{ companyId: string; title: string; body: string }> = [];
+  const queueNotification = async (companyId: string, title: string, body: string) => {
+    notifications.push({ companyId, title, body });
+  };
 
   try {
     // The provider HTTP call runs inside this transaction, so the default
     // 5s Prisma timeout would kill slower syncs mid-flight (P2028). Give
     // the whole sync a generous budget; the advisory lock still serializes
     // overlapping runs.
-    return await db.$transaction(async (tx) => {
+    const outcome = await db.$transaction(async (tx) => {
     // pg_advisory_xact_lock returns void — cast so the Prisma driver can
     // deserialize it. The lock releases when this transaction ends.
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockTag}, 0))::text`;
 
     const connection = await tx.bankConnection.findUniqueOrThrow({ where: { id: connectionId } });
     if (!bankFeedPilotAllowed(connection.companyId)) return { ...ZERO_OUTCOME, skipped: true };
-    if (connection.status === 'revoked' || connection.status === 'error') {
+    if (connection.status === 'revoked') {
       throw new Error(`Connection is ${connection.status}.`);
     }
 
@@ -134,9 +138,15 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
     syncRunId = syncRun.id;
 
     const accounts = await tx.bankFeedAccount.findMany({
-      where: { connectionId, isFeeding: true },
+      where: { connectionId, isFeeding: true, financialAccountId: { not: null } },
       include: { financialAccount: { select: { lockedThrough: true } } },
     });
+    if (accounts.length === 0) {
+      // Webhooks can arrive before the owner saves the initial mapping.
+      // Keep the initial cursor so those rows are fetched after mapping.
+      await tx.bankSyncRun.update({ where: { id: syncRun.id }, data: { status: 'success', finishedAt: new Date(), addedCount: 0, dedupedCount: 0 } });
+      return { ...ZERO_OUTCOME, syncRunId: syncRun.id, skipped: true };
+    }
     const byProviderId = new Map(accounts.map((a) => [a.providerAccountId, a]));
     const rules = await loadRules(connection.companyId);
     const accessToken = decryptToken(connection.accessTokenEncrypted);
@@ -155,14 +165,14 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
         for (const item of page.removed) {
           if (!item.transactionId) continue;
           const marked = await tx.bankFeedTransaction.updateMany({
-            where: { providerTransactionId: item.transactionId, removedByProviderAt: null },
+            where: { connectionId, providerTransactionId: item.transactionId, removedByProviderAt: null },
             data: { removedByProviderAt: new Date() },
           });
           counts.removedMarked += marked.count;
           // Review-stage rows are kept (deletion is a human decision in
           // BF-4's UI); owners get a notification so nothing is lost.
           if (marked.count > 0) {
-            await notifyCompany(
+            await queueNotification(
               connection.companyId,
               'Bank feed: provider removed a transaction',
               `${connection.institutionName} removed a transaction that is still waiting in Review & match. It has been kept for your decision.`
@@ -172,6 +182,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
 
         for (const item of page.modified) {
           const feedAccount = byProviderId.get(item.providerAccountId);
+          if (!feedAccount?.financialAccountId) continue;
           const link = await tx.bankFeedTransaction.findUnique({
             where: { providerAccountId_providerTransactionId: { providerAccountId: item.providerAccountId, providerTransactionId: item.providerTransactionId } },
             include: { transaction: { select: { id: true, status: true, reconciledInId: true, voidedAt: true, date: true } } },
@@ -185,10 +196,10 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
             row.reconciledInId ||
             row.voidedAt ||
             !['toreview', 'categorized'].includes(row.status) ||
-            (accountLockedThrough && row.date <= accountLockedThrough)
+            (accountLockedThrough && (row.date <= accountLockedThrough || new Date(item.date) <= accountLockedThrough))
           ) {
             counts.blockedUpdates += 1;
-            await notifyCompany(
+            await queueNotification(
               connection.companyId,
               'Bank feed: correction blocked',
               `${connection.institutionName} changed a transaction that has already been posted or reconciled. Review it manually in the banking screen.`
@@ -222,17 +233,21 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
                   providerTransactionId: item.pendingTransactionId,
                 },
               },
-              include: { transaction: { select: { id: true, status: true, reconciledInId: true, voidedAt: true, categoryId: true, appliedRuleId: true } } },
+              include: { transaction: { select: { id: true, status: true, reconciledInId: true, voidedAt: true, categoryId: true, appliedRuleId: true, date: true } } },
             });
             if (pendingLink?.transaction) {
               const row = pendingLink.transaction;
-              if (row.reconciledInId || row.voidedAt || !['toreview', 'categorized'].includes(row.status)) {
+              const lockedThrough = feedAccount.financialAccount?.lockedThrough;
+              if (row.reconciledInId || row.voidedAt || !['toreview', 'categorized'].includes(row.status) ||
+                (lockedThrough && (row.date <= lockedThrough || new Date(item.date) <= lockedThrough))) {
                 counts.blockedUpdates += 1;
-                await notifyCompany(
+                await queueNotification(
                   connection.companyId,
                   'Bank feed: settlement blocked',
                   `${connection.institutionName} settled a transaction that has already been posted or reconciled. Review it manually.`
                 );
+                // Do not create a second row for a blocked settlement.
+                continue;
               } else {
                 try {
                   // Keep the user's categorization; update amounts/date only.
@@ -288,6 +303,10 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
             where: {
               companyId: connection.companyId,
               financialAccountId: feedAccount.financialAccountId,
+              // Different provider IDs are different transactions, even
+              // when two purchases have identical dates/amounts/descriptions.
+              source: { not: 'feed' },
+              bankFeedTransaction: { is: null },
               date: { gte: new Date(new Date(item.date).getTime() - 2 * DAY_MS), lte: new Date(new Date(item.date).getTime() + 2 * DAY_MS) },
             },
             select: { id: true, date: true, amount: true, description: true },
@@ -357,7 +376,7 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
           if (overlap.verdict === 'ambiguous') counts.held += 1;
         }
 
-        // Cursor commits with the page's rows — a crash here re-reads the page.
+        // This update is provisional until the entire batch commits.
         cursor = page.nextCursor;
         await tx.bankConnection.update({ where: { id: connectionId }, data: { transactionsCursor: cursor, lastSyncAt: new Date() } });
 
@@ -373,9 +392,16 @@ export async function syncConnection(connectionId: string, trigger: 'webhook' | 
       where: { id: syncRun.id },
       data: { status: 'success', finishedAt: new Date(), addedCount: counts.added, dedupedCount: counts.deduped },
     });
+    // A successful authenticated provider read confirms reconnect succeeded.
+    if (connection.status === 'login_required' || connection.status === 'error') {
+      await tx.bankConnection.update({ where: { id: connectionId }, data: { status: 'active' } });
+    }
 
     return { ...counts, syncRunId: syncRun.id, pages };
     }, { maxWait: 15000, timeout: 60000 });
+    // A rolled-back batch must not leave misleading correction notifications.
+    for (const notice of notifications) await notifyCompany(notice.companyId, notice.title, notice.body);
+    return outcome;
   } catch (error) {
     // The transaction has now rolled back: its running row no longer exists.
     // Create the failure evidence outside it; do not update an uncommitted row.

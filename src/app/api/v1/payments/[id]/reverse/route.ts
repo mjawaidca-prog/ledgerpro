@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { authenticateApiRequest } from '@/lib/api/auth';
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { reverseDocumentPayment } from '@/lib/journal';
-import { auditLog } from '@/lib/api-helpers';
+import { auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { z } from 'zod';
 import { validationErrorResponse } from '@/lib/api/validation';
 export const dynamic = 'force-dynamic';
@@ -27,8 +27,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   let outcome;
   try {
-    outcome = await withIdempotency(idem.context, async () => {
-      const payment = await db.journalEntry.findFirst({
+    outcome = await withIdempotency(idem.context, async (tx) => {
+      const payment = await tx.journalEntry.findFirst({
         where: { id: params.id, companyId: context!.companyId, sourceType: 'payment', voidedAt: null },
         select: { id: true, sourceId: true, sourceType: true },
       });
@@ -42,14 +42,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const reversalDate = parsed.data.reversalDate
         ? (() => { const [y, m, d] = parsed.data.reversalDate!.split('-').map(Number); return new Date(y, m - 1, d); })()
         : new Date();
+      const guard = await closedPeriodGuard(context!.companyId, reversalDate);
+      if (guard) return { resourceType: 'payment_reversal', resourceId: params.id, statusCode: guard.status, body: await guard.json() };
 
       // The payment entry references its document by id; resolve which kind.
       const sourceId = payment.sourceId;
       const invoice = sourceId
-        ? await db.invoice.findFirst({ where: { id: sourceId, companyId: context!.companyId }, select: { id: true } })
+        ? await tx.invoice.findFirst({ where: { id: sourceId, companyId: context!.companyId }, select: { id: true } })
         : null;
       const bill = !invoice && sourceId
-        ? await db.bill.findFirst({ where: { id: sourceId, companyId: context!.companyId }, select: { id: true } })
+        ? await tx.bill.findFirst({ where: { id: sourceId, companyId: context!.companyId }, select: { id: true } })
         : null;
       if (!invoice && !bill) {
         const err: any = new Error('The document for this payment was not found.');
@@ -66,7 +68,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         companyId: context!.companyId,
         reversalDate,
         userId: undefined,
-      });
+      }, tx);
 
       return {
         resourceType: 'payment_reversal',

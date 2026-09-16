@@ -12,6 +12,8 @@ const mockSubscriptionFindFirst = jest.fn();
 const mockFinancialAccountFindFirst = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
+    $transaction: async function (fn: any) { return fn(this); },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     bankConnection: {
       create: (...a: unknown[]) => mockConnectionCreate(...a),
       findFirst: (...a: unknown[]) => mockConnectionFindFirst(...a),
@@ -164,6 +166,13 @@ describe('BF-1 account mapping route', () => {
       })
     );
   });
+
+  test('cannot add an account after the connection cursor advanced', async () => {
+    mockConnectionFindFirst.mockResolvedValue({ id: 'conn-1', transactionsCursor: 'cursor-after-history', accounts: [{ providerAccountId: 'pa-1', currency: 'CAD', subtype: 'checking', financialAccountId: null, isFeeding: false }] });
+    const res = await accountsRoute(req({ accounts: [{ providerAccountId: 'pa-1', is_feeding: true, financialAccountId: 'fa-1' }] }), { params: { id: 'conn-1' } } as any);
+    expect(res.status).toBe(400);
+    expect(mockFeedAccountUpdate).not.toHaveBeenCalled();
+  });
 });
 
 describe('BF-1 disconnect route', () => {
@@ -206,5 +215,14 @@ describe('BF-1 disconnect route', () => {
     const res = await disconnectRoute(new NextRequest('http://localhost/api/plaid/connections/conn-1', { method: 'DELETE' }), { params: { id: 'conn-1' } } as any);
     expect(res.status).toBe(502);
     expect(mockConnectionDelete).not.toHaveBeenCalled();
+  });
+
+  test('finishes local disconnect when a previous provider removal already succeeded', async () => {
+    const { encryptToken } = jest.requireActual('@/lib/bank-feed/crypto');
+    mockConnectionFindFirst.mockResolvedValue({ id: 'conn-1', institutionName: 'Bank', accessTokenEncrypted: encryptToken('access-token-123') });
+    mockRemoveItem.mockRejectedValue({ response: { data: { error_code: 'ITEM_NOT_FOUND' } } });
+    const res = await disconnectRoute(new NextRequest('http://localhost/api/plaid/connections/conn-1', { method: 'DELETE' }), { params: { id: 'conn-1' } } as any);
+    expect(res.status).toBe(200);
+    expect(mockConnectionDelete).toHaveBeenCalled();
   });
 });

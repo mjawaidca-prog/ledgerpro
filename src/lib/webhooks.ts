@@ -8,9 +8,12 @@
 // - Delivery retries follow a fixed backoff ladder; a delivery is sent at
 //   most once per attempt. Replay resets the ladder in place.
 // - Destination URLs are validated against private/internal networks before
-//   every attempt, redirects included (SSRF protection).
+//   every attempt and pinned to the verified IP. Redirects are not followed.
 
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { db } from '@/lib/db';
 import type { WebhookDeliveryStatus } from '@prisma/client';
 
@@ -107,7 +110,7 @@ export async function sweepDueDeliveries(companyId: string | null, limit: number
     where: {
       status: { in: ['pending', 'failed'] },
       nextAttemptAt: { lte: new Date() },
-      ...(companyId ? { endpoint: { companyId } } : {}),
+      endpoint: { enabled: true, ...(companyId ? { companyId } : {}) },
     },
     orderBy: { nextAttemptAt: 'asc' },
     take: limit,
@@ -123,27 +126,35 @@ export async function sweepDueDeliveries(companyId: string | null, limit: number
 
 // ── SSRF protection ─────────────────────────────────────────
 
-const PRIVATE_IPV4 = [
-  /^10\./, /^127\./, /^169\.254\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, /^0\./,
-];
-const PRIVATE_IPV6 = [/^::1$/, /^fc/i, /^fd/i, /^fe[89ab]/i];
-
 export function isPrivateIp(ip: string): boolean {
-  if (ip.includes(':')) {
-    const normalized = ip.toLowerCase();
-    return PRIVATE_IPV6.some((re) => re.test(normalized));
+  const family = isIP(ip);
+  if (family === 6) {
+    // Permit global unicast only. This rejects unspecified, mapped IPv4,
+    // NAT64, link-local, ULA, multicast and other transition mechanisms.
+    const normalized = new URL(`http://[${ip}]/`).hostname.slice(1, -1);
+    const [first, second = '0'] = normalized.split(':');
+    const a = parseInt(first, 16), b = parseInt(second || '0', 16);
+    return (a & 0xe000) !== 0x2000 || a === 0x2002 ||
+      (a === 0x2001 && (b < 0x200 || b === 0xdb8)) || a === 0x3fff;
   }
-  return PRIVATE_IPV4.some((re) => re.test(ip));
+  if (family !== 4) return true;
+  const [a, b, c] = ip.split('.').map(Number);
+  return a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)) || (b === 88 && c === 99))) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113);
 }
 
-const MAX_REDIRECTS = 3;
+type Destination = { ok: true; parsed: URL; address: string; family: number } | { ok: false; reason: string };
 
 /**
  * Validates a webhook destination: http/https only, and every resolved IP
  * must be public (no loopback, private, link-local, CGNAT or unspecified
  * addresses). Called before EVERY delivery attempt.
  */
-export async function validateWebhookUrl(url: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+async function resolveWebhookUrl(url: string): Promise<Destination> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -157,34 +168,55 @@ export async function validateWebhookUrl(url: string): Promise<{ ok: true } | { 
     return { ok: false, reason: 'Destination must not embed credentials.' };
   }
   try {
-    const addresses = await import('node:dns/promises').then((dns) => dns.lookup(parsed.hostname, { all: true }));
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+    const addresses = isIP(hostname)
+      ? [{ address: hostname, family: isIP(hostname) }]
+      : await import('node:dns/promises').then((dns) => dns.lookup(hostname, { all: true }));
     if (!addresses.length) return { ok: false, reason: 'Destination host does not resolve.' };
     for (const { address } of addresses) {
       if (isPrivateIp(address)) {
         return { ok: false, reason: 'Destination resolves to a private or internal address.' };
       }
     }
+    return { ok: true, parsed, address: addresses[0].address, family: isIP(addresses[0].address) };
   } catch {
     return { ok: false, reason: 'Destination host does not resolve.' };
   }
-  return { ok: true };
 }
 
-/** Follows up to MAX_REDIRECTS hops, re-validating each destination. */
+export async function validateWebhookUrl(url: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const result = await resolveWebhookUrl(url);
+  return result.ok ? { ok: true } : result;
+}
+
+/** Native transport pins DNS to the checked IP, preserving TLS hostname checks.
+ * Never follow redirects with accounting payloads or signature headers. */
 export async function safeFetchWebhook(
   url: string,
-  init: RequestInit,
-  redirectsLeft = MAX_REDIRECTS
+  init: RequestInit
 ): Promise<Response> {
-  const check = await validateWebhookUrl(url);
+  const check = await resolveWebhookUrl(url);
   if (!check.ok) throw new Error(`webhook_ssrf: ${check.reason}`);
-  const res = await fetch(url, { ...init, redirect: 'manual' });
-  if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
-    if (redirectsLeft <= 0) throw new Error('webhook_ssrf: too many redirects');
-    const next = new URL(res.headers.get('location')!, url).toString();
-    return safeFetchWebhook(next, init, redirectsLeft - 1);
-  }
-  return res;
+  if (init.signal?.aborted) throw new Error('Webhook delivery aborted');
+  if (init.body != null && typeof init.body !== 'string') throw new Error('Webhook body must be text');
+  return new Promise((resolve, reject) => {
+    const request = check.parsed.protocol === 'https:' ? httpsRequest : httpRequest;
+    const req = request(check.parsed, {
+      method: init.method ?? 'POST',
+      headers: Object.fromEntries(new Headers(init.headers).entries()),
+      agent: false,
+      family: check.family,
+      lookup: (_hostname, _options, callback) => callback(null, check.address, check.family),
+      signal: init.signal ?? undefined,
+    }, (res) => {
+      // Only status is needed. Do not buffer an untrusted/unbounded response.
+      const status = res.statusCode ?? 502;
+      res.destroy();
+      resolve(new Response(null, { status }));
+    });
+    req.on('error', reject);
+    req.end(init.body ?? undefined);
+  });
 }
 
 /**
@@ -199,6 +231,13 @@ export async function deliverWebhook(deliveryId: string): Promise<WebhookDeliver
   });
   if (!delivery || delivery.status === 'success' || delivery.status === 'dead') {
     return delivery?.status ?? 'dead';
+  }
+  if (!delivery.endpoint.enabled) {
+    // Preserve history for explicit replay; disabling must stop queued retries.
+    await db.webhookDelivery.update({ where: { id: delivery.id }, data: {
+      status: 'dead', nextAttemptAt: null, lastError: 'Webhook endpoint disabled',
+    } });
+    return 'dead';
   }
 
   const attempt = delivery.attempts + 1;

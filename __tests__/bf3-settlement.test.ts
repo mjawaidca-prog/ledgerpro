@@ -130,6 +130,7 @@ describe('BF-3 settlement and notification wiring', () => {
     const outcome = await syncConnection('conn-1', 'webhook');
     expect(outcome.blockedUpdates).toBe(1);
     expect(mockTxUpdate).not.toHaveBeenCalled();
+    expect(mockTxCreate).not.toHaveBeenCalled();
     expect(mockNotificationCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ title: 'Bank feed: settlement blocked' }) })
     );
@@ -194,5 +195,30 @@ describe('BF-3 settlement and notification wiring', () => {
     const outcome = await syncConnection('conn-1', 'webhook');
     expect(outcome.removedMarked).toBe(1);
     expect(mockNotificationCreate).toHaveBeenCalled();
+    expect(mockLinkUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ connectionId: 'conn-1' }) }));
+  });
+
+  test('settlement cannot move a review row into a locked period or create a duplicate', async () => {
+    mockFeedAccountFindMany.mockResolvedValue([{ ...feedAccount, financialAccount: { lockedThrough: new Date('2026-09-15') } }]);
+    mockSyncPage.mockResolvedValue({ added: [settledItem], modified: [], removed: [], nextCursor: 'c-2', hasMore: false });
+    mockLinkFindUnique.mockResolvedValue({ transaction: { id: 'pending', status: 'toreview', date: new Date('2026-09-20') } });
+    const outcome = await syncConnection('conn-1', 'manual');
+    expect(outcome.blockedUpdates).toBe(1);
+    expect(mockTxUpdate).not.toHaveBeenCalled();
+    expect(mockTxCreate).not.toHaveBeenCalled();
+  });
+
+  test('modified rows cannot move into an already locked period', async () => {
+    mockFeedAccountFindMany.mockResolvedValue([{ ...feedAccount, financialAccount: { lockedThrough: new Date('2026-09-15') } }]);
+    mockSyncPage.mockResolvedValue({ added: [], modified: [settledItem], removed: [], nextCursor: 'c-2', hasMore: false });
+    mockLinkFindUnique.mockResolvedValue({ transaction: { id: 'modified', status: 'toreview', date: new Date('2026-09-20') } });
+    expect((await syncConnection('conn-1', 'manual')).blockedUpdates).toBe(1);
+    expect(mockTxUpdate).not.toHaveBeenCalled();
+  });
+
+  test('overlap lookup excludes earlier feed purchases and already-linked statement rows', async () => {
+    mockSyncPage.mockResolvedValue({ added: [{ ...settledItem, pendingTransactionId: null }], modified: [], removed: [], nextCursor: 'c-2', hasMore: false });
+    await syncConnection('conn-1', 'manual');
+    expect(mockTxFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ source: { not: 'feed' }, bankFeedTransaction: { is: null } }) }));
   });
 });

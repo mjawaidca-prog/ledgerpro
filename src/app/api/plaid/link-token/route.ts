@@ -23,11 +23,12 @@ export async function POST(req: NextRequest) {
     if (connectionId) {
       const connection = await db.bankConnection.findFirst({
         where: { id: connectionId, companyId: session.companyId! },
-        select: { id: true, accessTokenEncrypted: true },
+        select: { id: true, accessTokenEncrypted: true, status: true },
       });
       if (!connection) {
         return NextResponse.json({ error: 'Bank connection not found' }, { status: 404 });
       }
+      if (connection.status === 'revoked') return NextResponse.json({ error: 'Disconnect this revoked connection, then connect the bank again.' }, { status: 409 });
       const { linkToken, expiration } = await updateLinkToken({
         accessToken: decryptToken(connection.accessTokenEncrypted),
         userId: session.userId!,

@@ -16,13 +16,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   let outcome;
   try {
-    outcome = await withIdempotency(idem.context, async () => {
+    outcome = await withIdempotency(idem.context, async (tx) => {
       const result = await voidReviewedDocument({
         kind: 'invoice',
         id: params.id,
         companyId: context!.companyId,
         apiKeyId: context!.apiKeyId,
-      });
+      }, tx);
       if (!result.ok) {
         const err: any = new Error(result.message);
         err.__status = result.status;

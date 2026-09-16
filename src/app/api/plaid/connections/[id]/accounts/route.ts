@@ -15,7 +15,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const session = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'] });
     if (session.error) return session.error;
 
-    const connection = await db.bankConnection.findFirst({
+    return await db.$transaction(async (tx) => {
+    // Company lock serializes mappings across connections; the sync lock
+    // prevents cursor advancement while account selection changes.
+    const companyLock = `bfmap:${session.companyId}`;
+    const syncLock = `bfsync:${params.id}`;
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${companyLock}, 0))::text`;
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${syncLock}, 0))::text`;
+    const connection = await tx.bankConnection.findFirst({
       where: { id: params.id, companyId: session.companyId! },
       include: { accounts: true },
     });
@@ -31,6 +38,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const byProviderId = new Map(connection.accounts.map((a) => [a.providerAccountId, a]));
     const errors: Record<string, string> = {};
+    const selected = new Set<string>();
 
     for (const u of updates) {
       const key = u.providerAccountId;
@@ -47,8 +55,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         continue;
       }
       if (!isFeeding) continue; // stored unmapped, enabled later without reconnecting
+      if (selected.has(financialAccountId!)) {
+        errors[key] = 'Each bank account needs a different ledger account.';
+        continue;
+      }
+      selected.add(financialAccountId!);
+      if (connection.transactionsCursor && (existing.financialAccountId !== financialAccountId || !existing.isFeeding)) {
+        errors[key] = 'This connection has already synchronized. Contact support to add or change accounts without missing history.';
+        continue;
+      }
 
-      const gl = await db.financialAccount.findFirst({
+      const gl = await tx.financialAccount.findFirst({
         where: { id: financialAccountId!, companyId: session.companyId! },
         select: { id: true, currency: true, kind: true, name: true },
       });
@@ -69,8 +86,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         errors[key] = 'A bank account must map to an asset account, not a credit card.';
         continue;
       }
-      const alreadyFed = await db.bankFeedAccount.findFirst({
-        where: { financialAccountId: financialAccountId!, connection: { id: { not: params.id } }, isFeeding: true },
+      const alreadyFed = await tx.bankFeedAccount.findFirst({
+        where: { financialAccountId: financialAccountId!, NOT: { connectionId: params.id, providerAccountId: key }, isFeeding: true },
         select: { connection: { select: { institutionName: true } } },
       });
       if (alreadyFed) {
@@ -85,7 +102,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     for (const u of updates) {
       const isFeeding = Boolean(u.is_feeding);
       const financialAccountId = typeof u.financialAccountId === 'string' && u.financialAccountId ? u.financialAccountId : null;
-      await db.bankFeedAccount.update({
+      await tx.bankFeedAccount.update({
         where: { connectionId_providerAccountId: { connectionId: params.id, providerAccountId: u.providerAccountId } },
         data: {
           isFeeding,
@@ -99,6 +116,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     });
 
     return NextResponse.json({ data: { mapped: updates.length } });
+    }, { maxWait: 15000, timeout: 60000 });
   } catch (error) {
     console.error('PATCH /api/plaid/connections/[id]/accounts error:', error);
     return NextResponse.json({ error: 'Failed to save account mapping' }, { status: 500 });

@@ -266,13 +266,14 @@ export interface PaymentPostingOptions {
  * PAYMENT. Updates the document and the financial account in one transaction.
  * Overpayment posts the excess as a foreign-denominated customer credit on AR.
  */
-export async function postInvoicePayment(opts: PaymentPostingOptions) {
-  return db.$transaction(async (tx) => {
+export async function postInvoicePayment(opts: PaymentPostingOptions, outerTx?: Prisma.TransactionClient) {
+  const run = async (tx: Prisma.TransactionClient) => {
+    await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${opts.documentId} AND "companyId" = ${opts.companyId} FOR UPDATE`;
     const invoice = await tx.invoice.findUniqueOrThrow({
       where: { id: opts.documentId, companyId: opts.companyId },
       include: { company: { select: { currency: true } } },
     });
-    if (invoice.status === 'void') throw new Error('Cannot pay a voided invoice.');
+    if (invoice.status === 'void' || invoice.status === 'draft') throw new Error('Cannot pay a draft or voided invoice.');
     const isHomeCurrency = invoice.currency === invoice.company.currency;
     if (!isHomeCurrency && !invoice.fxRate) throw new Error('The invoice has no frozen FX rate to settle against.');
     // Home-currency documents intentionally store no FX block. A missing value
@@ -373,7 +374,8 @@ export async function postInvoicePayment(opts: PaymentPostingOptions) {
     }
 
     return entry;
-  });
+  };
+  return outerTx ? run(outerTx) : db.$transaction(run);
 }
 
 /**
@@ -483,13 +485,14 @@ export async function postBillToLedger(
  * frozen rate) / CR cash at the settlement rate / FX difference to the
  * realized FX account — the payable sign flips in computeSettlement.
  */
-export async function postBillPayment(opts: PaymentPostingOptions) {
-  return db.$transaction(async (tx) => {
+export async function postBillPayment(opts: PaymentPostingOptions, outerTx?: Prisma.TransactionClient) {
+  const run = async (tx: Prisma.TransactionClient) => {
+    await tx.$queryRaw`SELECT id FROM "Bill" WHERE id = ${opts.documentId} AND "companyId" = ${opts.companyId} FOR UPDATE`;
     const bill = await tx.bill.findUniqueOrThrow({
       where: { id: opts.documentId, companyId: opts.companyId },
       include: { company: { select: { currency: true } } },
     });
-    if (bill.status === 'void') throw new Error('Cannot pay a voided bill.');
+    if (bill.status === 'void' || bill.status === 'draft') throw new Error('Cannot pay a draft or voided bill.');
     const isHomeCurrency = bill.currency === bill.company.currency;
     if (!isHomeCurrency && !bill.fxRate) throw new Error('The bill has no frozen FX rate to settle against.');
     const documentRate = isHomeCurrency ? 1 : Number(bill.fxRate);
@@ -584,7 +587,8 @@ export async function postBillPayment(opts: PaymentPostingOptions) {
     }
 
     return entry;
-  });
+  };
+  return outerTx ? run(outerTx) : db.$transaction(run);
 }
 
 
@@ -602,8 +606,13 @@ export interface PaymentReversalOptions {
  * subledger, and financial-account balance synchronized. The original entry
  * remains visible and is linked to an equal-and-opposite reversal.
  */
-export async function reverseDocumentPayment(opts: PaymentReversalOptions) {
-  return db.$transaction(async (tx) => {
+export async function reverseDocumentPayment(opts: PaymentReversalOptions, outerTx?: Prisma.TransactionClient) {
+  const run = async (tx: Prisma.TransactionClient) => {
+    if (opts.documentType === 'invoice') {
+      await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${opts.documentId} AND "companyId" = ${opts.companyId} FOR UPDATE`;
+    } else {
+      await tx.$queryRaw`SELECT id FROM "Bill" WHERE id = ${opts.documentId} AND "companyId" = ${opts.companyId} FOR UPDATE`;
+    }
     const payment = await tx.journalEntry.findUnique({
       where: { id: opts.paymentEntryId, companyId: opts.companyId },
       include: { lines: true, paymentAccount: true },
@@ -674,7 +683,8 @@ export async function reverseDocumentPayment(opts: PaymentReversalOptions) {
     });
 
     return { original: payment, reversal };
-  });
+  };
+  return outerTx ? run(outerTx) : db.$transaction(run);
 }
 
 /**
@@ -809,6 +819,7 @@ export async function voidJournalEntry(
   outerTx?: Prisma.TransactionClient // pass in an existing transaction (e.g. void-then-repost) for atomicity
 ) {
   const run = async (tx: Prisma.TransactionClient) => {
+    await tx.$queryRaw`SELECT id FROM "JournalEntry" WHERE id = ${entryId} AND "companyId" = ${companyId} FOR UPDATE`;
     const entry = await tx.journalEntry.findUnique({
       where: { id: entryId, companyId },
       include: { lines: true },

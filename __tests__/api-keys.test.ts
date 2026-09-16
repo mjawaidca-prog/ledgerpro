@@ -220,6 +220,7 @@ describe('authenticateApiRequest', () => {
     expect(res.error?.status).toBe(429);
     const body = await res.error!.json();
     expect(body.error.code).toBe('rate_limited');
+    expect(Number(res.error!.headers.get('Retry-After'))).toBeGreaterThan(0);
     expect(body.error.retryAfterSeconds).toBeGreaterThan(0);
   });
 
@@ -230,6 +231,15 @@ describe('authenticateApiRequest', () => {
     );
     expect(res.error).toBeNull();
     expect(res.context).toMatchObject({ companyId: 'company-a', permissions: ['read'] });
+  });
+
+  test('counter outages block access rather than bypassing usage controls', async () => {
+    mockUpsert.mockRejectedValue(new Error('database unavailable'));
+    const res = await authenticateApiRequest(request({ authorization: `Bearer ${validToken}` }));
+    expect(res.context).toBeNull();
+    expect(res.error?.status).toBe(503);
+    expect(await res.error!.json()).toMatchObject({ error: { code: 'api_unavailable' } });
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   test('successful requests record last-use and request count', async () => {

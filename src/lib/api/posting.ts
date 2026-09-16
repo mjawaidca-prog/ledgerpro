@@ -29,14 +29,17 @@ export type PostResult =
  * entry), computes the document totals from the immutable snapshots, and
  * flips the status — all in one transaction.
  */
-export async function postReviewedDocument(input: PostDocumentInput): Promise<PostResult> {
+export async function postReviewedDocument(input: PostDocumentInput, outerTx?: Prisma.TransactionClient): Promise<PostResult> {
+  if (!outerTx) return db.$transaction(tx => postReviewedDocument(input, tx));
+  await lockDocument(outerTx, input);
+  const client = outerTx ?? db;
   const doc =
     input.kind === 'invoice'
-      ? await db.invoice.findFirst({
+      ? await client.invoice.findFirst({
           where: { id: input.id, companyId: input.companyId },
           include: { lineItems: { orderBy: { sortOrder: 'asc' } } },
         })
-      : await db.bill.findFirst({
+      : await client.bill.findFirst({
           where: { id: input.id, companyId: input.companyId },
           include: { lineItems: { orderBy: { sortOrder: 'asc' } } },
         });
@@ -69,7 +72,7 @@ export async function postReviewedDocument(input: PostDocumentInput): Promise<Po
       };
     });
 
-    const result = await db.$transaction(async (tx) => {
+    const result = await inTransaction(outerTx, async (tx) => {
       const posting = await postTaxDocument(
         {
           companyId: input.companyId,
@@ -147,8 +150,11 @@ export type VoidResult =
  * are voided only when no payments or bank matches remain, through a tax
  * posting reversal — nothing is ever hard-deleted from the books.
  */
-export async function voidReviewedDocument(input: VoidDocumentInput): Promise<VoidResult> {
-  const existingTaxPosting = await db.taxPosting.findFirst({
+export async function voidReviewedDocument(input: VoidDocumentInput, outerTx?: Prisma.TransactionClient): Promise<VoidResult> {
+  if (!outerTx) return db.$transaction(tx => voidReviewedDocument(input, tx));
+  await lockDocument(outerTx, input);
+  const client = outerTx ?? db;
+  const existingTaxPosting = await client.taxPosting.findFirst({
     where: {
       companyId: input.companyId,
       journalEntry: { sourceId: input.id, sourceType: input.kind },
@@ -159,8 +165,8 @@ export async function voidReviewedDocument(input: VoidDocumentInput): Promise<Vo
 
   const doc =
     input.kind === 'invoice'
-      ? await db.invoice.findFirst({ where: { id: input.id, companyId: input.companyId }, select: { id: true, status: true, paidAmount: true } })
-      : await db.bill.findFirst({ where: { id: input.id, companyId: input.companyId }, select: { id: true, status: true, paidAmount: true } });
+      ? await client.invoice.findFirst({ where: { id: input.id, companyId: input.companyId }, select: { id: true, status: true, paidAmount: true } })
+      : await client.bill.findFirst({ where: { id: input.id, companyId: input.companyId }, select: { id: true, status: true, paidAmount: true } });
 
   if (!doc) return { ok: false, status: 404, code: 'not_found', message: `${input.kind === 'invoice' ? 'Invoice' : 'Bill'} not found.` };
   if (doc.status === 'void') return { ok: true, id: doc.id, status: 'void', mode: 'voided' };
@@ -170,7 +176,7 @@ export async function voidReviewedDocument(input: VoidDocumentInput): Promise<Vo
     if (doc.status !== 'draft') {
       return { ok: false, status: 409, code: 'legacy_document', message: 'This document predates reviewed tax and cannot be voided through the API.' };
     }
-    await db.$transaction(async (tx) => {
+    await inTransaction(outerTx, async (tx) => {
       if (input.kind === 'invoice') {
         await tx.invoiceLineItem.deleteMany({ where: { invoiceId: input.id } });
         await tx.invoice.delete({ where: { id: input.id } });
@@ -183,7 +189,7 @@ export async function voidReviewedDocument(input: VoidDocumentInput): Promise<Vo
   }
 
   try {
-    await db.$transaction(async (tx) => {
+    await inTransaction(outerTx, async (tx) => {
       // Serialize concurrent void/pay attempts on this document (both table
       // names come from a closed enum, never from request input).
       if (input.kind === 'invoice') {
@@ -236,5 +242,17 @@ export async function voidReviewedDocument(input: VoidDocumentInput): Promise<Vo
       return { ok: false, status: err.status, code: err.code, message: err.message };
     }
     throw err;
+  }
+}
+
+async function inTransaction<T>(outerTx: Prisma.TransactionClient | undefined, run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return outerTx ? run(outerTx) : db.$transaction(run);
+}
+
+async function lockDocument(tx: Prisma.TransactionClient, input: { kind: 'invoice' | 'bill'; id: string; companyId: string }) {
+  if (input.kind === 'invoice') {
+    await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${input.id} AND "companyId" = ${input.companyId} FOR UPDATE`;
+  } else {
+    await tx.$queryRaw`SELECT id FROM "Bill" WHERE id = ${input.id} AND "companyId" = ${input.companyId} FOR UPDATE`;
   }
 }

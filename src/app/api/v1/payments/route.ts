@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
 
   let outcome;
   try {
-    outcome = await withIdempotency(idem.context, async () => {
+    outcome = await withIdempotency(idem.context, async (tx) => {
       const baseOpts = {
         documentId,
         counterpartyName,
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
       // The posting services are internally atomic (subledger + balance + FX
       // sync in one db.$transaction) and return the posted journal entry.
       const entry =
-        documentType === 'invoice' ? await postInvoicePayment(baseOpts) : await postBillPayment(baseOpts);
+        documentType === 'invoice' ? await postInvoicePayment(baseOpts, tx) : await postBillPayment(baseOpts, tx);
 
       return {
         resourceType: 'payment',

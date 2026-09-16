@@ -25,17 +25,31 @@ Corrections prepared on `codex/bf5-pilot-review`:
   retaining the original cursor for retry rather than committing partial pages.
 - Use the exchange response's connection ID for account mapping; report first
   sync failures instead of showing success unconditionally.
+- Resume OAuth redirects using a short-lived, user/company-bound Link session;
+  reconnect success requires a successful authenticated sync.
+- Serialize disconnect and mapping with sync; prevent mapping two bank accounts
+  to one ledger account and reject post-sync mapping changes requiring backfill.
+- Preserve the initial cursor when webhooks arrive before mapping is saved.
+- Prevent corrections and settlements from moving rows into locked periods;
+  blocked settlements cannot create duplicate review rows.
+- Exclude feed rows and already-linked imports from fuzzy overlap matching.
+- Send correction notifications only after the batch commits.
+
+Validation on this review branch: TypeScript passed; production build completed;
+the full unit suite passed (391 tests, 9 skipped at that run). Added regressions
+cover early unmapped webhooks, page-budget failure, locked-period settlements and
+corrections, provider-scoped removal and overlap restrictions. These are mocked
+unit checks, not evidence of real database rollback or bank consent completion.
 
 Additional release checks still required:
-- Rehearse the selected institution's Link flow. Redirect return/resume is
-  not implemented; do not include mobile webview/OAuth redirect flows in this
-  pilot until implemented and tested. Plaid's current OAuth guide says Canadian
-  institutions do not currently use OAuth; confirm the selected institution.
+- Rehearse the selected institution's Link and OAuth return/resume flow in a
+  browser. Implementation is prepared; bank-hosted verification is still required.
 - Verify failure-run persistence with an actual PostgreSQL rollback.
 - Rehearse pagination retries; oversized updates currently fail closed after
   eight pages or the time budget. Add a durable full-update staging mechanism
   before admitting accounts whose initial history exceeds those limits.
-- Audit remaining provider error logging and disconnect/sync concurrency.
+- Verify disconnect/sync concurrency against PostgreSQL (unit mocks cannot
+  prove advisory lock ordering). Provider error logs in disconnect are sanitized.
 - Confirm production credentials, KEK, provider approval and pilot company.
 - Agree pilot charges explicitly. `billableOwnerId` is attribution, not an
   implemented charge/collection workflow.

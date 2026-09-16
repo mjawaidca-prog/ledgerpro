@@ -110,6 +110,20 @@ describe('BF-2 sync', () => {
     ...overrides,
   });
 
+  test('early webhook before mapping preserves initial cursor', async () => {
+    mockFeedAccountFindMany.mockResolvedValue([]);
+    expect((await syncConnection('conn-1', 'webhook')).skipped).toBe(true);
+    expect(mockSyncPage).not.toHaveBeenCalled();
+    expect(mockConnectionUpdate).not.toHaveBeenCalled();
+  });
+
+  test('pagination budget fails the full batch and records failure', async () => {
+    mockSyncPage.mockResolvedValue(page({ hasMore: true }));
+    await expect(syncConnection('conn-1', 'manual')).rejects.toThrow('page budget');
+    expect(mockSyncPage).toHaveBeenCalledTimes(8);
+    expect(mockSyncRunCreate).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'failed', addedCount: 0 }) }));
+  });
+
   test('added rows become review-queue transactions with the shared dedupe key — and no journal entries', async () => {
     mockSyncPage.mockResolvedValue(
       page({

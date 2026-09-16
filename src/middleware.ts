@@ -22,6 +22,7 @@ function isPublicPath(pathname: string) {
     pathname.startsWith('/api/plaid/webhook') ||
     // Cron performs its own CRON_SECRET check; it has no dashboard cookie.
     pathname === '/api/plaid/sync-cron' ||
+    pathname === '/api/webhooks/deliver-cron' ||
     PUBLIC_MARKETING_PATHS.includes(pathname)
   );
 }

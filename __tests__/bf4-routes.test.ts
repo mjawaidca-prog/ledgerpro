@@ -14,6 +14,8 @@ const mockGetAccounts = jest.fn();
 const mockRemoveItem = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
+    $transaction: async function (fn: any) { return fn(this); },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     bankConnection: {
       findFirst: (...a: unknown[]) => mockConnectionFindFirst(...a),
       update: (...a: unknown[]) => mockConnectionUpdate(...a),

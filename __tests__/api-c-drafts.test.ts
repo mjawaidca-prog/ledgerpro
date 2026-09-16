@@ -15,7 +15,7 @@ jest.mock('@/lib/db', () => ({
     invoice: { create: (...a: unknown[]) => mockInvoiceCreate(...a) },
     company: { findUniqueOrThrow: (...a: unknown[]) => mockCompanyFind(...a) },
     apiIdempotencyRecord: { findUnique: (...a: unknown[]) => mockIdemFindUnique(...a), create: (...a: unknown[]) => mockIdemCreate(...a) },
-    $transaction: (fn: unknown) => fn({ contact: { create: mockContactCreate }, invoice: { create: mockInvoiceCreate }, apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: mockIdemCreate } }),
+    $transaction: (fn: unknown) => fn({ $executeRaw: jest.fn(), contact: { create: mockContactCreate }, invoice: { create: mockInvoiceCreate }, apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: mockIdemCreate } }),
   },
 }));
 
@@ -81,6 +81,7 @@ describe('API-C draft writes — contacts', () => {
 
   test('the same Idempotency-Key replays the stored response without a second create', async () => {
     mockIdemFindUnique.mockResolvedValue({
+      companyId: 'co-1', method: 'POST', path: '/api/v1/contacts',
       response: { data: { id: 'c-new', name: 'Cust', type: 'customer', currency: 'CAD' } },
       statusCode: 201,
     });
