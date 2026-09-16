@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { exchangePublicToken, getItem, getItemAccounts } from '@/lib/bank-feed/plaid-client';
 import { encryptToken } from '@/lib/bank-feed/crypto';
+import { bankFeedPilotAllowed } from '@/lib/bank-feed/pilot';
 export const dynamic = 'force-dynamic';
 
 // POST /api/plaid/exchange — completes the Plaid Link flow: the public token
@@ -13,6 +14,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await requireCompany(req, { roles: ['owner'] });
     if (session.error) return session.error;
+    if (!bankFeedPilotAllowed(session.companyId!)) return NextResponse.json({ error: 'Bank feeds are restricted to the approved production pilot.' }, { status: 403 });
 
     const body = await req.json().catch(() => null);
     const publicToken = typeof body?.publicToken === 'string' ? body.publicToken.trim() : '';
@@ -105,8 +107,8 @@ export async function POST(req: NextRequest) {
       throw inner;
     }
   } catch (error: any) {
-    console.error('POST /api/plaid/exchange error:', error);
-    const message = error?.response?.data?.error_message || error?.message || 'Failed to connect the bank.';
+    console.error('POST /api/plaid/exchange failed');
+    const message = 'Failed to connect the bank. Please retry or contact support.';
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

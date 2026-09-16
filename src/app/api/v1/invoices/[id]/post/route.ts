@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   let outcome;
   try {
-    outcome = await withIdempotency(idem.context, async () => {
+    outcome = await withIdempotency(idem.context, async (tx) => {
       const result = await postReviewedDocument({
         kind: 'invoice',
         id: params.id,
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         apiKeyId: context!.apiKeyId,
         requestKey: parsed.data.requestKey,
         taxDecisions: parsed.data.lines,
-      });
+      }, tx);
       if (!result.ok) {
         // Business failures are NOT recorded as idempotent outcomes — a
         // corrected retry with the same key must be able to succeed.

@@ -59,15 +59,13 @@ describe('BF-3 amount normalization (no sign flips)', () => {
     expect(normalizeFeedAmount(-12.545)).toBe(-12.54);
     expect(normalizeFeedAmount(89.4)).toBe(89.4);
     expect(normalizeFeedAmount(-0)).toBe(-0);
-    expect(normalizeFeedAmount(Number.NaN)).toBe(0);
-    expect(normalizeFeedAmount(Infinity)).toBe(0);
+    expect(() => normalizeFeedAmount(Number.NaN)).toThrow('Invalid feed amount');
+    expect(() => normalizeFeedAmount(Infinity)).toThrow('Invalid feed amount');
   });
 
-  test('credit-card charges keep Plaid signs (no signMultiplier regression)', () => {
-    // Plaid sends credit-card charges positive and payments negative; the
-    // import path removed sign flipping in BUG-1 and feeds must match.
+  test('normalization preserves already-adapted signs', () => {
+    // The provider adapter converts Plaid signs before normalization.
     expect(normalizeFeedAmount(45.67)).toBe(45.67);
     expect(normalizeFeedAmount(-45.67)).toBe(-45.67);
   });
 });
-

@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   let outcome;
   try {
-    outcome = await withIdempotency(idem.context, async () => {
+    outcome = await withIdempotency(idem.context, async (tx) => {
       const result = await postReviewedDocument({
         kind: 'bill',
         id: params.id,
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         apiKeyId: context!.apiKeyId,
         requestKey: parsed.data.requestKey,
         taxDecisions: parsed.data.lines,
-      });
+      }, tx);
       if (!result.ok) {
         const err: any = new Error(result.message);
         err.__status = result.status;

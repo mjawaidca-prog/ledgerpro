@@ -5,6 +5,8 @@ const mockSnapshotsFindMany = jest.fn();
 const mockInvoiceUpdate = jest.fn();
 const mockJournalFindFirst = jest.fn();
 const mockPeriodCloseFindFirst = jest.fn();
+const mockIdemFindUnique = jest.fn().mockResolvedValue(null);
+const mockTransaction = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
     invoice: {
@@ -14,14 +16,18 @@ jest.mock('@/lib/db', () => ({
     documentLineTaxSnapshot: { findMany: (...a: unknown[]) => mockSnapshotsFindMany(...a) },
     journalEntry: { findFirst: (...a: unknown[]) => mockJournalFindFirst(...a) },
     periodClose: { findFirst: (...a: unknown[]) => mockPeriodCloseFindFirst(...a) },
-    apiIdempotencyRecord: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
-    $transaction: (fn: unknown) =>
-      fn({
+    apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: jest.fn() },
+    $transaction: (fn: any) => {
+      mockTransaction();
+      return fn({
+        $executeRaw: jest.fn(),
+        $queryRaw: jest.fn(),
         invoice: { findFirst: mockInvoiceFindFirst, update: mockInvoiceUpdate },
         documentLineTaxSnapshot: { findMany: mockSnapshotsFindMany },
         journalEntry: { findFirst: mockJournalFindFirst },
-        apiIdempotencyRecord: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
-      }),
+        apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: jest.fn() },
+      });
+    },
   },
 }));
 
@@ -95,6 +101,8 @@ describe('API-C posting — invoice post', () => {
   test('posts through the tax engine with the API key as actor and null user', async () => {
     const res = await call(decision());
     expect(res.status).toBe(200);
+    // The journal and its stored replay result must share one transaction.
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
 
     expect(mockPostTaxDocument).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -151,6 +159,7 @@ describe('API-C posting — invoice post', () => {
   test('a replayed Idempotency-Key returns the stored response without re-posting', async () => {
     const { db } = jest.requireMock('@/lib/db');
     (db.apiIdempotencyRecord.findUnique as jest.Mock).mockResolvedValueOnce({
+      companyId: 'co-1', method: 'POST', path: '/api/v1/invoices/INV-1/post',
       response: { data: { id: 'INV-1', status: 'sent' } },
       statusCode: 200,
     });

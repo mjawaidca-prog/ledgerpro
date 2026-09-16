@@ -196,19 +196,18 @@ async function enforceRateLimit(apiKeyId: string, scope: ApiRateScope): Promise<
         create: { apiKeyId, scope: w.scope, windowStart: w.windowStart, count: 1 },
         update: { count: { increment: 1 } },
       });
-    } catch (e) {
-      console.error('[api-auth] Rate counter failed:', e);
-      // Fail open on counter errors only in the sense that a request may
-      // pass — the alternative is denying all API traffic when the counter
-      // has a transient problem. The day window still guards runaway usage.
-      continue;
+    } catch {
+      console.error('[api-auth] Rate counter unavailable');
+      return errorResponse(503, 'api_unavailable', 'API usage controls are temporarily unavailable. Please retry.');
     }
     if (counter.count > w.limit) {
       const windowMs = w.scope === 'minute' ? RATE_WINDOW_MINUTE_MS : RATE_WINDOW_DAY_MS;
       const retryAfterSeconds = Math.max(1, Math.ceil((w.windowStart.getTime() + windowMs - now) / 1000));
-      return errorResponse(429, 'rate_limited', `Rate limit exceeded (${w.limit} requests per ${w.scope}).`, {
+      const response = errorResponse(429, 'rate_limited', `Rate limit exceeded (${w.limit} requests per ${w.scope}).`, {
         retryAfterSeconds,
       });
+      response.headers.set('Retry-After', String(retryAfterSeconds));
+      return response;
     }
   }
   return null;

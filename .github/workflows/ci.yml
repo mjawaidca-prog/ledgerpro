@@ -57,4 +57,12 @@ jobs:
         run: npx jest __tests__/tax-database.test.ts --runInBand --verbose
         env:
           CI_TAX_DATABASE: '1'
+      - name: Verify bank feed rollback and concurrent sync against Postgres
+        run: npx jest __tests__/bf5-database.test.ts --runInBand --verbose
+        env:
+          CI_BF_DATABASE: '1'
+      - name: Verify API atomicity against Postgres
+        run: npx jest __tests__/api-database.test.ts --runInBand --verbose
+        env:
+          CI_API_DATABASE: '1'
       - run: npm run build

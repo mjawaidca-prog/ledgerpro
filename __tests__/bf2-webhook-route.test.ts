@@ -45,10 +45,10 @@ describe('BF-2 webhook route', () => {
     expect(mockSync).not.toHaveBeenCalled();
   });
 
-  test('sync failures are swallowed so Plaid retries cleanly', async () => {
+  test('sync failures return 503 so Plaid can retry', async () => {
     mockVerify.mockResolvedValue({ connectionId: 'conn-1' });
     mockSync.mockRejectedValue(new Error('boom'));
     const res = await webhookRoute(req({ item_id: 'item-1', webhook_type: 'TRANSACTIONS', webhook_code: 'SYNC_UPDATES_AVAILABLE' }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
   });
 });

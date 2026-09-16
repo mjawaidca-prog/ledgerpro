@@ -6,6 +6,8 @@ import { Configuration, PlaidApi, PlaidEnvironments, CountryCode, Products } fro
 
 function configFor() {
   const env = process.env.PLAID_ENV ?? 'sandbox';
+  if (!['sandbox', 'production'].includes(env)) throw new Error('Unsupported Plaid environment.');
+  if (process.env.VERCEL_ENV === 'production' && env !== 'production') throw new Error('Production must use Plaid production.');
   if (env === 'production' && !process.env.PLAID_SECRET_PRODUCTION) {
     throw new Error('PLAID_SECRET_PRODUCTION is not configured.');
   }
@@ -13,18 +15,30 @@ function configFor() {
   if (!process.env.PLAID_CLIENT_ID || !secret) {
     throw new Error('Plaid credentials are not configured in this environment.');
   }
-  const baseOptions =
-    env === 'sandbox' ? { sandbox: true } : env === 'development' ? { development: true } : { production: true };
   return new PlaidApi(
     new Configuration({
       basePath: PlaidEnvironments[env as 'sandbox' | 'development' | 'production'],
-      baseOptions: { headers: { 'PLAID-CLIENT-ID': process.env.PLAID_CLIENT_ID, 'PLAID-SECRET': secret, ...baseOptions } },
+      baseOptions: { timeout: 15000, headers: { 'PLAID-CLIENT-ID': process.env.PLAID_CLIENT_ID, 'PLAID-SECRET': secret } },
     })
   );
 }
 
 function client(): PlaidApi {
   return configFor();
+}
+
+function linkCallbacks() {
+  const redirect = process.env.PLAID_REDIRECT_URI;
+  const webhook = process.env.PLAID_WEBHOOK_URL;
+  if (process.env.PLAID_ENV === 'production' && (!redirect || !webhook)) throw new Error('Plaid callback URLs are not configured.');
+  for (const value of [redirect, webhook]) if (value && new URL(value).protocol !== 'https:') throw new Error('Plaid callbacks require HTTPS.');
+  return { ...(redirect ? { redirect_uri: redirect } : {}), ...(webhook ? { webhook } : {}) };
+}
+
+/** Plaid reports outflows positive; LedgerPro review rows use inflows positive. */
+export function plaidAmountToLedger(amount: number): number {
+  if (!Number.isFinite(amount)) throw new Error('Invalid provider transaction amount.');
+  return amount === 0 ? 0 : -amount;
 }
 
 export interface LinkTokenResult {
@@ -40,6 +54,7 @@ export async function createLinkToken(opts: { userId: string; companyName: strin
     language: 'en',
     country_codes: [CountryCode.Ca],
     products: [Products.Transactions],
+    ...linkCallbacks(),
   });
   if (!res.data.link_token) {
     throw new Error('Plaid returned no link token.');
@@ -61,6 +76,7 @@ export async function updateLinkToken(opts: { accessToken: string; userId: strin
     language: 'en',
     country_codes: [CountryCode.Ca],
     access_token: opts.accessToken,
+    ...linkCallbacks(),
   });
   if (!res.data.link_token) {
     throw new Error('Plaid returned no link token.');
@@ -166,7 +182,7 @@ export async function syncTransactionsPage(opts: {
     pendingTransactionId: t.pending_transaction_id ?? null,
     date: t.date ?? t.authorized_date ?? new Date().toISOString().slice(0, 10),
     description: t.name ?? t.original_description ?? 'Transaction',
-    amount: t.amount ?? 0,
+    amount: plaidAmountToLedger(t.amount),
     currency: t.iso_currency_code ?? 'CAD',
   });
   return {
@@ -180,8 +196,7 @@ export async function syncTransactionsPage(opts: {
 
 /** Fetches the JWK used to verify this item's webhook signatures. */
 export async function getWebhookVerificationKey(accessToken: string, keyId: string): Promise<object> {
-  // The SDK's request type omits access_token, but the API accepts it (and
-  // prefers it over client_id+secret); pass it through explicitly.
-  const res = await client().webhookVerificationKeyGet({ access_token: accessToken, key_id: keyId } as any);
+  // Verification keys are fetched with client credentials, not an item token.
+  const res = await client().webhookVerificationKeyGet({ key_id: keyId });
   return res.data.key as unknown as object;
 }

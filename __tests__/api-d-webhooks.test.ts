@@ -1,4 +1,19 @@
 import { createHmac } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+
+const mockFetch = jest.fn();
+const mockPinnedRequest = jest.fn((url, options, callback) => {
+  const req = new EventEmitter() as EventEmitter & { end: (body: unknown) => void };
+  req.end = (body) => {
+    Promise.resolve().then(() => mockFetch(url.toString(), { ...options, body })).then(
+      (response) => callback({ statusCode: response.status, destroy: jest.fn() }),
+      (error) => req.emit('error', error),
+    );
+  };
+  return req;
+});
+jest.mock('node:https', () => ({ request: (...args: unknown[]) => (mockPinnedRequest as any)(...args) }));
+jest.mock('node:http', () => ({ request: (...args: unknown[]) => (mockPinnedRequest as any)(...args) }));
 
 jest.mock('node:dns/promises', () => ({
   lookup: async (hostname: string) => {
@@ -36,6 +51,7 @@ import {
   deliverWebhook,
   emitWebhookEvent,
   generateWebhookSecret,
+  safeFetchWebhook,
 } from '@/lib/webhooks';
 
 describe('webhook signing', () => {
@@ -77,6 +93,9 @@ describe('SSRF protection', () => {
     expect(isPrivateIp('::1')).toBe(true);
     expect(isPrivateIp('fc00::1')).toBe(true);
     expect(isPrivateIp('fe80::1')).toBe(true);
+    for (const address of ['::', '::ffff:127.0.0.1', '::ffff:7f00:1', '64:ff9b::a00:1', 'ff02::1', '2002:7f00:1::', '2001:db8::1', '198.18.0.1', '224.0.0.1', '255.255.255.255', 'not-an-ip']) {
+      expect(isPrivateIp(address)).toBe(true);
+    }
   });
 
   test('public addresses pass', () => {
@@ -92,10 +111,31 @@ describe('SSRF protection', () => {
     expect((await validateWebhookUrl('https://linklocal.test/x')).ok).toBe(false);
     expect((await validateWebhookUrl('not a url')).ok).toBe(false);
     expect((await validateWebhookUrl('https://unresolvable.test/x')).ok).toBe(false);
+    expect((await validateWebhookUrl('http://2130706433/x')).ok).toBe(false);
+    expect((await validateWebhookUrl('http://[::ffff:127.0.0.1]/x')).ok).toBe(false);
   });
 
   test('validateWebhookUrl accepts public destinations', async () => {
     expect(await validateWebhookUrl('https://public.test/x')).toEqual({ ok: true });
+  });
+
+  test('transport lookup is pinned to the approved address and disables socket reuse', async () => {
+    mockFetch.mockResolvedValue(new Response(null, { status: 204 }));
+    await safeFetchWebhook('https://public.test/x', { method: 'POST', body: '{}' });
+    const options = mockPinnedRequest.mock.calls.at(-1)![1];
+    const callback = jest.fn();
+    options.lookup('public.test', {}, callback);
+    expect(callback).toHaveBeenCalledWith(null, '8.8.8.8', 4);
+    expect(options.agent).toBe(false);
+    expect(options.family).toBe(4);
+  });
+
+  test('redirects do not resend signed accounting payloads to another destination', async () => {
+    mockPinnedRequest.mockClear();
+    mockFetch.mockResolvedValue(new Response(null, { status: 302, headers: { location: 'http://private.test/' } }));
+    const res = await safeFetchWebhook('https://public.test/x', { method: 'POST', body: '{}' });
+    expect(res.status).toBe(302);
+    expect(mockPinnedRequest).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -111,11 +151,10 @@ describe('delivery processing', () => {
     deliveredAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
-    endpoint: { url: 'https://public.test/x', secret: 'whsec_test' },
+    endpoint: { url: 'https://public.test/x', secret: 'whsec_test', enabled: true },
   };
 
   const realFetch = global.fetch;
-  const mockFetch = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -161,7 +200,7 @@ describe('delivery processing', () => {
   });
 
   test('an SSRF-blocked destination fails without any outbound fetch', async () => {
-    mockDeliveryFindUnique.mockResolvedValue({ ...delivery, endpoint: { url: 'https://private.test/x', secret: 'whsec_test' } });
+    mockDeliveryFindUnique.mockResolvedValue({ ...delivery, endpoint: { url: 'https://private.test/x', secret: 'whsec_test', enabled: true } });
     expect(await deliverWebhook('d-1')).toBe('failed');
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockDeliveryUpdate).toHaveBeenCalledWith(
@@ -174,6 +213,15 @@ describe('delivery processing', () => {
     expect(await deliverWebhook('d-1')).toBe('success');
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockDeliveryUpdate).not.toHaveBeenCalled();
+  });
+
+  test('disabled endpoints stop already queued delivery without sending or increasing attempts', async () => {
+    mockDeliveryFindUnique.mockResolvedValue({ ...delivery, endpoint: { ...delivery.endpoint, enabled: false } });
+    expect(await deliverWebhook('d-1')).toBe('dead');
+    expect(mockPinnedRequest).not.toHaveBeenCalled();
+    expect(mockDeliveryUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: { status: 'dead', nextAttemptAt: null, lastError: 'Webhook endpoint disabled' },
+    }));
   });
 });
 
@@ -214,16 +262,17 @@ describe('event emission', () => {
     mockDeliveryFindUnique.mockResolvedValue({
       id: 'due-1', eventType: 'bill.updated', eventId: 'evt-old', payload: {}, attempts: 0, status: 'pending',
       lastError: null, deliveredAt: null, createdAt: new Date(), updatedAt: new Date(),
-      endpoint: { url: 'https://public.test/x', secret: 'whsec_test' },
+      endpoint: { url: 'https://public.test/x', secret: 'whsec_test', enabled: true },
     });
     global.fetch = jest.fn().mockResolvedValue(new Response('ok', { status: 200 })) as any;
+    mockFetch.mockResolvedValue(new Response('ok', { status: 200 }));
 
     await emitWebhookEvent({ companyId: 'co-1', eventType: 'invoice.created', payload: { id: 'INV-1' } });
     // give the fire-and-forget sweep a tick
     await new Promise((r) => setTimeout(r, 20));
 
     expect(mockDeliveryFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ endpoint: { companyId: 'co-1' } }) })
+      expect.objectContaining({ where: expect.objectContaining({ endpoint: { companyId: 'co-1', enabled: true } }) })
     );
     expect(mockDeliveryUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'success' }) })

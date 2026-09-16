@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiRequest } from '@/lib/api/auth';
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { voidJournalEntry } from '@/lib/journal';
-import { auditLog } from '@/lib/api-helpers';
+import { auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 export const dynamic = 'force-dynamic';
 
 // POST /api/v1/journal-entries/[id]/void — void a posted journal entry with
@@ -16,8 +16,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   let outcome;
   try {
-    outcome = await withIdempotency(idem.context, async () => {
-      const result = await voidJournalEntry(params.id, context!.companyId, undefined);
+    outcome = await withIdempotency(idem.context, async (tx) => {
+      const entry = await tx.journalEntry.findFirst({ where: { id: params.id, companyId: context!.companyId } });
+      if (!entry) throw new Error('Journal entry not found');
+      if (entry.sourceType !== 'manual' || entry.reversalOfId) {
+        return { resourceType: 'journal_void', resourceId: params.id, statusCode: 409,
+          body: { error: { code: 'source_workflow_required', message: 'Only original manual journals can be voided here. Use the source document or payment reversal workflow.' } } };
+      }
+      const guard = await closedPeriodGuard(context!.companyId, new Date());
+      if (guard) return { resourceType: 'journal_void', resourceId: params.id, statusCode: guard.status, body: await guard.json() };
+      const result = await voidJournalEntry(params.id, context!.companyId, undefined, new Date(), tx);
       return {
         resourceType: 'journal_void',
         resourceId: params.id,

@@ -1,7 +1,7 @@
 // Public API (v1) write idempotency. Every POST endpoint requires an
 // Idempotency-Key header. The record and the mutation commit in the SAME
-// transaction: a retry either replays the stored response or loses the
-// unique-constraint race and re-reads the winner's response. No duplicate
+// transaction: a retry waits for the transaction-scoped lock and replays
+// the winner's response. No duplicate
 // invoice, payment or journal entry can be created by a repeated request.
 
 import { NextResponse } from 'next/server';
@@ -74,19 +74,18 @@ export async function withIdempotency(
     body: unknown;
   }>
 ): Promise<IdempotencyOutcome> {
-  const existing = await db.apiIdempotencyRecord.findUnique({
-    where: { apiKeyId_requestKey: { apiKeyId: ctx.apiKeyId, requestKey: ctx.requestKey } },
-  });
-  if (existing) {
-    return { body: existing.response, statusCode: existing.statusCode, replayed: true };
-  }
-
   return db.$transaction(async (tx) => {
-    // Re-check inside the transaction; the unique index breaks the race.
+    // Serialize retries BEFORE any accounting work. Transaction-scoped locks
+    // release on commit/rollback; hash collisions only serialize extra requests.
+    const lockKey = JSON.stringify([ctx.apiKeyId, ctx.requestKey]);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
     const winner = await tx.apiIdempotencyRecord.findUnique({
       where: { apiKeyId_requestKey: { apiKeyId: ctx.apiKeyId, requestKey: ctx.requestKey } },
     });
     if (winner) {
+      if (winner.companyId !== ctx.companyId || winner.method !== ctx.method || winner.path !== ctx.path) {
+        return { body: { error: { code: 'idempotency_key_conflict', message: 'This key was already used for a different request. Use a new Idempotency-Key.' } }, statusCode: 409, replayed: true };
+      }
       return { body: winner.response, statusCode: winner.statusCode, replayed: true };
     }
 
@@ -105,5 +104,5 @@ export async function withIdempotency(
       },
     });
     return { body: result.body, statusCode: result.statusCode, replayed: false };
-  });
+  }, { timeout: 20000 });
 }

@@ -28,7 +28,7 @@ jest.mock('@/lib/db', () => ({
     membership: { findMany: (...a: unknown[]) => mockMembershipFindMany(...a) },
     notification: { create: (...a: unknown[]) => mockNotificationCreate(...a) },
     // Failure marking runs outside the transaction on the db-level client.
-    bankSyncRun: { update: (...a: unknown[]) => mockSyncRunUpdate(...a) },
+    bankSyncRun: { update: (...a: unknown[]) => mockSyncRunUpdate(...a), create: (...a: unknown[]) => mockSyncRunCreate(...a) },
     $transaction: (fn: unknown) =>
       fn({
         $queryRaw: (...a: unknown[]) => mockTxQueryRaw(...a),
@@ -108,6 +108,20 @@ describe('BF-2 sync', () => {
     nextCursor: 'cursor-2',
     hasMore: false,
     ...overrides,
+  });
+
+  test('early webhook before mapping preserves initial cursor', async () => {
+    mockFeedAccountFindMany.mockResolvedValue([]);
+    expect((await syncConnection('conn-1', 'webhook')).skipped).toBe(true);
+    expect(mockSyncPage).not.toHaveBeenCalled();
+    expect(mockConnectionUpdate).not.toHaveBeenCalled();
+  });
+
+  test('pagination budget fails the full batch and records failure', async () => {
+    mockSyncPage.mockResolvedValue(page({ hasMore: true }));
+    await expect(syncConnection('conn-1', 'manual')).rejects.toThrow('page budget');
+    expect(mockSyncPage).toHaveBeenCalledTimes(8);
+    expect(mockSyncRunCreate).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'failed', addedCount: 0 }) }));
   });
 
   test('added rows become review-queue transactions with the shared dedupe key — and no journal entries', async () => {
@@ -225,7 +239,7 @@ describe('BF-2 sync', () => {
   test('a failed page marks the run failed and rethrows', async () => {
     mockSyncPage.mockRejectedValue(new Error('provider boom'));
     await expect(syncConnection('conn-1', 'webhook')).rejects.toThrow('provider boom');
-    expect(mockSyncRunUpdate).toHaveBeenCalledWith(
+    expect(mockSyncRunCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
     );
   });

@@ -1,6 +1,65 @@
 # BF-5 controlled production pilot — runbook
 
-**Status: prepared and ready to execute.** The pilot cannot start until BF-0 closes: Plaid production access for Canadian `transactions` (requested by the owner in the Plaid dashboard; approval typically takes days). Everything below is scripted so the pilot runs in a single session once approval lands.
+**Status: NO-GO pending readiness fixes and provider confirmation (reviewed 2026-09-15).** Initial connection can be performed in a session, but acceptance requires five business days of evidence. BF-0 requires confirmed Canadian Transactions production access.
+
+## 2026-09-15 independent implementation review
+
+Latest reviewed main: `23a485c`. Vercel reports a READY production deployment.
+Production has the four bank-feed tables and zero feed transaction rows; real-bank
+pilot evidence is not established. Never treat staging sandbox rehearsal as
+production acceptance.
+
+Corrections prepared on `codex/bf5-pilot-review`:
+- ES256 webhook verification with five-minute issued-at validation and a
+  constant-time comparison of the SHA-256 of the exact raw request body.
+- Convert Plaid's outflow-positive amounts to LedgerPro's inflow-positive
+  convention once at the provider adapter. Existing stored rows are not rewritten.
+- Send redirect and webhook URLs in Link token requests.
+- Return HTTP 503 for failed webhook syncs to permit provider retry.
+- Restrict production Link/exchange/sync to explicit company IDs; add an
+  emergency stop that leaves provider disconnect available.
+- Let the bank-feed cron reach its own bearer-secret guard without a session.
+- Avoid printing Plaid error objects from connection and webhook routes.
+- Persist failed sync runs after the transaction rolls back.
+- Roll back the full update when pagination exceeds its time/page budget,
+  retaining the original cursor for retry rather than committing partial pages.
+- Use the exchange response's connection ID for account mapping; report first
+  sync failures instead of showing success unconditionally.
+- Resume OAuth redirects using a short-lived, user/company-bound Link session;
+  reconnect success requires a successful authenticated sync.
+- Serialize disconnect and mapping with sync; prevent mapping two bank accounts
+  to one ledger account and reject post-sync mapping changes requiring backfill.
+- Preserve the initial cursor when webhooks arrive before mapping is saved.
+- Prevent corrections and settlements from moving rows into locked periods;
+  blocked settlements cannot create duplicate review rows.
+- Exclude feed rows and already-linked imports from fuzzy overlap matching.
+- Send correction notifications only after the batch commits.
+
+Validation on this review branch: TypeScript passed; production build completed;
+the full unit suite passed (391 tests, 9 skipped at that run). Added regressions
+cover early unmapped webhooks, page-budget failure, locked-period settlements and
+corrections, provider-scoped removal and overlap restrictions. These are mocked
+unit checks, not evidence of real database rollback or bank consent completion.
+
+Additional release checks still required:
+- Rehearse the selected institution's Link and OAuth return/resume flow in a
+  browser. Implementation is prepared; bank-hosted verification is still required.
+- Verify failure-run persistence with an actual PostgreSQL rollback.
+- Rehearse pagination retries; oversized updates currently fail closed after
+  eight pages or the time budget. Add a durable full-update staging mechanism
+  before admitting accounts whose initial history exceeds those limits.
+- Verify disconnect/sync concurrency against PostgreSQL (unit mocks cannot
+  prove advisory lock ordering). Provider error logs in disconnect are sanitized.
+- Confirm production credentials, KEK, provider approval and pilot company.
+- Agree pilot charges explicitly. `billableOwnerId` is attribution, not an
+  implemented charge/collection workflow.
+
+Required production settings: `PLAID_ENV=production`, configured credentials,
+`BANK_FEED_KEK`, `PLAID_REDIRECT_URI`, `PLAID_WEBHOOK_URL`,
+`BANK_FEED_PILOT_COMPANY_IDS=<approved exact company ID>` and
+`BANK_FEEDS_DISABLED=false`. Empty allowlist blocks all production syncs and
+new connections. `BANK_FEEDS_DISABLED=true` pauses sync; only successful provider
+item removal ends the connection. Do not broaden access until the matrix passes.
 
 The gate: a real bank connects, feed results reconcile against statements, billing and disconnect behave, and the decision to widen access is evidence-based.
 

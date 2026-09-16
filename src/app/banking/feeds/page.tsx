@@ -16,11 +16,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import {
   ArrowLeft, Landmark, RefreshCw, Settings2, Unplug, Loader2, CircleAlert, Check,
 } from 'lucide-react';
 
 const PLAID_LINK_SRC = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+const LINK_SESSION_KEY = 'ledgerpro.bankLink';
 
 interface ConnectionAccount {
   providerAccountId: string;
@@ -74,6 +76,7 @@ const statusMeta: Record<string, { pill: string; badge: 'paid' | 'pending' | 'ov
 
 export default function BankFeedsPage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [connections, setConnections] = useState<Connection[] | null>(null);
   const [glAccounts, setGlAccounts] = useState<GlAccount[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
@@ -88,6 +91,7 @@ export default function BankFeedsPage() {
   const [removeUnreviewed, setRemoveUnreviewed] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const linkHandlerRef = useRef<any>(null);
+  const resumedRef = useRef(false);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -102,11 +106,26 @@ export default function BankFeedsPage() {
 
   useEffect(() => { fetchConnections(); }, [fetchConnections]);
 
-  function openPlaidLink(linkToken: string, onSuccess: (publicToken: string) => void) {
+  useEffect(() => {
+    if (!session?.user || resumedRef.current || !new URLSearchParams(window.location.search).has('oauth_state_id')) return;
+    resumedRef.current = true;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(LINK_SESSION_KEY) || 'null');
+      if (!saved || saved.userId !== session.user.id || saved.companyId !== session.user.activeCompanyId || Date.now() > saved.expiresAt) {
+        sessionStorage.removeItem(LINK_SESSION_KEY);
+        throw new Error('The bank connection session expired or the company changed. Start Connect again.');
+      }
+      openPlaidLink(saved.linkToken, (token) => completeLink(token, saved.connectionId), saved.connectionId, window.location.href);
+    } catch (error: any) { setMessage({ type: 'danger', text: error.message }); }
+  }, [session]);
+
+  function openPlaidLink(linkToken: string, onSuccess: (publicToken: string) => void, connectionId: string | null = null, receivedRedirectUri?: string) {
+    if (!receivedRedirectUri) sessionStorage.setItem(LINK_SESSION_KEY, JSON.stringify({ linkToken, connectionId, userId: session?.user.id, companyId: session?.user.activeCompanyId, expiresAt: Date.now() + 30 * 60_000 }));
     if (!(window as any).Plaid) {
       const script = document.createElement('script');
       script.src = PLAID_LINK_SRC;
       script.onload = () => launchPlaid();
+      script.onerror = () => setMessage({ type: 'danger', text: 'The bank connection window could not load. Please retry.' });
       document.body.appendChild(script);
     } else {
       launchPlaid();
@@ -114,11 +133,15 @@ export default function BankFeedsPage() {
     function launchPlaid() {
       linkHandlerRef.current = (window as any).Plaid.create({
         token: linkToken,
+        ...(receivedRedirectUri ? { receivedRedirectUri } : {}),
         onSuccess: (publicToken: string) => {
+          sessionStorage.removeItem(LINK_SESSION_KEY);
+          if (receivedRedirectUri) window.history.replaceState({}, '', '/banking/feeds');
           onSuccess(publicToken);
           linkHandlerRef.current?.destroy();
         },
         onExit: () => {
+          sessionStorage.removeItem(LINK_SESSION_KEY);
           linkHandlerRef.current?.destroy();
         },
         onEvent: () => {},
@@ -133,8 +156,18 @@ export default function BankFeedsPage() {
       const res = await fetch('/api/plaid/link-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Could not start the bank connection.');
-      openPlaidLink(json.data.linkToken, async (publicToken) => {
+      openPlaidLink(json.data.linkToken, (publicToken) => completeLink(publicToken, null));
+    } catch (err: any) {
+      setMessage({ type: 'danger', text: err.message });
+    }
+  }
+
+  async function completeLink(publicToken: string, connectionId: string | null) {
         try {
+          if (connectionId) {
+            await handleSyncNow(connectionId);
+            return;
+          }
           const exRes = await fetch('/api/plaid/exchange', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -143,15 +176,11 @@ export default function BankFeedsPage() {
           const exJson = await exRes.json();
           if (!exRes.ok) throw new Error(exJson.error || 'Could not connect the bank.');
           await fetchConnections();
-          setPendingConnection({ ...exJson.data, accounts: exJson.data.accounts.map((a: any) => ({ ...a, financialAccountId: null })), recentSyncs: [], cadence: 'daily', autoCategorize: true, notifyOnFailure: true, lastSyncAt: null, consentExpiresAt: exJson.data.consentExpiresAt, createdAt: new Date().toISOString() } as Connection);
+          setPendingConnection({ ...exJson.data, id: exJson.data.connectionId, accounts: exJson.data.accounts.map((a: any) => ({ ...a, financialAccountId: null })), recentSyncs: [], cadence: 'daily', autoCategorize: true, notifyOnFailure: true, lastSyncAt: null, consentExpiresAt: exJson.data.consentExpiresAt, createdAt: new Date().toISOString() } as Connection);
           setMapping(Object.fromEntries(exJson.data.accounts.filter((a: any) => a.isFeeding).map((a: any) => [a.providerAccountId, { feeding: true, glId: bestGuessGlId(a) }])));
         } catch (err: any) {
           setMessage({ type: 'danger', text: err.message });
         }
-      });
-    } catch (err: any) {
-      setMessage({ type: 'danger', text: err.message });
-    }
   }
 
   function bestGuessGlId(account: ConnectionAccount): string {
@@ -192,9 +221,12 @@ export default function BankFeedsPage() {
         throw new Error(first || json.error || 'Could not save the account mapping.');
       }
       // The mapping route does not auto-sync; run the first sync now.
-      await fetch(`/api/plaid/connections/${pendingConnection.id}/sync`, { method: 'POST' }).catch(() => {});
+      const syncResponse = await fetch(`/api/plaid/connections/${pendingConnection.id}/sync`, { method: 'POST' });
+      if (!syncResponse.ok) throw new Error('Account mapping saved, but the first sync failed. Retry Sync now or contact support.');
+      const syncResult = await syncResponse.json();
+      if (syncResult.data?.skipped) throw new Error('Account mapping saved, but sync was not started. Check pilot access or an existing sync before retrying.');
       setPendingConnection(null);
-      setMessage({ type: 'success', text: 'Feed started — the first sync is running.' });
+      setMessage({ type: 'success', text: 'Account mapping saved and the first sync completed.' });
       await fetchConnections();
     } catch (err: any) {
       setMessage({ type: 'danger', text: err.message });
@@ -210,6 +242,7 @@ export default function BankFeedsPage() {
       const res = await fetch(`/api/plaid/connections/${id}/sync`, { method: 'POST' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Sync failed.');
+      if (json.data?.skipped) throw new Error('Sync did not start. Check pilot access or retry after the current sync finishes.');
       setMessage({ type: 'success', text: `Sync complete — ${json.data.added} new, ${json.data.deduped} duplicates filtered.` });
       await fetchConnections();
     } catch (err: any) {
@@ -229,10 +262,7 @@ export default function BankFeedsPage() {
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Could not reopen the bank connection.');
-        openPlaidLink(json.data.linkToken, async () => {
-          setMessage({ type: 'success', text: 'Connection refreshed.' });
-          await fetchConnections();
-        });
+        openPlaidLink(json.data.linkToken, (token) => completeLink(token, connection.id), connection.id);
       } catch (err: any) {
         setMessage({ type: 'danger', text: err.message });
       }

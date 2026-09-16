@@ -4,6 +4,7 @@ import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 const mockFindUnique = jest.fn();
 const mockCreate = jest.fn();
 const mockTransaction = jest.fn();
+const mockLock = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
     apiIdempotencyRecord: {
@@ -12,7 +13,7 @@ jest.mock('@/lib/db', () => ({
     },
     $transaction: (fn: unknown) => {
       mockTransaction(fn);
-      return fn({ apiIdempotencyRecord: { findUnique: mockFindUnique, create: mockCreate } });
+      return fn({ $executeRaw: mockLock, apiIdempotencyRecord: { findUnique: mockFindUnique, create: mockCreate } });
     },
   },
 }));
@@ -75,6 +76,7 @@ describe('withIdempotency', () => {
 
   test('replays the stored response without executing again', async () => {
     mockFindUnique.mockResolvedValue({
+      companyId: ctx.companyId, method: ctx.method, path: ctx.path,
       response: { data: { id: 'c-1' } },
       statusCode: 201,
     });
@@ -89,9 +91,10 @@ describe('withIdempotency', () => {
   });
 
   test('a retry racing an in-flight request re-reads the winner inside the transaction', async () => {
-    // Pre-transaction lookup misses, but the in-transaction lookup finds the
-    // concurrent winner — execute must not run.
-    mockFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
+    // After acquiring the transaction lock, the lookup finds the concurrent
+    // winner — execute must not run.
+    mockFindUnique.mockResolvedValueOnce({
+      companyId: ctx.companyId, method: ctx.method, path: ctx.path,
       response: { data: { id: 'c-1' } },
       statusCode: 201,
     });
@@ -100,5 +103,19 @@ describe('withIdempotency', () => {
     const outcome = await withIdempotency(ctx, execute);
     expect(outcome.replayed).toBe(true);
     expect(execute).not.toHaveBeenCalled();
+    expect(mockLock).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects the same key used for another endpoint', async () => {
+    mockFindUnique.mockResolvedValue({ companyId: ctx.companyId, method: ctx.method, path: '/api/v1/payments' });
+    const execute = jest.fn();
+    expect((await withIdempotency(ctx, execute)).statusCode).toBe(409);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('does not store success when the accounting mutation fails', async () => {
+    mockFindUnique.mockResolvedValue(null);
+    await expect(withIdempotency(ctx, async () => { throw new Error('accounting failure'); })).rejects.toThrow('accounting failure');
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 });
