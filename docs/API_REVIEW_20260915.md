@@ -9,17 +9,18 @@
 - Generic API journal void is restricted to original manual journals. Source-managed entries must use their document/payment workflows to preserve subledgers.
 - API journal void and payment reversal now check the reversal date against closed-period controls.
 
-## Validation and remaining acceptance work
+## Reliability follow-up — 16 September 2026
 
-TypeScript passes. The three focused API write/idempotency suites pass (25 tests), including checking that reviewed posting uses one transaction and mismatched endpoint keys are rejected. These mock tests do not establish real PostgreSQL concurrency/rollback behavior.
+- Added a nullable canonical request-body SHA-256 fingerprint. Exact retries replay; reuse for another payload, company, method or path returns `409 idempotency_key_conflict`; legacy null-fingerprint rows return `409 idempotency_legacy_record`.
+- Moved mutable document, account, currency and closed-period validation behind the idempotency replay lookup and into the protected database transaction.
+- API audit rows and webhook delivery intent now use a transactional outbox: accounting, audit, event intent and replay response commit or roll back together. Delivery remains post-commit and retryable.
+- Webhook attempts now serialize across cron and request-triggered sweeps with a PostgreSQL advisory lock, preventing concurrent duplicate sends of the same attempt.
+- PostgreSQL integration coverage now verifies concurrent same-key execution, distinct-key payments, forced rollback, outbox/audit atomicity, exact replay without duplicate effects, and changed-payload conflict behavior.
 
-Before unrestricted write access, run PostgreSQL integration cases for concurrent identical payments, differing keys on the same document, payment-versus-void, simultaneous reversals, lock timeout and forced replay-record failure. Assert one committed outcome, balanced journals, correct subledger/bank balances, and a retry returning the original response.
+## Remaining external acceptance work
 
-Remaining contract gaps:
-
-1. Idempotency records do not store a request-body fingerprint. Same key/path with different payload currently replays the first outcome rather than rejecting a mismatch. Add a nullable fingerprint migration and define behavior for older records before claiming payload-aware idempotency.
-2. Some endpoint validation precedes replay lookup. Subsequent document/account changes or period closure can therefore make an otherwise valid retry fail validation rather than replay. Move mutable validation inside the protected execution callback while retaining authentication/authorization before replay.
-3. Audit/event dispatch after the accounting transaction is not a transactional outbox. A process failure can commit accounting without reliably delivering its integration event; retries may also repeat side effects. Persist event intent in the accounting transaction and dispatch with deduplication/retry before promising reliable delivery.
-4. Exercise the shared services against dashboard write flows as well: row locking is effective only when competing writers participate in the same locking protocol.
+- Add explicit PostgreSQL cases for payment-versus-void, simultaneous reversals and lock-timeout recovery.
+- Exercise the shared services against dashboard write flows as well: row locking is effective only when competing writers participate in the same locking protocol.
+- Complete an external developer/pilot acceptance test before unrestricted public write access.
 
 This review is not a completed external-developer acceptance test or a declaration that all API release criteria are met.

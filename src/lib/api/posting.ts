@@ -53,7 +53,7 @@ export async function postReviewedDocument(input: PostDocumentInput, outerTx?: P
   }
 
   const docDate = input.kind === 'invoice' ? (doc as any).issueDate : (doc as any).billDate;
-  const guard = await closedPeriodGuard(input.companyId, docDate);
+  const guard = await closedPeriodGuard(input.companyId, docDate, outerTx);
   if (guard) {
     const body = await guard.json();
     return { ok: false, status: 409, code: body.error?.code ?? 'closed_period', message: body.error?.message ?? body.error ?? 'Closed period.' };

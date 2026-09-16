@@ -4,7 +4,7 @@ API-E closes the public API program: the OpenAPI endpoint reference, in-app deve
 
 ## What shipped
 
-- **OpenAPI 3.0 document** served at `https://ledger.nexvarlab.com/api/v1/openapi.json` — public (it grants nothing), cached 5 minutes. Covers all 24 v1 paths, the bearer-key security scheme, pagination, money and error schemas, idempotency parameters on every POST, and the webhook signature contract.
+- **OpenAPI 3.0 document** served at `https://ledger.nexvarlab.com/api/v1/openapi.json` — public (it grants nothing), cached 5 minutes. Covers all 24 v1 paths, the bearer-key security scheme, pagination, money and error schemas, idempotency parameters on every mutating request, and the webhook signature contract.
 - **Help → Developer API** — seven articles: overview, authentication and permissions, pagination and change sync, error codes, tax and FX restrictions, webhook verification and dedupe, and the sandbox/pilot guide.
 - **Plan entitlement** — `Plan.apiAccess` on Pro and Enterprise (additive migration + seed). Production API access follows the plan; sandbox access is granted separately to approved developers on any plan; no per-call billing initially.
 - **Plan gate enforcement** (post-launch fix) — the auth pipeline rejects requests from companies without an active or trialing Pro/Enterprise subscription (`403 api_plan_required`), and key creation / API-enable are gated the same way. The emergency disable switch is never gated.

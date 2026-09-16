@@ -4,10 +4,9 @@ import { authenticateApiRequest } from '@/lib/api/auth';
 import { pageParamsFrom, cursorPage, prismaCursor } from '@/lib/api/pagination';
 import { moneyString, isoDate } from '@/lib/api/serialize';
 import { paymentCreateSchema, validationErrorResponse, parseDateField } from '@/lib/api/validation';
-import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
+import { idempotencyContextFrom, withIdempotency, idempotencyRejection } from '@/lib/api/idempotency';
 import { postInvoicePayment, postBillPayment } from '@/lib/journal';
-import { closedPeriodGuard, auditLog } from '@/lib/api-helpers';
-import { emitWebhookEvent } from '@/lib/webhooks';
+import { closedPeriodGuard } from '@/lib/api-helpers';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -86,62 +85,63 @@ export async function POST(req: NextRequest) {
   const { context, error } = await authenticateApiRequest(req, { permission: 'write_posting' });
   if (error) return error;
 
-  const parsed = paymentCreateSchema.safeParse(await req.json().catch(() => null));
+  const requestBody = await req.json().catch(() => null);
+  const parsed = paymentCreateSchema.safeParse(requestBody);
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
-  const { documentType, documentId } = parsed.data;
-
-  const document =
-    documentType === 'invoice'
-      ? await db.invoice.findFirst({
-          where: { id: documentId, companyId: context!.companyId },
-          include: { customer: { select: { name: true } } },
-        })
-      : await db.bill.findFirst({
-          where: { id: documentId, companyId: context!.companyId },
-          include: { vendor: { select: { name: true } } },
-        });
-
-  if (!document) {
-    return NextResponse.json({ error: { code: 'not_found', message: `${documentType} not found.` } }, { status: 404 });
-  }
-  if (document.status === 'draft' || document.status === 'void') {
-    return NextResponse.json(
-      { error: { code: 'document_not_posted', message: `Payments can only be recorded against posted documents (current status: ${document.status}).` } },
-      { status: 409 }
-    );
-  }
-
-  const account = await db.financialAccount.findFirst({
-    where: { id: parsed.data.paymentAccountId, companyId: context!.companyId },
-    select: { id: true, glAccountCode: true, currency: true },
-  });
-  if (!account || !account.glAccountCode) {
-    return NextResponse.json(
-      { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { paymentAccountId: 'paymentAccountId must be an existing company account with a GL code.' } } },
-      { status: 400 }
-    );
-  }
-
-  const company = await db.company.findUniqueOrThrow({
-    where: { id: context!.companyId },
-    select: { realizedFxAccountCode: true, fxRoundingAccountCode: true },
-  });
-
-  const paymentDate = parseDateField(parsed.data.paymentDate);
-  const guard = await closedPeriodGuard(context!.companyId, paymentDate);
-  if (guard) return guard;
-
-  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId });
+  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId }, requestBody);
   if ('error' in idem) return idem.error;
-
-  const counterpartyName = documentType === 'invoice' ? (document as any).customer.name : (document as any).vendor.name;
-  const docRate = Number((document as any).fxRate ?? 1);
-  const settlementRate = parsed.data.settlementRate ?? docRate;
 
   let outcome;
   try {
     outcome = await withIdempotency(idem.context, async (tx) => {
+      const { documentType, documentId } = parsed.data;
+
+      const document =
+        documentType === 'invoice'
+          ? await tx.invoice.findFirst({
+              where: { id: documentId, companyId: context!.companyId },
+              include: { customer: { select: { name: true } } },
+            })
+          : await tx.bill.findFirst({
+              where: { id: documentId, companyId: context!.companyId },
+              include: { vendor: { select: { name: true } } },
+            });
+
+      if (!document) {
+        return idempotencyRejection(NextResponse.json({ error: { code: 'not_found', message: `${documentType} not found.` } }, { status: 404 }));
+      }
+      if (document.status === 'draft' || document.status === 'void') {
+        return idempotencyRejection(NextResponse.json(
+          { error: { code: 'document_not_posted', message: `Payments can only be recorded against posted documents (current status: ${document.status}).` } },
+          { status: 409 }
+        ));
+      }
+
+      const account = await tx.financialAccount.findFirst({
+        where: { id: parsed.data.paymentAccountId, companyId: context!.companyId },
+        select: { id: true, glAccountCode: true, currency: true },
+      });
+      if (!account || !account.glAccountCode) {
+        return idempotencyRejection(NextResponse.json(
+          { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { paymentAccountId: 'paymentAccountId must be an existing company account with a GL code.' } } },
+          { status: 400 }
+        ));
+      }
+
+      const company = await tx.company.findUniqueOrThrow({
+        where: { id: context!.companyId },
+        select: { realizedFxAccountCode: true, fxRoundingAccountCode: true },
+      });
+
+      const paymentDate = parseDateField(parsed.data.paymentDate);
+      const guard = await closedPeriodGuard(context!.companyId, paymentDate, tx);
+      if (guard) return idempotencyRejection(guard);
+      const counterpartyName = documentType === 'invoice' ? (document as any).customer.name : (document as any).vendor.name;
+      const docRate = Number((document as any).fxRate ?? 1);
+      const settlementRate = parsed.data.settlementRate ?? docRate;
+
+
       const baseOpts = {
         documentId,
         counterpartyName,
@@ -178,29 +178,11 @@ export async function POST(req: NextRequest) {
           },
         },
       };
-    });
+    }, { audit: { action: 'api.payment.record', entityType: 'payment', apiKeyName: context!.apiKeyName }, eventType: 'payment.recorded' });
   } catch (err: any) {
     console.error('POST /api/v1/payments error:', err);
     return NextResponse.json({ error: { code: 'payment_failed', message: err?.message ?? 'Failed to record payment.' } }, { status: 400 });
   }
-
-  await auditLog(context!.companyId, undefined, 'api.payment.record', 'payment', (outcome.body as any)?.data?.id ?? null, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-    documentType,
-    documentId,
-  });
-
-  await emitWebhookEvent({
-    companyId: context!.companyId,
-    eventType: 'payment.recorded',
-    payload: {
-      id: (outcome.body as any)?.data?.id,
-      documentType,
-      documentId,
-      occurredAt: new Date().toISOString(),
-    },
-  });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }

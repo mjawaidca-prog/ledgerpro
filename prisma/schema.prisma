@@ -1829,6 +1829,7 @@ model ApiIdempotencyRecord {
   requestKey   String // caller-supplied Idempotency-Key header value
   method       String // "POST" | "PATCH"
   path         String // canonical route, e.g. "/api/v1/invoices"
+  requestHash  String? // SHA-256 of canonical request JSON; null only on legacy records
   resourceType String // "contact" | "invoice" | "bill" | "payment" | "journal_entry"
   resourceId   String?
   statusCode   Int

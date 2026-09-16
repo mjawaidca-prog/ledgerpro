@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { requestFingerprint } from '@/lib/api/idempotency';
 
 const mockInvoiceFindFirst = jest.fn();
 const mockSnapshotsFindMany = jest.fn();
@@ -7,6 +8,7 @@ const mockJournalFindFirst = jest.fn();
 const mockPeriodCloseFindFirst = jest.fn();
 const mockIdemFindUnique = jest.fn().mockResolvedValue(null);
 const mockTransaction = jest.fn();
+const mockAuditLog = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
     invoice: {
@@ -15,17 +17,29 @@ jest.mock('@/lib/db', () => ({
     },
     documentLineTaxSnapshot: { findMany: (...a: unknown[]) => mockSnapshotsFindMany(...a) },
     journalEntry: { findFirst: (...a: unknown[]) => mockJournalFindFirst(...a) },
+    webhookDelivery: { findMany: jest.fn().mockResolvedValue([]) },
     periodClose: { findFirst: (...a: unknown[]) => mockPeriodCloseFindFirst(...a) },
-    apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: jest.fn() },
+    apiIdempotencyRecord: {
+      findUnique: (...a: unknown[]) => mockIdemFindUnique(...a),
+      create: jest.fn(),
+    },
     $transaction: (fn: any) => {
       mockTransaction();
       return fn({
         $executeRaw: jest.fn(),
         $queryRaw: jest.fn(),
-        invoice: { findFirst: mockInvoiceFindFirst, update: mockInvoiceUpdate },
-        documentLineTaxSnapshot: { findMany: mockSnapshotsFindMany },
-        journalEntry: { findFirst: mockJournalFindFirst },
-        apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: jest.fn() },
+        auditLog: { create: (...a: unknown[]) => mockAuditLog(...a) },
+        webhookEndpoint: { findMany: jest.fn().mockResolvedValue([]) },
+        invoice: {
+          findFirst: (...a: unknown[]) => mockInvoiceFindFirst(...a),
+          update: (...a: unknown[]) => mockInvoiceUpdate(...a),
+        },
+        documentLineTaxSnapshot: { findMany: (...a: unknown[]) => mockSnapshotsFindMany(...a) },
+        journalEntry: { findFirst: (...a: unknown[]) => mockJournalFindFirst(...a) },
+        apiIdempotencyRecord: {
+          findUnique: (...a: unknown[]) => mockIdemFindUnique(...a),
+          create: jest.fn(),
+        },
       });
     },
   },
@@ -47,7 +61,6 @@ jest.mock('@/lib/api/auth', () => ({
 }));
 
 const mockClosedPeriodGuard = jest.fn();
-const mockAuditLog = jest.fn();
 jest.mock('@/lib/api-helpers', () => ({
   closedPeriodGuard: (...a: unknown[]) => mockClosedPeriodGuard(...a),
   auditLog: (...a: unknown[]) => mockAuditLog(...a),
@@ -153,13 +166,12 @@ describe('API-C posting — invoice post', () => {
 
   test('successful posting records the integration identity in the audit trail', async () => {
     await call(decision());
-    expect(mockAuditLog).toHaveBeenCalledWith('co-1', undefined, 'api.invoice.post', 'invoice', 'INV-1', undefined, expect.objectContaining({ apiKeyId: 'k' }));
+    expect(mockAuditLog).toHaveBeenCalledWith({ data: expect.objectContaining({ companyId: 'co-1', action: 'api.invoice.post', entityId: 'INV-1', metadata: expect.objectContaining({ apiKeyId: 'k' }) }) });
   });
 
   test('a replayed Idempotency-Key returns the stored response without re-posting', async () => {
-    const { db } = jest.requireMock('@/lib/db');
-    (db.apiIdempotencyRecord.findUnique as jest.Mock).mockResolvedValueOnce({
-      companyId: 'co-1', method: 'POST', path: '/api/v1/invoices/INV-1/post',
+    mockIdemFindUnique.mockResolvedValueOnce({
+      companyId: 'co-1', method: 'POST', path: '/api/v1/invoices/INV-1/post', requestHash: requestFingerprint(decision()),
       response: { data: { id: 'INV-1', status: 'sent' } },
       statusCode: 200,
     });
