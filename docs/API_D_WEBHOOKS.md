@@ -9,12 +9,13 @@ API-D delivers signed, retried, visible and replayable event notifications to co
 - **Delivery** — every attempt signs `timestamp.payload` with HMAC-SHA256 and sends `x-ledgerpro-event`, `x-ledgerpro-event-id`, `x-ledgerpro-timestamp`, `x-ledgerpro-signature` headers. Consumers verify and dedupe on the stable event id.
 - **Retry ladder** — fixed 1m → 5m → 30m → 2h → 6h between attempts, then `dead`. A delivery is sent at most once per attempt; successes are never re-delivered.
 - **SSRF protection** — destinations must be http/https without embedded credentials; DNS is re-resolved and every resolved IP must be public before every attempt. The connection is pinned to a verified address while preserving TLS hostname validation. Redirects are not followed; configure the final receiver URL.
-- **Emission** — events are emitted from both the v1 write endpoints and the dashboard write routes. Emission is best-effort: it can never fail or roll back the mutation that produced the event. Duplicate queueing is impossible (`(endpointId, eventId)` unique, re-emission swallowed).
+- **Emission** — v1 API writes insert their audit record and webhook delivery intent in the same database transaction as the accounting mutation and idempotency response. A persistence failure rolls back all of them. Dashboard write routes retain their original best-effort emitter. Duplicate queueing is impossible (`(endpointId, eventId)` unique).
 - **Delivery scheduling** — Vercel's Hobby plan limits crons to one run per day, so a per-minute cron cannot deploy. Instead, every emission runs an **awaited, bounded piggyback sweep** of that company's due deliveries (5 max, 5s per-attempt timeout), and a daily cron (`/api/webhooks/deliver-cron`, CRON_SECRET-guarded) is the catch-all for dormant queues. Retries therefore ride along with real activity.
 
 ## Defects found and fixed during the stage
 
 - The first sweep implementation was fire-and-forget — on Vercel serverless the promise froze the moment the request response returned, so deliveries queued but never went out. The sweep is now awaited inside the emission path with hard bounds; the daily cron covers anything dormant.
+- Cron and request-triggered sweeps can overlap. Each delivery now takes a PostgreSQL transaction-scoped advisory lock before re-reading state and holds it through the bounded attempt, so two workers cannot send the same attempt concurrently.
 
 ## Automated acceptance evidence
 

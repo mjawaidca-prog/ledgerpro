@@ -694,6 +694,8 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'validation_error — field-level problems; see fields (400).',
           'not_found — the id does not exist in this company (404).',
           'idempotency_key_required — writes need an Idempotency-Key header (400).',
+          'idempotency_key_conflict — that key was already used for a different payload, company, method or path; retry with a new key (409).',
+          'idempotency_legacy_record — that key predates payload verification; inspect the existing result and use a new key (409).',
           'closed_period / document_not_draft / document_not_posted / tax_decision_required / tax_settlement_reversal_required — accounting controls (409).',
         ],
       },

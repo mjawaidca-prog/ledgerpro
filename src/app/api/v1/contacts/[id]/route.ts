@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { authenticateApiRequest } from '@/lib/api/auth';
 import { moneyString, isoDate } from '@/lib/api/serialize';
 import { contactUpdateSchema, validationErrorResponse } from '@/lib/api/validation';
-import { auditLog } from '@/lib/api-helpers';
+import { idempotencyContextFrom, withIdempotency, idempotencyRejection } from '@/lib/api/idempotency';
 export const dynamic = 'force-dynamic';
 
 // GET /api/v1/contacts/[id] — one contact, scoped to the key's company.
@@ -36,13 +36,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // PATCH /api/v1/contacts/[id] — update editable fields (write_draft).
-// PATCH replays are naturally safe (same fields re-applied); no idempotency
-// key required, but the request is still scoped to the key's company.
+// Idempotency-Key required so a retry cannot overwrite a subsequent edit.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const { context, error } = await authenticateApiRequest(req, { permission: 'write_draft' });
   if (error) return error;
 
-  const parsed = contactUpdateSchema.safeParse(await req.json().catch(() => null));
+  const requestBody = await req.json().catch(() => null);
+  const parsed = contactUpdateSchema.safeParse(requestBody);
   if (!parsed.success) return validationErrorResponse(parsed.error);
   if (Object.keys(parsed.data).length === 0) {
     return NextResponse.json(
@@ -51,33 +51,33 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     );
   }
 
-  const existing = await db.contact.findFirst({
-    where: { id: params.id, companyId: context!.companyId },
-    select: { id: true, name: true, currency: true },
-  });
-  if (!existing) {
-    return NextResponse.json({ error: { code: 'not_found', message: 'Contact not found.' } }, { status: 404 });
-  }
+  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId }, requestBody);
+  if ('error' in idem) return idem.error;
+  const outcome = await withIdempotency(idem.context, async tx => {
+    const existing = await tx.contact.findFirst({
+      where: { id: params.id, companyId: context!.companyId },
+      select: { id: true, name: true, currency: true },
+    });
+    if (!existing) {
+      return idempotencyRejection(NextResponse.json({ error: { code: 'not_found', message: 'Contact not found.' } }, { status: 404 }));
+    }
 
-  const currency = parsed.data.currency ?? existing.currency;
-  const updated = await db.contact.update({
-    where: { id: params.id },
-    data: {
-      name: parsed.data.name ?? undefined,
-      companyName: parsed.data.companyName === undefined ? undefined : parsed.data.companyName,
-      email: parsed.data.email === undefined ? undefined : parsed.data.email,
-      phone: parsed.data.phone === undefined ? undefined : parsed.data.phone,
-      address: parsed.data.address === undefined ? undefined : parsed.data.address,
-      currency,
-      notes: parsed.data.notes === undefined ? undefined : parsed.data.notes,
-    },
-    select: { id: true, name: true, currency: true },
-  });
+    const currency = parsed.data.currency ?? existing.currency;
+    const updated = await tx.contact.update({
+      where: { id: params.id },
+      data: {
+        name: parsed.data.name ?? undefined,
+        companyName: parsed.data.companyName === undefined ? undefined : parsed.data.companyName,
+        email: parsed.data.email === undefined ? undefined : parsed.data.email,
+        phone: parsed.data.phone === undefined ? undefined : parsed.data.phone,
+        address: parsed.data.address === undefined ? undefined : parsed.data.address,
+        currency,
+        notes: parsed.data.notes === undefined ? undefined : parsed.data.notes,
+      },
+      select: { id: true, name: true, currency: true },
+    });
 
-  await auditLog(context!.companyId, undefined, 'api.contact.update', 'contact', updated.id, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-  });
-
-  return NextResponse.json({ data: { id: updated.id, name: updated.name, currency: updated.currency } });
+    return { resourceType: 'contact', resourceId: updated.id, statusCode: 200, body: { data: { id: updated.id, name: updated.name, currency: updated.currency } } };
+  }, { audit: { action: 'api.contact.update', entityType: 'contact', apiKeyName: context!.apiKeyName } });
+  return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }

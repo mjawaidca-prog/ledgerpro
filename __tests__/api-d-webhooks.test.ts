@@ -29,8 +29,16 @@ const mockDeliveryUpdate = jest.fn();
 const mockDeliveryCreate = jest.fn();
 const mockDeliveryFindMany = jest.fn();
 const mockEndpointFindMany = jest.fn();
+const mockExecuteRaw = jest.fn();
 jest.mock('@/lib/db', () => ({
   db: {
+    $transaction: (fn: any) => fn({
+      $executeRaw: (...a: unknown[]) => mockExecuteRaw(...a),
+      webhookDelivery: {
+        findUnique: (...a: unknown[]) => mockDeliveryFindUnique(...a),
+        update: (...a: unknown[]) => mockDeliveryUpdate(...a),
+      },
+    }),
     webhookDelivery: {
       findUnique: (...a: unknown[]) => mockDeliveryFindUnique(...a),
       update: (...a: unknown[]) => mockDeliveryUpdate(...a),
@@ -170,6 +178,7 @@ describe('delivery processing', () => {
   test('2xx marks the delivery successful with the signed headers', async () => {
     mockFetch.mockResolvedValue(new Response('ok', { status: 200 }));
     expect(await deliverWebhook('d-1')).toBe('success');
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
     expect(mockDeliveryUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'success', attempts: 1, deliveredAt: expect.any(Date) }) })
     );

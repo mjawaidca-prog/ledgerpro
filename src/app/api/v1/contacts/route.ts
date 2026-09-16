@@ -4,8 +4,7 @@ import { authenticateApiRequest } from '@/lib/api/auth';
 import { pageParamsFrom, cursorPage, prismaCursor, updatedAtFilter } from '@/lib/api/pagination';
 import { moneyString, isoDate } from '@/lib/api/serialize';
 import { contactCreateSchema, validationErrorResponse } from '@/lib/api/validation';
-import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
-import { auditLog } from '@/lib/api-helpers';
+import { idempotencyContextFrom, withIdempotency, idempotencyRejection } from '@/lib/api/idempotency';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -71,31 +70,32 @@ export async function POST(req: NextRequest) {
   const { context, error } = await authenticateApiRequest(req, { permission: 'write_draft' });
   if (error) return error;
 
-  const parsed = contactCreateSchema.safeParse(await req.json().catch(() => null));
+  const requestBody = await req.json().catch(() => null);
+  const parsed = contactCreateSchema.safeParse(requestBody);
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
-  const company = await db.company.findUniqueOrThrow({
-    where: { id: context!.companyId },
-    select: { currency: true, enabledCurrencies: true },
-  });
-  const currency = parsed.data.currency ?? company.currency;
-  if (!company.enabledCurrencies.includes(currency)) {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'validation_error',
-          message: 'One or more fields failed validation.',
-          fields: { currency: `Currency ${currency} is not enabled for this company.` },
-        },
-      },
-      { status: 400 }
-    );
-  }
-
-  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId });
+  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId }, requestBody);
   if ('error' in idem) return idem.error;
 
   const outcome = await withIdempotency(idem.context, async (tx) => {
+    const company = await tx.company.findUniqueOrThrow({
+      where: { id: context!.companyId },
+      select: { currency: true, enabledCurrencies: true },
+    });
+    const currency = parsed.data.currency ?? company.currency;
+    if (!company.enabledCurrencies.includes(currency)) {
+      return idempotencyRejection(NextResponse.json(
+        {
+          error: {
+            code: 'validation_error',
+            message: 'One or more fields failed validation.',
+            fields: { currency: `Currency ${currency} is not enabled for this company.` },
+          },
+        },
+        { status: 400 }
+      ));
+    }
+
     const contact = await tx.contact.create({
       data: {
         companyId: context!.companyId,
@@ -115,12 +115,7 @@ export async function POST(req: NextRequest) {
       statusCode: 201,
       body: { data: { id: contact.id, name: contact.name, type: contact.type, currency } },
     };
-  });
-
-  await auditLog(context!.companyId, undefined, 'api.contact.create', 'contact', (outcome.body as any)?.data?.id ?? null, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-  });
+  }, { audit: { action: 'api.contact.create', entityType: 'contact', apiKeyName: context!.apiKeyName } });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }

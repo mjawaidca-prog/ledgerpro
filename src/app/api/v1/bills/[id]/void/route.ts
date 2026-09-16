@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiRequest } from '@/lib/api/auth';
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { voidReviewedDocument } from '@/lib/api/posting';
-import { auditLog } from '@/lib/api-helpers';
 export const dynamic = 'force-dynamic';
 
 // POST /api/v1/bills/[id]/void — void a draft (deleted) or a posted bill
@@ -35,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         statusCode: 200,
         body: { data: { id: result.id, status: result.status, mode: result.mode } },
       };
-    });
+    }, { audit: { action: 'api.bill.void', entityType: 'bill', apiKeyName: context!.apiKeyName } });
   } catch (err: any) {
     if (err?.__status) {
       return NextResponse.json({ error: { code: err.__code, message: err.message } }, { status: err.__status });
@@ -43,11 +42,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     console.error('POST /api/v1/bills/[id]/void error:', err);
     return NextResponse.json({ error: { code: 'internal_error', message: 'Failed to void bill.' } }, { status: 500 });
   }
-
-  await auditLog(context!.companyId, undefined, 'api.bill.void', 'bill', params.id, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-  });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/auth';
 import { db } from '@/lib/db';
+import type { Prisma } from '@prisma/client';
 
 /**
  * Get the authenticated user's companyId and userId.
@@ -247,9 +248,10 @@ export async function accountLockedGuard(
  */
 export async function closedPeriodGuard(
   companyId: string,
-  date: Date
+  date: Date,
+  client: Prisma.TransactionClient | typeof db = db
 ): Promise<NextResponse | null> {
-  const closed = await db.periodClose.findFirst({
+  const closed = await client.periodClose.findFirst({
     where: {
       companyId,
       status: 'closed',

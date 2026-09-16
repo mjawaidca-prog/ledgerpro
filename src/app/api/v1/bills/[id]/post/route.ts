@@ -3,8 +3,6 @@ import { authenticateApiRequest } from '@/lib/api/auth';
 import { taxDecisionSchema, validationErrorResponse } from '@/lib/api/validation';
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { postReviewedDocument } from '@/lib/api/posting';
-import { auditLog } from '@/lib/api-helpers';
-import { emitWebhookEvent } from '@/lib/webhooks';
 export const dynamic = 'force-dynamic';
 
 // POST /api/v1/bills/[id]/post — post a draft bill through the reviewed-tax
@@ -13,10 +11,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { context, error } = await authenticateApiRequest(req, { permission: 'write_posting' });
   if (error) return error;
 
-  const parsed = taxDecisionSchema.safeParse(await req.json().catch(() => null));
+  const requestBody = await req.json().catch(() => null);
+  const parsed = taxDecisionSchema.safeParse(requestBody);
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
-  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId });
+  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId }, requestBody);
   if ('error' in idem) return idem.error;
 
   let outcome;
@@ -42,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         statusCode: 200,
         body: { data: result.document },
       };
-    });
+    }, { audit: { action: 'api.bill.post', entityType: 'bill', apiKeyName: context!.apiKeyName }, eventType: 'bill.updated' });
   } catch (err: any) {
     if (err?.__status) {
       return NextResponse.json({ error: { code: err.__code, message: err.message } }, { status: err.__status });
@@ -50,21 +49,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     console.error('POST /api/v1/bills/[id]/post error:', err);
     return NextResponse.json({ error: { code: 'internal_error', message: 'Failed to post bill.' } }, { status: 500 });
   }
-
-  await auditLog(context!.companyId, undefined, 'api.bill.post', 'bill', params.id, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-  });
-
-  await emitWebhookEvent({
-    companyId: context!.companyId,
-    eventType: 'bill.updated',
-    payload: {
-      id: params.id,
-      status: (outcome.body as any)?.data?.status,
-      occurredAt: new Date().toISOString(),
-    },
-  });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
+import { idempotencyContextFrom, withIdempotency, requestFingerprint } from '@/lib/api/idempotency';
 
 const mockFindUnique = jest.fn();
 const mockCreate = jest.fn();
@@ -39,10 +39,16 @@ describe('idempotency header parsing', () => {
     const tooLong = idempotencyContextFrom(req('x'.repeat(201)), { apiKeyId: 'k', companyId: 'co-1' });
     expect('error' in tooLong).toBe(true);
   });
+
+  test('fingerprints are stable across object key order but preserve value changes', () => {
+    expect(requestFingerprint({ amount: 10, contact: { id: 'c-1', name: 'A' } }))
+      .toBe(requestFingerprint({ contact: { name: 'A', id: 'c-1' }, amount: 10 }));
+    expect(requestFingerprint({ amount: 10 })).not.toBe(requestFingerprint({ amount: 11 }));
+  });
 });
 
 describe('withIdempotency', () => {
-  const ctx = { requestKey: 'key-1', apiKeyId: 'k', companyId: 'co-1', method: 'POST', path: '/api/v1/contacts' };
+  const ctx = { requestKey: 'key-1', apiKeyId: 'k', companyId: 'co-1', method: 'POST', path: '/api/v1/contacts', requestHash: requestFingerprint({ name: 'Cust' }) };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -76,7 +82,7 @@ describe('withIdempotency', () => {
 
   test('replays the stored response without executing again', async () => {
     mockFindUnique.mockResolvedValue({
-      companyId: ctx.companyId, method: ctx.method, path: ctx.path,
+      requestHash: ctx.requestHash, companyId: ctx.companyId, method: ctx.method, path: ctx.path,
       response: { data: { id: 'c-1' } },
       statusCode: 201,
     });
@@ -94,7 +100,7 @@ describe('withIdempotency', () => {
     // After acquiring the transaction lock, the lookup finds the concurrent
     // winner — execute must not run.
     mockFindUnique.mockResolvedValueOnce({
-      companyId: ctx.companyId, method: ctx.method, path: ctx.path,
+      requestHash: ctx.requestHash, companyId: ctx.companyId, method: ctx.method, path: ctx.path,
       response: { data: { id: 'c-1' } },
       statusCode: 201,
     });
@@ -107,9 +113,27 @@ describe('withIdempotency', () => {
   });
 
   test('rejects the same key used for another endpoint', async () => {
-    mockFindUnique.mockResolvedValue({ companyId: ctx.companyId, method: ctx.method, path: '/api/v1/payments' });
+    mockFindUnique.mockResolvedValue({ requestHash: ctx.requestHash, companyId: ctx.companyId, method: ctx.method, path: '/api/v1/payments' });
     const execute = jest.fn();
     expect((await withIdempotency(ctx, execute)).statusCode).toBe(409);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('rejects the same key used with a changed request body', async () => {
+    mockFindUnique.mockResolvedValue({ ...ctx, requestHash: requestFingerprint({ name: 'Different' }) });
+    const execute = jest.fn();
+    const outcome = await withIdempotency(ctx, execute);
+    expect(outcome.statusCode).toBe(409);
+    expect((outcome.body as any).error.code).toBe('idempotency_key_conflict');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test('legacy records without a fingerprint are not replayed unsafely', async () => {
+    mockFindUnique.mockResolvedValue({ ...ctx, requestHash: null });
+    const execute = jest.fn();
+    const outcome = await withIdempotency(ctx, execute);
+    expect(outcome.statusCode).toBe(409);
+    expect((outcome.body as any).error.code).toBe('idempotency_legacy_record');
     expect(execute).not.toHaveBeenCalled();
   });
 

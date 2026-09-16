@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { requestFingerprint } from '@/lib/api/idempotency';
 
 const mockContactCreate = jest.fn();
 const mockContactFindFirst = jest.fn();
@@ -15,7 +16,7 @@ jest.mock('@/lib/db', () => ({
     invoice: { create: (...a: unknown[]) => mockInvoiceCreate(...a) },
     company: { findUniqueOrThrow: (...a: unknown[]) => mockCompanyFind(...a) },
     apiIdempotencyRecord: { findUnique: (...a: unknown[]) => mockIdemFindUnique(...a), create: (...a: unknown[]) => mockIdemCreate(...a) },
-    $transaction: (fn: unknown) => fn({ $executeRaw: jest.fn(), contact: { create: mockContactCreate }, invoice: { create: mockInvoiceCreate }, apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: mockIdemCreate } }),
+    $transaction: (fn: unknown) => fn({ $executeRaw: jest.fn(), auditLog: { create: mockAuditLog }, webhookEndpoint: { findMany: jest.fn().mockResolvedValue([]) }, company: { findUniqueOrThrow: mockCompanyFind }, contact: { create: mockContactCreate, findFirst: mockContactFindFirst }, invoice: { create: mockInvoiceCreate }, apiIdempotencyRecord: { findUnique: mockIdemFindUnique, create: mockIdemCreate } }),
   },
 }));
 
@@ -76,12 +77,12 @@ describe('API-C draft writes — contacts', () => {
     expect(mockContactCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ companyId: 'co-1', name: 'Cust', type: 'customer' }) })
     );
-    expect(mockAuditLog).toHaveBeenCalledWith('co-1', undefined, 'api.contact.create', 'contact', 'c-new', undefined, expect.objectContaining({ apiKeyId: 'k' }));
+    expect(mockAuditLog).toHaveBeenCalledWith({ data: expect.objectContaining({ companyId: 'co-1', action: 'api.contact.create', entityId: 'c-new', metadata: expect.objectContaining({ apiKeyId: 'k' }) }) });
   });
 
   test('the same Idempotency-Key replays the stored response without a second create', async () => {
     mockIdemFindUnique.mockResolvedValue({
-      companyId: 'co-1', method: 'POST', path: '/api/v1/contacts',
+      companyId: 'co-1', method: 'POST', path: '/api/v1/contacts', requestHash: requestFingerprint({ name: 'Cust', type: 'customer' }),
       response: { data: { id: 'c-new', name: 'Cust', type: 'customer', currency: 'CAD' } },
       statusCode: 201,
     });

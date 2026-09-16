@@ -5,9 +5,7 @@ import { authenticateApiRequest } from '@/lib/api/auth';
 import { pageParamsFrom, cursorPage, prismaCursor, updatedAtFilter } from '@/lib/api/pagination';
 import { moneyString, isoDate } from '@/lib/api/serialize';
 import { billDraftSchema, validationErrorResponse, parseDateField } from '@/lib/api/validation';
-import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
-import { auditLog } from '@/lib/api-helpers';
-import { emitWebhookEvent } from '@/lib/webhooks';
+import { idempotencyContextFrom, withIdempotency, idempotencyRejection } from '@/lib/api/idempotency';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -95,59 +93,60 @@ export async function POST(req: NextRequest) {
   const { context, error } = await authenticateApiRequest(req, { permission: 'write_draft' });
   if (error) return error;
 
-  const parsed = billDraftSchema.safeParse(await req.json().catch(() => null));
+  const requestBody = await req.json().catch(() => null);
+  const parsed = billDraftSchema.safeParse(requestBody);
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
-  const company = await db.company.findUniqueOrThrow({
-    where: { id: context!.companyId },
-    select: { currency: true, enabledCurrencies: true },
-  });
-  const currency = parsed.data.currency ?? company.currency;
-  if (!company.enabledCurrencies.includes(currency)) {
-    return NextResponse.json(
-      { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { currency: `Currency ${currency} is not enabled for this company.` } } },
-      { status: 400 }
-    );
-  }
-  const vendor = await db.contact.findFirst({
-    where: { id: parsed.data.vendorId, companyId: context!.companyId, type: 'supplier' },
-    select: { id: true, currency: true },
-  });
-  if (!vendor) {
-    return NextResponse.json(
-      { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { vendorId: 'vendorId must be an existing supplier of this company.' } } },
-      { status: 400 }
-    );
-  }
-  if (currency !== vendor.currency && parsed.data.currency) {
-    return NextResponse.json(
-      { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { currency: `Currency must match the vendor's currency (${vendor.currency}).` } } },
-      { status: 400 }
-    );
-  }
-
-  const billDate = parseDateField(parsed.data.billDate);
-  const dueDate = parsed.data.dueDate ? parseDateField(parsed.data.dueDate) : null;
-  if (dueDate && dueDate < billDate) {
-    return NextResponse.json(
-      { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { dueDate: 'dueDate cannot be before billDate.' } } },
-      { status: 400 }
-    );
-  }
-
-  // Foreign-currency documents freeze their FX rate at creation.
-  const isForeign = currency !== company.currency;
-  if (isForeign && !parsed.data.fxRate) {
-    return NextResponse.json(
-      { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { fxRate: `fxRate is required for foreign-currency documents (${currency} vs home ${company.currency}).` } } },
-      { status: 400 }
-    );
-  }
-
-  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId });
+  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId }, requestBody);
   if ('error' in idem) return idem.error;
 
   const outcome = await withIdempotency(idem.context, async (tx) => {
+    const company = await tx.company.findUniqueOrThrow({
+      where: { id: context!.companyId },
+      select: { currency: true, enabledCurrencies: true },
+    });
+    const currency = parsed.data.currency ?? company.currency;
+    if (!company.enabledCurrencies.includes(currency)) {
+      return idempotencyRejection(NextResponse.json(
+        { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { currency: `Currency ${currency} is not enabled for this company.` } } },
+        { status: 400 }
+      ));
+    }
+    const vendor = await tx.contact.findFirst({
+      where: { id: parsed.data.vendorId, companyId: context!.companyId, type: 'supplier' },
+      select: { id: true, currency: true },
+    });
+    if (!vendor) {
+      return idempotencyRejection(NextResponse.json(
+        { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { vendorId: 'vendorId must be an existing supplier of this company.' } } },
+        { status: 400 }
+      ));
+    }
+    if (currency !== vendor.currency && parsed.data.currency) {
+      return idempotencyRejection(NextResponse.json(
+        { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { currency: `Currency must match the vendor's currency (${vendor.currency}).` } } },
+        { status: 400 }
+      ));
+    }
+
+    const billDate = parseDateField(parsed.data.billDate);
+    const dueDate = parsed.data.dueDate ? parseDateField(parsed.data.dueDate) : null;
+    if (dueDate && dueDate < billDate) {
+      return idempotencyRejection(NextResponse.json(
+        { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { dueDate: 'dueDate cannot be before billDate.' } } },
+        { status: 400 }
+      ));
+    }
+
+    // Foreign-currency documents freeze their FX rate at creation.
+    const isForeign = currency !== company.currency;
+    if (isForeign && !parsed.data.fxRate) {
+      return idempotencyRejection(NextResponse.json(
+        { error: { code: 'validation_error', message: 'One or more fields failed validation.', fields: { fxRate: `fxRate is required for foreign-currency documents (${currency} vs home ${company.currency}).` } } },
+        { status: 400 }
+      ));
+    }
+
     const subtotal = Math.round(parsed.data.lineItems.reduce((s, l) => s + l.amount, 0) * 100) / 100;
 
     const bill = await tx.bill.create({
@@ -187,23 +186,7 @@ export async function POST(req: NextRequest) {
       statusCode: 201,
       body: { data: serializeBill(bill) },
     };
-  });
-
-  await auditLog(context!.companyId, undefined, 'api.bill.create', 'bill', (outcome.body as any)?.data?.id ?? null, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-    status: 'draft',
-  });
-
-  await emitWebhookEvent({
-    companyId: context!.companyId,
-    eventType: 'bill.created',
-    payload: {
-      id: (outcome.body as any)?.data?.id,
-      status: 'draft',
-      occurredAt: new Date().toISOString(),
-    },
-  });
+  }, { audit: { action: 'api.bill.create', entityType: 'bill', apiKeyName: context!.apiKeyName }, eventType: 'bill.created' });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }

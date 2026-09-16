@@ -1,8 +1,8 @@
 // API-D webhooks: signed, retried, visible and replayable event delivery to
 // connected applications. Separate from Stripe payment webhooks.
 //
-// - Events are emitted as durable WebhookDelivery rows — emitting is
-//   best-effort and can never fail the mutation that produced the event.
+// - API-write events are inserted as durable WebhookDelivery rows in the
+//   accounting transaction. Dashboard emitters remain best-effort.
 // - Each delivery is HMAC-SHA256 signed with the endpoint secret and carries
 //   a stable event id, so consumers can verify and dedupe.
 // - Delivery retries follow a fixed backoff ladder; a delivery is sent at
@@ -225,74 +225,81 @@ export async function safeFetchWebhook(
  * history. Returns the updated status.
  */
 export async function deliverWebhook(deliveryId: string): Promise<WebhookDeliveryStatus> {
-  const delivery = await db.webhookDelivery.findUnique({
-    where: { id: deliveryId },
-    include: { endpoint: true },
-  });
-  if (!delivery || delivery.status === 'success' || delivery.status === 'dead') {
-    return delivery?.status ?? 'dead';
-  }
-  if (!delivery.endpoint.enabled) {
-    // Preserve history for explicit replay; disabling must stop queued retries.
-    await db.webhookDelivery.update({ where: { id: delivery.id }, data: {
-      status: 'dead', nextAttemptAt: null, lastError: 'Webhook endpoint disabled',
-    } });
-    return 'dead';
-  }
-
-  const attempt = delivery.attempts + 1;
-  try {
-    const body = JSON.stringify(delivery.payload);
-    const timestamp = Date.now();
-    const signature = signWebhookPayload(delivery.endpoint.secret, body, timestamp);
-    const res = await safeFetchWebhook(delivery.endpoint.url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-ledgerpro-event': delivery.eventType,
-        'x-ledgerpro-event-id': delivery.eventId,
-        'x-ledgerpro-timestamp': String(timestamp),
-        'x-ledgerpro-signature': `sha256=${signature}`,
-      },
-      body,
-      // Bound each attempt so one slow endpoint can't stall the sweep.
-      signal: AbortSignal.timeout(5000),
+  return db.$transaction(async (tx) => {
+    // Serialize delivery across cron and request piggyback sweeps. Holding the
+    // transaction-scoped advisory lock through the bounded HTTP attempt ensures
+    // that a single delivery attempt is never sent concurrently.
+    const lockKey = `webhook-delivery:${deliveryId}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    const delivery = await tx.webhookDelivery.findUnique({
+      where: { id: deliveryId },
+      include: { endpoint: true },
     });
-
-    if (res.ok) {
-      await db.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: { status: 'success', attempts: attempt, lastError: null, deliveredAt: new Date(), nextAttemptAt: null },
-      });
-      return 'success';
+    if (!delivery || delivery.status === 'success' || delivery.status === 'dead') {
+      return delivery?.status ?? 'dead';
     }
-
-    const error = `HTTP ${res.status}`;
-    if (attempt >= MAX_ATTEMPTS) {
-      await db.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: { status: 'dead', attempts: attempt, lastError: error, nextAttemptAt: null },
-      });
+    if (!delivery.endpoint.enabled) {
+      // Preserve history for explicit replay; disabling must stop queued retries.
+      await tx.webhookDelivery.update({ where: { id: delivery.id }, data: {
+        status: 'dead', nextAttemptAt: null, lastError: 'Webhook endpoint disabled',
+      } });
       return 'dead';
     }
-    await db.webhookDelivery.update({
-      where: { id: delivery.id },
-      data: { status: 'failed', attempts: attempt, lastError: error, nextAttemptAt: nextAttemptAtFor(attempt) },
-    });
-    return 'failed';
-  } catch (e: any) {
-    const error = e?.message?.slice(0, 500) ?? 'Unknown delivery error';
-    if (attempt >= MAX_ATTEMPTS) {
-      await db.webhookDelivery.update({
-        where: { id: delivery.id },
-        data: { status: 'dead', attempts: attempt, lastError: error, nextAttemptAt: null },
+
+    const attempt = delivery.attempts + 1;
+    try {
+      const body = JSON.stringify(delivery.payload);
+      const timestamp = Date.now();
+      const signature = signWebhookPayload(delivery.endpoint.secret, body, timestamp);
+      const res = await safeFetchWebhook(delivery.endpoint.url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-ledgerpro-event': delivery.eventType,
+          'x-ledgerpro-event-id': delivery.eventId,
+          'x-ledgerpro-timestamp': String(timestamp),
+          'x-ledgerpro-signature': `sha256=${signature}`,
+        },
+        body,
+        // Bound each attempt so one slow endpoint can't stall the sweep.
+        signal: AbortSignal.timeout(5000),
       });
-      return 'dead';
+
+      if (res.ok) {
+        await tx.webhookDelivery.update({
+          where: { id: delivery.id },
+          data: { status: 'success', attempts: attempt, lastError: null, deliveredAt: new Date(), nextAttemptAt: null },
+        });
+        return 'success';
+      }
+
+      const error = `HTTP ${res.status}`;
+      if (attempt >= MAX_ATTEMPTS) {
+        await tx.webhookDelivery.update({
+          where: { id: delivery.id },
+          data: { status: 'dead', attempts: attempt, lastError: error, nextAttemptAt: null },
+        });
+        return 'dead';
+      }
+      await tx.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: { status: 'failed', attempts: attempt, lastError: error, nextAttemptAt: nextAttemptAtFor(attempt) },
+      });
+      return 'failed';
+    } catch (e: any) {
+      const error = e?.message?.slice(0, 500) ?? 'Unknown delivery error';
+      if (attempt >= MAX_ATTEMPTS) {
+        await tx.webhookDelivery.update({
+          where: { id: delivery.id },
+          data: { status: 'dead', attempts: attempt, lastError: error, nextAttemptAt: null },
+        });
+        return 'dead';
+      }
+      await tx.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: { status: 'failed', attempts: attempt, lastError: error, nextAttemptAt: nextAttemptAtFor(attempt) },
+      });
+      return 'failed';
     }
-    await db.webhookDelivery.update({
-      where: { id: delivery.id },
-      data: { status: 'failed', attempts: attempt, lastError: error, nextAttemptAt: nextAttemptAtFor(attempt) },
-    });
-    return 'failed';
-  }
+  }, { maxWait: 10000, timeout: 12000 });
 }

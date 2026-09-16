@@ -21,7 +21,8 @@ Drafts carry no tax decisions — reviewed tax is applied at posting, exactly li
 
 ## Idempotency and duplicate prevention
 
-- Every POST requires an `Idempotency-Key` header. `ApiIdempotencyRecord` commits **in the same transaction as the mutation**; a retry replays the stored response, and the unique index breaks the concurrent race.
+- Every mutating request (POST and contact PATCH) requires an `Idempotency-Key` header. `ApiIdempotencyRecord` commits **in the same transaction as the mutation**. The record includes a canonical SHA-256 request-body fingerprint: an exact retry replays the stored response, while reuse for a different payload, company, method or path returns `409 idempotency_key_conflict`. Pre-migration records without a fingerprint return `409 idempotency_legacy_record` instead of an unsafe replay.
+- The accounting mutation, audit entry, API webhook intent and idempotency response commit or roll back together. Network delivery occurs only after commit and failed attempts remain queued for retry.
 - Posting also inherits the engine's own replay receipt (`companyId+sourceKey`), so duplicate protection holds at two independent layers.
 - Migration `20260911180000_api_c_idempotency` is additive only.
 

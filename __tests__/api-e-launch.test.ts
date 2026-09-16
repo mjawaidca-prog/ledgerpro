@@ -28,11 +28,11 @@ describe('API-E OpenAPI document', () => {
     expect(doc.components.schemas.WebhookSignature.description).toContain('HMAC-SHA256');
   });
 
-  test('documents idempotency on every POST endpoint (PATCH replays are naturally safe)', () => {
+  test('documents idempotency on every mutating endpoint', () => {
     const doc: any = openapiDocument();
     for (const [path, methods] of Object.entries<any>(doc.paths)) {
       for (const [method, op] of Object.entries<any>(methods)) {
-        if (method === 'post') {
+        if (method === 'post' || method === 'patch') {
           const hasIdem = (op.parameters ?? []).some((p: any) => p.name === 'Idempotency-Key');
           expect(hasIdem).toBe(true);
         }
@@ -53,6 +53,8 @@ describe('API-E OpenAPI document', () => {
     expect(codes.api_plan_required).toBeDefined();
     expect(codes.rate_limited).toBeDefined();
     expect(codes.idempotency_key_required).toBeDefined();
+    expect(codes.idempotency_key_conflict).toBeDefined();
+    expect(codes.idempotency_legacy_record).toBeDefined();
     expect(codes.tax_settlement_reversal_required).toBeDefined();
   });
 });

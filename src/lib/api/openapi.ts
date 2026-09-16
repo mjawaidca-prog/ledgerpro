@@ -83,7 +83,10 @@ export function openapiDocument(): object {
         patch: {
           operationId: 'updateContact',
           summary: 'Update a contact (write_draft)',
-          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } },
+          ],
           responses: { '200': { description: 'Updated' } },
         },
       },
@@ -332,6 +335,8 @@ export function openapiDocument(): object {
             rate_limited: { type: 'string', description: '429 — over a limit window; honor retryAfterSeconds.' },
             validation_error: { type: 'string', description: '400 — field-level problems; see fields.' },
             idempotency_key_required: { type: 'string', description: '400 — writes need an Idempotency-Key header.' },
+            idempotency_key_conflict: { type: 'string', description: '409 — the key was already used for a different payload, company, method or path.' },
+            idempotency_legacy_record: { type: 'string', description: '409 — the key predates payload verification and cannot be replayed automatically.' },
             not_found: { type: 'string', description: '404 — the id does not exist in this company.' },
             invalid_parameter: { type: 'string', description: '400 — a query parameter is malformed.' },
             closed_period: { type: 'string', description: '409 — the date falls inside a closed period.' },

@@ -4,10 +4,9 @@ import { authenticateApiRequest } from '@/lib/api/auth';
 import { pageParamsFrom, cursorPage, prismaCursor } from '@/lib/api/pagination';
 import { moneyString, isoDate } from '@/lib/api/serialize';
 import { journalCreateSchema, validationErrorResponse, parseDateField } from '@/lib/api/validation';
-import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
+import { idempotencyContextFrom, withIdempotency, idempotencyRejection } from '@/lib/api/idempotency';
 import { postJournalEntry } from '@/lib/journal';
-import { closedPeriodGuard, auditLog } from '@/lib/api-helpers';
-import { emitWebhookEvent } from '@/lib/webhooks';
+import { closedPeriodGuard } from '@/lib/api-helpers';
 import type { Prisma } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
@@ -82,19 +81,20 @@ export async function POST(req: NextRequest) {
   const { context, error } = await authenticateApiRequest(req, { permission: 'write_posting' });
   if (error) return error;
 
-  const parsed = journalCreateSchema.safeParse(await req.json().catch(() => null));
+  const requestBody = await req.json().catch(() => null);
+  const parsed = journalCreateSchema.safeParse(requestBody);
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
-  const entryDate = parseDateField(parsed.data.entryDate);
-  const guard = await closedPeriodGuard(context!.companyId, entryDate);
-  if (guard) return guard;
-
-  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId });
+  const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId }, requestBody);
   if ('error' in idem) return idem.error;
 
   let outcome;
   try {
     outcome = await withIdempotency(idem.context, async (tx) => {
+      const entryDate = parseDateField(parsed.data.entryDate);
+      const guard = await closedPeriodGuard(context!.companyId, entryDate, tx);
+      if (guard) return idempotencyRejection(guard);
+
       const entry = await postJournalEntry(
         {
           entryDate,
@@ -117,27 +117,13 @@ export async function POST(req: NextRequest) {
         statusCode: 201,
         body: { data: { id: entry.id, entryDate: entryDate.toISOString(), description: parsed.data.description, sourceType: 'manual' } },
       };
-    });
+    }, { audit: { action: 'api.journal.create', entityType: 'journal_entry', apiKeyName: context!.apiKeyName }, eventType: 'journal.posted' });
   } catch (err: any) {
     const message = err?.message ?? '';
     const code = /balanced/i.test(message) ? 'journal_unbalanced' : /account/i.test(message) ? 'invalid_account' : 'journal_failed';
     const status = code === 'journal_failed' ? 400 : 400;
     return NextResponse.json({ error: { code, message: message || 'Failed to create journal entry.' } }, { status });
   }
-
-  await auditLog(context!.companyId, undefined, 'api.journal.create', 'journal_entry', (outcome.body as any)?.data?.id ?? null, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-  });
-
-  await emitWebhookEvent({
-    companyId: context!.companyId,
-    eventType: 'journal.posted',
-    payload: {
-      id: (outcome.body as any)?.data?.id,
-      occurredAt: new Date().toISOString(),
-    },
-  });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }

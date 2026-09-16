@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiRequest } from '@/lib/api/auth';
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
 import { voidJournalEntry } from '@/lib/journal';
-import { auditLog, closedPeriodGuard } from '@/lib/api-helpers';
+import { closedPeriodGuard } from '@/lib/api-helpers';
 export const dynamic = 'force-dynamic';
 
 // POST /api/v1/journal-entries/[id]/void — void a posted journal entry with
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         return { resourceType: 'journal_void', resourceId: params.id, statusCode: 409,
           body: { error: { code: 'source_workflow_required', message: 'Only original manual journals can be voided here. Use the source document or payment reversal workflow.' } } };
       }
-      const guard = await closedPeriodGuard(context!.companyId, new Date());
+      const guard = await closedPeriodGuard(context!.companyId, new Date(), tx);
       if (guard) return { resourceType: 'journal_void', resourceId: params.id, statusCode: guard.status, body: await guard.json() };
       const result = await voidJournalEntry(params.id, context!.companyId, undefined, new Date(), tx);
       return {
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         statusCode: 200,
         body: { data: { id: params.id, voided: true } },
       };
-    });
+    }, { audit: { action: 'api.journal.void', entityType: 'journal_entry', apiKeyName: context!.apiKeyName } });
   } catch (err: any) {
     const message = err?.message ?? '';
     if (/not found/i.test(message)) {
@@ -44,11 +44,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     console.error('POST /api/v1/journal-entries/[id]/void error:', err);
     return NextResponse.json({ error: { code: 'journal_void_failed', message: message || 'Failed to void journal entry.' } }, { status: 400 });
   }
-
-  await auditLog(context!.companyId, undefined, 'api.journal.void', 'journal_entry', params.id, undefined, {
-    apiKeyId: context!.apiKeyId,
-    apiKeyName: context!.apiKeyName,
-  });
 
   return NextResponse.json(outcome.body, { status: outcome.statusCode });
 }
