@@ -1,9 +1,12 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
+import { StructuredData } from '@/components/seo/StructuredData';
+import { LEDGERPRO_URL } from '@/lib/seo';
 
 export const metadata = {
-  title: 'FAQ — LedgerPro',
+  title: 'Accounting Software FAQ',
   description: 'Answers to common questions about LedgerPro: pricing, trials, data security, Canadian tax support, and migrating from another system.',
+  alternates: { canonical: 'https://ledger.nexvarlab.com/faq' },
 };
 
 const FAQS = [
@@ -56,6 +59,18 @@ const FAQS = [
 export default function FAQPage() {
   return (
     <>
+      <StructuredData
+        data={{
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          url: `${LEDGERPRO_URL}/faq`,
+          mainEntity: FAQS.map((item) => ({
+            '@type': 'Question',
+            name: item.q,
+            acceptedAnswer: { '@type': 'Answer', text: item.a },
+          })),
+        }}
+      />
       <section className="max-w-3xl mx-auto px-5 pt-16 pb-10 text-center">
         <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight text-[var(--text-strong)]">
           Frequently asked questions
@@ -80,7 +95,7 @@ export default function FAQPage() {
         <p className="text-[var(--text-muted)] mb-6">Still have questions?</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <a
-            href="mailto:sales@nexvarlab.com"
+            href="mailto:hello@nexvarlab.online"
             className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)] bg-[var(--surface)] border border-[var(--border-strong)] hover:bg-[var(--surface-2)] rounded-md px-6 py-3 no-underline transition-colors"
           >
             Contact Sales

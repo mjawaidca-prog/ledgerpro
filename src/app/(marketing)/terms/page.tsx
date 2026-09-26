@@ -1,5 +1,6 @@
 export const metadata = {
   title: 'Terms of Service — LedgerPro',
+  robots: { index: false, follow: true },
 };
 
 export default function TermsPage() {
@@ -12,7 +13,7 @@ export default function TermsPage() {
         and cancellation policy.
       </div>
       <p className="text-sm text-[var(--text-muted)]">
-        Questions in the meantime? Contact <a href="mailto:sales@nexvarlab.com" className="text-[var(--primary)]">sales@nexvarlab.com</a>.
+        Questions in the meantime? Contact <a href="mailto:hello@nexvarlab.online" className="text-[var(--primary)]">hello@nexvarlab.online</a>.
       </p>
     </section>
   );

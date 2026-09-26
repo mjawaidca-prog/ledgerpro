@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 
 export const metadata = {
-  title: 'About — LedgerPro',
+  title: 'About LedgerPro',
   description: 'Why LedgerPro exists: accounting software built specifically for how Canadian small businesses actually keep their books.',
+  alternates: { canonical: 'https://ledger.nexvarlab.com/about' },
 };
 
 export default function AboutPage() {

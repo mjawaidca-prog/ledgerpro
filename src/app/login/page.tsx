@@ -59,7 +59,7 @@ export default function LoginPage() {
             <span className="text-2xl font-bold tracking-[-0.02em] text-[var(--text-strong)]">
               Ledger<span className="text-[var(--primary)]">Pro</span>
             </span>
-            <div className="text-[10px] text-[var(--text-faint)] font-mono mt-1">by NexvarLab</div>
+            <div className="text-[10px] text-[var(--text-faint)] font-mono mt-1">by Nexvar Lab Inc.</div>
           </div>
           <p className="text-sm text-[var(--text-muted)]">Sign in to your account</p>
         </div>
@@ -137,7 +137,7 @@ export default function LoginPage() {
           </Link>
         </p>
         <p className="text-center text-xs text-[var(--text-faint)] mt-6">
-          LedgerPro by NexvarLab
+          LedgerPro by Nexvar Lab Inc.
         </p>
       </div>
     </div>

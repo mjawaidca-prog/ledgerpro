@@ -9,7 +9,7 @@ type CrossSellProps = {
 };
 
 export function CrossSell({
-  eyebrow = 'Also from NexvarLab',
+  eyebrow = 'Also from Nexvar Lab',
   heading,
   body,
   ctaLabel,

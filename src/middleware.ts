@@ -23,6 +23,10 @@ function isPublicPath(pathname: string) {
     // Cron performs its own CRON_SECRET check; it has no dashboard cookie.
     pathname === '/api/plaid/sync-cron' ||
     pathname === '/api/webhooks/deliver-cron' ||
+    pathname === '/robots.txt' ||
+    pathname === '/sitemap.xml' ||
+    pathname.startsWith('/opengraph-image') ||
+    pathname.startsWith('/features/') ||
     PUBLIC_MARKETING_PATHS.includes(pathname)
   );
 }
@@ -78,5 +82,5 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|opengraph-image).*)'],
 };

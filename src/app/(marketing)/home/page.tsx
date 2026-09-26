@@ -7,6 +7,8 @@ import {
 export const metadata = {
   title: 'LedgerPro — Accounting Software for Canadian Small Businesses',
   description: 'Double-entry accounting, invoicing, bank reconciliation, and tax-ready reports built for Canadian small businesses. Start your free 30-day trial.',
+  alternates: { canonical: 'https://ledger.nexvarlab.com' },
+  robots: { index: false, follow: true },
 };
 
 const FEATURES = [

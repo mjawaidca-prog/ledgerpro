@@ -1,7 +1,14 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Check, Mail } from 'lucide-react';
 import { LandingFooter } from '@/components/landing/Footer';
 import { LandingNavbar } from '@/components/landing/Navbar';
+
+export const metadata: Metadata = {
+  title: 'Pricing for Canadian Small Business Accounting',
+  description: 'Compare LedgerPro accounting plans for Canadian small businesses, bookkeepers, and accountants. Start with a free 30-day trial.',
+  alternates: { canonical: 'https://ledger.nexvarlab.com/pricing' },
+};
 
 const plans = [
   {
@@ -41,7 +48,7 @@ const plans = [
     annualPrice: '$1,990/yr', oneTime: '$1,999 one-time',
     features: ['50 users', '25 companies', 'Unlimited transactions', 'White label', 'API access', 'Dedicated support'],
     cta: 'Contact Sales',
-    href: 'mailto:sales@nexvarlab.com',
+    href: 'mailto:hello@nexvarlab.online',
     featured: false,
   },
 ];

@@ -28,7 +28,8 @@ export function MarketingFooter() {
           <ul className="space-y-2 list-none p-0 m-0">
             <li><Link href="/about" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">About</Link></li>
             <li><Link href="/faq" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">FAQ</Link></li>
-            <li><a href="mailto:sales@nexvarlab.com" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Contact Sales</a></li>
+            <li><a href="https://www.nexvarlab.online" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Nexvar Lab Inc.</a></li>
+            <li><a href="mailto:hello@nexvarlab.online" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Contact</a></li>
           </ul>
         </div>
 
@@ -43,7 +44,7 @@ export function MarketingFooter() {
 
       <div className="border-t border-[var(--border)]">
         <div className="max-w-6xl mx-auto px-5 py-5 text-xs text-[var(--text-faint)] flex flex-col md:flex-row gap-2 justify-between">
-          <span>© {new Date().getFullYear()} NexVar Labs. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} Nexvar Lab Inc. All rights reserved.</span>
           <span>Made for Canadian small businesses.</span>
         </div>
       </div>

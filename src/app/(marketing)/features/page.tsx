@@ -5,8 +5,9 @@ import {
 } from 'lucide-react';
 
 export const metadata = {
-  title: 'Features — LedgerPro',
+  title: 'Accounting Software Features',
   description: 'A tour of everything LedgerPro handles: invoicing, bills, bank reconciliation, Canadian tax reports, multi-company support, and audit-ready controls.',
+  alternates: { canonical: 'https://ledger.nexvarlab.com/features' },
 };
 
 const CATEGORIES = [
@@ -107,6 +108,13 @@ const CATEGORIES = [
   },
 ];
 
+const FEATURE_LINKS: Record<string, string> = {
+  'Invoicing & Accounts Receivable': '/features/invoicing',
+  'Bank & Credit Card Import': '/features/bank-reconciliation',
+  'Canadian Tax & Compliance': '/features/canadian-sales-tax',
+  Reporting: '/features/financial-reporting',
+};
+
 export default function FeaturesPage() {
   return (
     <>
@@ -127,7 +135,13 @@ export default function FeaturesPage() {
                 <div className="w-9 h-9 rounded-lg bg-[var(--primary-soft)] text-[var(--primary)] grid place-items-center flex-none">
                   <c.icon size={18} />
                 </div>
-                <h2 className="font-semibold text-[var(--text-strong)]">{c.title}</h2>
+                <h2 className="font-semibold text-[var(--text-strong)]">
+                  {FEATURE_LINKS[c.title] ? (
+                    <Link href={FEATURE_LINKS[c.title]} className="text-inherit no-underline hover:text-[var(--primary)]">
+                      {c.title}
+                    </Link>
+                  ) : c.title}
+                </h2>
               </div>
               <ul className="space-y-2 list-none p-0 m-0">
                 {c.items.map((item) => (

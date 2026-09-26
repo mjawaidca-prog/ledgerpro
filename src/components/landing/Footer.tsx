@@ -15,15 +15,15 @@ export function LandingFooter() {
               </span>
             </div>
             <p className="mt-3.5 max-w-[230px] text-sm text-[var(--text-muted)]">
-              Double-entry accounting built for Canadian small businesses. A NexvarLab product.
+              Double-entry accounting built for Canadian small businesses. A Nexvar Lab Inc. product.
             </p>
           </div>
           <FooterCol title="Product" links={[['Features', '/#features'], ['Pricing', '/pricing'], ['Start Free Trial', '/register']]} />
-          <FooterCol title="NexvarLab" links={[['Nexvar Pay Payroll', 'https://pay.nexvarlab.com'], ['Contact Sales', 'mailto:sales@nexvarlab.com'], ['Sign In', '/login']]} />
+          <FooterCol title="Nexvar Lab" links={[['Company Website', 'https://www.nexvarlab.online'], ['Nexvar Pay Payroll', 'https://pay.nexvarlab.com'], ['Contact', 'mailto:hello@nexvarlab.online']]} />
           <FooterCol title="Platform" links={[['Dashboard', '/dashboard'], ['Canadian Tax', '/#canadian'], ['Bank Reconciliation', '/#features']]} />
         </div>
         <div className="mt-10 flex flex-col justify-between border-t border-[var(--border)] pt-5 text-[13.5px] text-[var(--text-muted)] sm:flex-row">
-          <span>Copyright 2026 NexvarLab. All rights reserved.</span>
+          <span>Copyright 2026 Nexvar Lab Inc. All rights reserved.</span>
           <span>Made for Canadian small businesses.</span>
         </div>
       </div>
