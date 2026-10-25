@@ -32,8 +32,8 @@ export const SYSTEM_PRESETS: SystemPreset[] = [
     fileTypes: ['csv'],
     hasHeader: true,
     dateFormat: 'MM_DD_YYYY',
-    amountMode: 'debit_credit',
-    columnMap: { 'Transaction Date': 'date', 'Description': 'description', 'Withdrawals': 'amount_debit', 'Deposits': 'amount_credit', 'Balance': 'statement_balance' },
+    amountMode: 'signed',
+    columnMap: { 'Transaction Date': 'date', 'Description 1': 'description', 'Description 2': 'memo', 'CAD$': 'amount_signed' },
   },
   {
     institution: 'BMO',
