@@ -100,7 +100,7 @@ export async function DELETE(req: NextRequest) {
     // Find all matching transactions to clean up posted ones
     const txns = await db.transaction.findMany({
       where,
-      select: { id: true, status: true, matchRef: true, amount: true, account: { select: { glAccountCode: true } } },
+      select: { id: true, status: true, matchRef: true, amount: true, financialAccountId: true, statementImportId: true, account: { select: { glAccountCode: true } } },
     });
 
     if (txns.length === 0) {
@@ -139,6 +139,24 @@ export async function DELETE(req: NextRequest) {
 
     // Delete the transactions
     await db.transaction.deleteMany({ where });
+
+    // If this delete removed an account's last remaining imported transactions,
+    // clear its lastImportAt so the import flow no longer claims a previous
+    // import exists (the parse route's overlap note reads this field).
+    const importedAccountIds = [...new Set(
+      txns.filter(t => t.statementImportId).map(t => t.financialAccountId),
+    )];
+    for (const importedAccountId of importedAccountIds) {
+      const remainingImported = await db.transaction.count({
+        where: { financialAccountId: importedAccountId, statementImportId: { not: null } },
+      });
+      if (remainingImported === 0) {
+        await db.financialAccount.updateMany({
+          where: { id: importedAccountId, companyId },
+          data: { lastImportAt: null },
+        });
+      }
+    }
 
     return NextResponse.json({ data: { deleted: txns.length } });
   } catch (error) {
