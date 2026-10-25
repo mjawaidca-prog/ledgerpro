@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { AppShell } from '@/components/shell/AppShell';
@@ -76,7 +76,7 @@ const DATE_FORMATS = [
 export default function ImportStatementPage({ params }: { params: { accountId: string } }) {
   const router = useRouter();
   const { data: session } = useSession();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   const [step, setStep] = useState<Step>(1);
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -279,9 +279,27 @@ export default function ImportStatementPage({ params }: { params: { accountId: s
           <div className="space-y-5">
             <div>
               <label className="font-mono text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] block mb-2">Statement file</label>
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-[var(--border-strong)] rounded-[var(--r-xl)] p-10 text-center cursor-pointer hover:border-[var(--border-focus)] transition-colors"
+              <label
+                htmlFor="statement-file"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!busy) setDragActive(true);
+                }}
+                onDragLeave={() => setDragActive(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                  if (busy) return;
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) handleFile(f);
+                }}
+                className={cn(
+                  'block border-2 border-dashed rounded-[var(--r-xl)] p-10 text-center transition-colors',
+                  busy
+                    ? 'border-[var(--border-strong)] opacity-60 pointer-events-none'
+                    : 'cursor-pointer hover:border-[var(--border-focus)]',
+                  dragActive ? 'border-[var(--border-focus)] bg-[var(--primary-soft)]' : 'border-[var(--border-strong)]'
+                )}
               >
                 <Upload size={22} className="mx-auto text-[var(--text-muted)]" />
                 <div className="text-sm font-semibold text-[var(--text-strong)] mt-2">Drop your statement here</div>
@@ -292,9 +310,9 @@ export default function ImportStatementPage({ params }: { params: { accountId: s
                   ))}
                   <span className="px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] font-mono text-[10.5px] text-[var(--text-faint)]">.pdf</span>
                 </div>
-              </div>
+              </label>
               <input
-                ref={fileInputRef}
+                id="statement-file"
                 type="file"
                 accept=".csv,.ofx,.qfx"
                 className="hidden"
@@ -359,13 +377,18 @@ export default function ImportStatementPage({ params }: { params: { accountId: s
                 <Toggle label="Apply rules on the way in" hint="Categorized rows still wait for confirmation." on={applyRules} onChange={setApplyRules} />
                 <Toggle label="Auto-post exact invoice matches" hint="Off by default — a match on amount alone is not proof of payment." on={autoPostExact} onChange={setAutoPostExact} />
               </div>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={busy}
-                className="w-full rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--text-faint)] text-white text-[13.5px] font-semibold px-5 py-2.5 transition-all active:translate-y-[1px]"
+              <label
+                htmlFor="statement-file"
+                aria-disabled={busy}
+                className={cn(
+                  'block w-full text-center rounded-full text-white text-[13.5px] font-semibold px-5 py-2.5 transition-all',
+                  busy
+                    ? 'bg-[var(--text-faint)] opacity-60 pointer-events-none'
+                    : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] cursor-pointer active:translate-y-[1px]'
+                )}
               >
                 Read the file
-              </button>
+              </label>
             </div>
           </div>
         </div>

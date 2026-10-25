@@ -450,6 +450,18 @@ export async function reverseImport(input: {
 
     await tx.transaction.deleteMany({ where: { statementImportId: imp.id } });
 
+    // If no imported transactions remain for this account, clear lastImportAt
+    // so a future import isn't told a previous import exists.
+    const remainingImported = await tx.transaction.count({
+      where: { financialAccountId: imp.financialAccountId, statementImportId: { not: null } },
+    });
+    if (remainingImported === 0) {
+      await tx.financialAccount.update({
+        where: { id: imp.financialAccountId },
+        data: { lastImportAt: null },
+      });
+    }
+
     // Decrement appliedCount on rules that categorized this import's rows.
     const ruleIds = [...new Set(imp.transactions.map((t) => t.id))];
     void ruleIds;
