@@ -9,7 +9,7 @@ import { Alert } from '@/components/ui/Alert';
 import { BUSINESS_TYPES, PROVINCE_OPTIONS } from '@/lib/taxes';
 import { derivedFiscalYearEnd } from '@/lib/fiscal-year';
 import { activeCompanyFromCompaniesResponse } from '@/lib/active-company';
-import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar, Download, Upload, DatabaseBackup } from 'lucide-react';
+import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar, Download, Upload, DatabaseBackup, Trash2, AlertTriangle } from 'lucide-react';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -26,6 +26,14 @@ export default function SettingsPage() {
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
+  // Phase 0.2 — Danger Zone: the user's OTHER companies (the active one
+  // can never be deleted from here, or anywhere: the API refuses it).
+  const [otherCompanies, setOtherCompanies] = useState<any[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -38,6 +46,10 @@ export default function SettingsPage() {
         // membership). Saving this form PUTs to the active company, so the
         // values displayed here must come from that same company.
         const comp: any = activeCompanyFromCompaniesResponse(compRes);
+        // Danger Zone list: every company EXCEPT the active one.
+        if (Array.isArray(compRes?.data)) {
+          setOtherCompanies(compRes.data.filter((c: any) => c.id !== comp?.id));
+        }
         if (comp) {
           setCompany(comp);
           setForm({
@@ -114,6 +126,29 @@ export default function SettingsPage() {
       setRestoreResult({ type: 'danger', text: err.message || 'Failed to restore backup — check the file is a valid LedgerPro backup.' });
     } finally {
       setRestoring(false);
+    }
+  }
+
+  async function handleDeleteCompany() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/companies/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmName: deleteConfirmText.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to delete company');
+      setOtherCompanies(prev => prev.filter(c => c.id !== deleteTarget.id));
+      setDeleteMessage(`"${deleteTarget.name}" and all of its data were permanently deleted.`);
+      setDeleteTarget(null);
+      setDeleteConfirmText('');
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete company');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -220,8 +255,82 @@ export default function SettingsPage() {
               <Button variant="ghost" onClick={() => router.push('/settings/team')}>Manage Team</Button>
             </CardBody>
           </Card>
+
+          {/* Danger Zone — Phase 0.2: permanent company deletion.
+              Only NON-active companies are listed: the API refuses to
+              delete the active company or your only company, and only
+              owners ever succeed (the API answers 403 otherwise). */}
+          <Card className="border-[var(--danger-soft-border)]">
+            <CardHeader><div className="flex items-center gap-2"><AlertTriangle size={16} className="text-[var(--danger)]" /><h2 className="text-sm font-semibold text-[var(--danger)]">Danger Zone</h2></div></CardHeader>
+            <CardBody>
+              {deleteMessage && <Alert variant="success" className="mb-4">{deleteMessage}</Alert>}
+              <h3 className="text-sm font-semibold text-[var(--text-strong)] mb-1">Delete a company</h3>
+              <p className="text-sm text-[var(--text-muted)] mb-4">
+                Permanently delete one of your other companies and ALL of its data — accounts, transactions,
+                journal entries, invoices, bills, contacts and settings. This cannot be undone. Your active
+                company ({company?.name || 'this company'}) is not listed and cannot be deleted here; switch
+                to another company first if you ever need to delete it.
+              </p>
+              {otherCompanies.length === 0 ? (
+                <p className="text-sm text-[var(--text-faint)]">You have no other companies.</p>
+              ) : (
+                <div className="divide-y divide-[var(--border)] border border-[var(--border)] rounded-lg">
+                  {otherCompanies.map((c: any) => (
+                    <div key={c.id} className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <div className="text-sm font-medium text-[var(--text-strong)]">{c.name}</div>
+                        <div className="text-xs text-[var(--text-faint)]">{c.plan || 'Free Trial'}{c.role ? ` · your role: ${c.role}` : ''}</div>
+                      </div>
+                      <Button variant="destructive" size="sm" onClick={() => { setDeleteTarget(c); setDeleteConfirmText(''); setDeleteError(null); }}>
+                        <Trash2 size={14} /> Delete
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardBody>
+          </Card>
         </div>
       </div>
+
+      {/* Delete confirmation dialog — requires typing the exact name */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Delete ${deleteTarget.name}`}>
+          <div className="w-full max-w-md rounded-xl bg-[var(--surface)] border border-[var(--border)] shadow-xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle size={18} className="text-[var(--danger)]" />
+              <h2 className="text-base font-semibold text-[var(--text-strong)]">Delete “{deleteTarget.name}” permanently?</h2>
+            </div>
+            <p className="text-sm text-[var(--text-muted)] mb-4">
+              This permanently deletes <strong className="text-[var(--text-strong)]">{deleteTarget.name}</strong> and
+              all of its data — accounts, transactions, journal entries, invoices, bills, contacts and settings.
+              There is no undo and no recovery. Consider downloading a backup from Data Backup above first.
+            </p>
+            {deleteError && <Alert variant="danger" className="mb-4">{deleteError}</Alert>}
+            <div className="field mb-4">
+              <label>Type the company name exactly to confirm: <strong>{deleteTarget.legalName || deleteTarget.name}</strong></label>
+              <input
+                type="text"
+                className="input"
+                value={deleteConfirmText}
+                onChange={e => setDeleteConfirmText(e.target.value)}
+                placeholder={deleteTarget.legalName || deleteTarget.name}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteCompany}
+                disabled={deleting || (deleteConfirmText.trim() !== deleteTarget.name && deleteConfirmText.trim() !== (deleteTarget.legalName || ''))}
+              >
+                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete permanently
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }
