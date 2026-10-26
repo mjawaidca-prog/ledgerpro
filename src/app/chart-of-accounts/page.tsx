@@ -242,6 +242,11 @@ export default function ChartOfAccountsPage() {
     {
       key: 'balance', header: 'Balance', type: 'num', sortable: true, align: 'right',
       render: (row) => {
+        // Phase 0 (P0-2): show the SIGN. money() formats with Math.abs by
+        // default, which made a credit-balance asset (e.g. a suspense
+        // account) read as a positive balance here while the Balance Sheet
+        // and Trial Balance netted it negative — the same account appeared
+        // to disagree with itself across screens.
         const bal = Number(row.balance);
         const isZero = bal === 0;
         const isNegative = bal < 0;
@@ -250,7 +255,7 @@ export default function ChartOfAccountsPage() {
             'font-mono tabular-nums text-sm font-semibold',
             isZero ? 'text-[var(--text-faint)]' : isNegative ? 'text-[var(--danger)]' : 'text-[var(--text-strong)]'
           )}>
-            {money(bal)}
+            {bal < 0 ? '−' : ''}{money(bal)}
           </span>
         );
       },

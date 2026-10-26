@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
-import { getGLActivity, normalBalance, endOfDay, fiscalYearStartFor, parseLocalDate } from '@/lib/reporting';
+import { getGLActivity, normalBalance, endOfDay, fiscalYearStartFor, parseLocalDate, unclosedEarnings, balanceSheetTotals, isCurrentAccount } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 // ── Types ──
@@ -15,9 +15,7 @@ interface EquityGroup { accounts: AccountLine[]; total: number; priorTotal: numb
 // ── Helpers ──
 
 function isCurrent(a: Acct): boolean {
-  if (a.subType) return a.subType === 'current_asset' || a.subType === 'current_liability';
-  const n = parseInt(a.code, 10);
-  return a.type === 'asset' ? n < 2000 : n >= 2000 && n < 3000;
+  return isCurrentAccount(a);
 }
 
 function equityBucket(a: Acct): 'common_shares' | 'retained_earnings' | 'owners_equity' | 'other_equity' {
@@ -67,9 +65,13 @@ async function buildBalanceSheet(companyId: string, asOfDate: Date) {
 
   const fyStart = company ? fiscalYearStartFor(company.fiscalYearStart, asOfDate) : new Date(asOfDate.getFullYear(), 0, 1);
   const yearActivity = await getGLActivity(companyId, { from: fyStart, to: endOfDay(asOfDate) });
-  const currentYearEarnings = Math.round(
-    incomeExpenseAccounts.reduce((s, a) => { const bal = normalBalance(a.type, yearActivity[a.code]); return s + (a.type === 'income' ? bal : -bal); }, 0) * 100
-  ) / 100;
+  // Phase 0 (P0-2): equity must carry ALL unclosed earnings up to the as-of
+  // date, not only the current fiscal year's. Prior-year earnings that were
+  // never closed to Retained Earnings by a closing entry still belong to the
+  // owners — omitting them is what made this sheet report "Unbalanced" on
+  // real books whose trial balance balanced.
+  const earnings = unclosedEarnings(activity, yearActivity, incomeExpenseAccounts);
+  const currentYearEarnings = earnings.currentYear;
 
   const withBalance = accounts.map(a => ({ code: a.code, name: a.name, detailType: a.detailType, subType: a.subType, type: a.type, balance: Math.round(normalBalance(a.type as any, activity[a.code]) * 100) / 100 }));
 
@@ -84,13 +86,20 @@ async function buildBalanceSheet(companyId: string, asOfDate: Date) {
 
   const equityGroups: Record<string, typeof equity> = { common_shares: [], retained_earnings: [], owners_equity: [], other_equity: [] };
   for (const a of equity) equityGroups[equityBucket(a)].push(a);
+  if (earnings.priorYears !== 0) equityGroups.retained_earnings.push({ code: '', name: 'Prior Years\u2019 Earnings (not yet closed)', detailType: null, subType: 'retained_earnings', type: 'equity', balance: earnings.priorYears });
   if (currentYearEarnings !== 0) equityGroups.retained_earnings.push({ code: '', name: 'Current Year Earnings', detailType: null, subType: 'retained_earnings', type: 'equity', balance: currentYearEarnings });
 
   const companyName = company?.legalName || company?.name || '';
-  const totalAssets = currentAssets.reduce((s,a) => s+a.balance, 0) + nonCurrentAssets.reduce((s,a) => s+a.balance, 0);
-  const totalLiabilities = currentLiabilities.reduce((s,a) => s+a.balance, 0) + nonCurrentLiabilities.reduce((s,a) => s+a.balance, 0);
-  const totalEquity = equity.reduce((s,a) => s+a.balance, 0) + currentYearEarnings;
-  const isBalanced = Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01;
+  const totals = balanceSheetTotals({
+    assetBalances: withBalance.filter(a => a.type === 'asset').map(a => a.balance),
+    liabilityBalances: withBalance.filter(a => a.type === 'liability').map(a => a.balance),
+    equityAccountBalances: equity.map(a => a.balance),
+    cumulativeUnclosedEarnings: earnings.cumulative,
+  });
+  const totalAssets = totals.totalAssets;
+  const totalLiabilities = totals.totalLiabilities;
+  const totalEquity = totals.totalEquity;
+  const isBalanced = totals.isBalanced;
 
   return { companyName, currentAssets, nonCurrentAssets, currentLiabilities, nonCurrentLiabilities, equityGroups, totalAssets, totalLiabilities, totalEquity, isBalanced };
 }

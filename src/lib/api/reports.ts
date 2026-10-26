@@ -15,6 +15,8 @@ import {
   endOfDay,
   fiscalYearStartFor,
   formatReportPeriod,
+  unclosedEarnings,
+  balanceSheetTotals,
 } from '@/lib/reporting';
 import { moneyNumber } from '@/lib/api/serialize';
 import type { GLType } from '@prisma/client';
@@ -72,6 +74,10 @@ export interface BalanceSheetReport {
   liabilities: AccountLine[];
   equity: AccountLine[];
   currentYearEarnings: string;
+  /** Earnings from prior fiscal years not yet closed to a named equity account. Included in totalEquity. */
+  priorYearsEarnings: string;
+  /** currentYearEarnings + priorYearsEarnings — the full unclosed earnings in totalEquity. */
+  cumulativeEarnings: string;
   totalAssets: string;
   totalLiabilities: string;
   totalEquity: string;
@@ -102,30 +108,36 @@ export async function buildBalanceSheet(companyId: string, asOf: Date): Promise<
 
   const sum = (rows: AccountLine[]) => rows.reduce((s, r) => s + Number(r.balance), 0);
 
-  const totalAssets = sum(assets);
-  const totalLiabilities = sum(liabilities);
-  const baseEquity = sum(equityAccounts);
+  // Phase 0 (P0-2): total equity must include ALL unclosed earnings up to
+  // the as-of date — current fiscal year AND prior years that were never
+  // closed by a closing entry. Previously only the current year was added,
+  // so any company past its first year-end reported an unbalanced sheet
+  // while its trial balance balanced.
+  const incomeExpense = accounts.filter((a) => a.type === 'income' || a.type === 'expense');
+  const earnings = unclosedEarnings(activity, yearActivity, incomeExpense);
+  const currentYearEarnings = moneyNumber(earnings.currentYear);
 
-  // Current-year earnings: income − expenses for the fiscal year to date —
-  // the same derivation the dashboard balance sheet uses.
-  const income = accounts.filter((a) => a.type === 'income');
-  const expenses = accounts.filter((a) => a.type === 'expense');
-  const currentYearEarnings = moneyNumber(
-    income.reduce((s, a) => s + normalBalance(a.type, yearActivity[a.code]), 0) -
-      expenses.reduce((s, a) => s + normalBalance(a.type, yearActivity[a.code]), 0)
-  );
-
-  const totalEquity = moneyNumber(baseEquity + currentYearEarnings);
+  const totals = balanceSheetTotals({
+    assetBalances: assets.map((r) => Number(r.balance)),
+    liabilityBalances: liabilities.map((r) => Number(r.balance)),
+    equityAccountBalances: equityAccounts.map((r) => Number(r.balance)),
+    cumulativeUnclosedEarnings: earnings.cumulative,
+  });
+  const totalAssets = totals.totalAssets;
+  const totalLiabilities = totals.totalLiabilities;
+  const totalEquity = moneyNumber(totals.totalEquity);
 
   return {
     assets,
     liabilities,
     equity: equityAccounts,
     currentYearEarnings: currentYearEarnings.toFixed(2),
+    priorYearsEarnings: moneyNumber(earnings.priorYears).toFixed(2),
+    cumulativeEarnings: moneyNumber(earnings.cumulative).toFixed(2),
     totalAssets: moneyNumber(totalAssets).toFixed(2),
     totalLiabilities: moneyNumber(totalLiabilities).toFixed(2),
     totalEquity: totalEquity.toFixed(2),
-    isBalanced: Math.abs(moneyNumber(totalAssets) - (moneyNumber(totalLiabilities) + totalEquity)) < 0.01,
+    isBalanced: totals.isBalanced,
   };
 }
 
