@@ -20,17 +20,32 @@ export async function POST(req: NextRequest) {
     const account = await db.financialAccount.findUnique({ where: { id: accountId, companyId } });
     if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 404 });
 
-    // Get or create Opening Balance Equity account (3900)
+    // Get or create Opening Balance Equity.
+    // Phase 0 (P0-3/P0-8): this route used to get-or-create code 3900 as
+    // "Opening Balance Equity" — but the chart template defines 3900 as
+    // "Owner's Draw", so on templated companies the opening balance was
+    // posted into Owner's Draw, and the COA and the Banking page named
+    // the same code two different things. Opening Balance Equity now
+    // lives at 3950 (see lib/default-coa.ts). A legacy 3900 that is
+    // actually NAMED "Opening Balance Equity" (created by the old route
+    // on untemplated companies) is reused as-is so its existing balance
+    // is not split across two accounts.
     let equityAcct = await db.chartOfAccount.findFirst({
-      where: { code: '3900', companyId },
+      where: { code: '3950', companyId },
     });
+    if (!equityAcct) {
+      equityAcct = await db.chartOfAccount.findFirst({
+        where: { code: '3900', companyId, name: 'Opening Balance Equity' },
+      });
+    }
     if (!equityAcct) {
       equityAcct = await db.chartOfAccount.create({
         data: {
           companyId,
-          code: '3900',
+          code: '3950',
           name: 'Opening Balance Equity',
           type: 'equity',
+          subType: 'owners_equity',
           detailType: 'Opening balance offset',
           balance: 0,
           active: true,

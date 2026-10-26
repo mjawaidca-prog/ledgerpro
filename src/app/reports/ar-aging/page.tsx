@@ -157,7 +157,8 @@ export default function ARAgingPage() {
               </div>
             );
           })}
-          {data.totalInvoices === 0 && <div className="text-center py-8 text-[var(--text-muted)]">All invoices paid — nothing outstanding.</div>}
+          {/* Phase 0 (P0-8): this branch means ZERO invoices exist, not that all are paid — the old copy claimed "All invoices paid" on books that have never issued an invoice. */}
+          {data.totalInvoices === 0 && <div className="text-center py-8 text-[var(--text-muted)]">No invoices yet — once you issue invoices, anything unpaid will age here.</div>}
         </CardBody>
       </Card>
     </AppShell>

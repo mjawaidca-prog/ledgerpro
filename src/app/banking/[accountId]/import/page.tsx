@@ -314,7 +314,7 @@ export default function ImportStatementPage({ params }: { params: { accountId: s
               <input
                 id="statement-file"
                 type="file"
-                accept=".csv,.ofx,.qfx"
+                accept=".csv,.ofx,.qfx,.pdf"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -323,7 +323,7 @@ export default function ImportStatementPage({ params }: { params: { accountId: s
                 }}
               />
               <div className="text-xs text-[var(--text-muted)] mt-2">
-                PDF statements cannot be read. Every bank below offers a CSV or OFX download in online banking, usually under &ldquo;Download transactions&rdquo;.
+                Text-based PDF statements are supported. Scanned, image-only PDFs can&rsquo;t be read — for those, download a CSV or OFX file from online banking instead, usually under &ldquo;Download transactions&rdquo;.
               </div>
               {busy && (
                 <div className="flex items-center gap-2 text-sm text-[var(--text-muted)] mt-3">

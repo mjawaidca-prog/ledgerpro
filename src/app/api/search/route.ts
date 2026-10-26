@@ -11,10 +11,10 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const q = searchParams.get('q')?.trim();
     if (!q || q.length < 2) {
-      return NextResponse.json({ data: { invoices: [], bills: [], contacts: [], transactions: [], accounts: [] } });
+      return NextResponse.json({ data: { invoices: [], bills: [], contacts: [], transactions: [], accounts: [], journal: [], bankAccounts: [] } });
     }
 
-    const [invoices, bills, contacts, transactions, accounts] = await Promise.all([
+    const [invoices, bills, contacts, transactions, accounts, journal, bankAccounts] = await Promise.all([
       db.invoice.findMany({
         where: { companyId, OR: [{ id: { contains: q, mode: 'insensitive' } }, { customer: { name: { contains: q, mode: 'insensitive' } } }, { customer: { companyName: { contains: q, mode: 'insensitive' } } }] },
         include: { customer: { select: { name: true } } },
@@ -38,6 +38,26 @@ export async function GET(req: NextRequest) {
         where: { companyId, active: true, OR: [{ code: { contains: q, mode: 'insensitive' } }, { name: { contains: q, mode: 'insensitive' } }] },
         take: 5, orderBy: { code: 'asc' },
       }),
+      // Phase 0 (P0-8): journal entries were not indexed at all — a search
+      // for text that exists ONLY in the journal (e.g. "Monthly fee" on a
+      // posted entry whose bank row was already matched) returned
+      // "No results found". Search entry descriptions and line memos.
+      db.journalEntry.findMany({
+        where: {
+          companyId,
+          OR: [
+            { description: { contains: q, mode: 'insensitive' } },
+            { lines: { some: { description: { contains: q, mode: 'insensitive' } } } },
+          ],
+        },
+        take: 5, orderBy: { entryDate: 'desc' },
+      }),
+      // Phase 0 (P0-8): bank/financial accounts were not indexed either —
+      // searching "TD" found nothing even with a "TD Chequing" account.
+      db.financialAccount.findMany({
+        where: { companyId, isActive: true, name: { contains: q, mode: 'insensitive' } },
+        take: 5, orderBy: { name: 'asc' },
+      }),
     ]);
 
     return NextResponse.json({
@@ -47,6 +67,8 @@ export async function GET(req: NextRequest) {
         contacts: contacts.map(c => ({ id: c.id, title: c.companyName || c.name, subtitle: c.email || c.type, link: `/contacts?id=${c.id}` })),
         transactions: transactions.map(t => ({ id: t.id, title: t.description, subtitle: t.account?.name || '', amount: Number(t.amount), link: `/banking/transactions/${t.id}` })),
         accounts: accounts.map(a => ({ id: a.id, title: `${a.code} — ${a.name}`, subtitle: a.type, link: `/reports/general-ledger?code=${a.code}&name=${encodeURIComponent(a.name)}` })),
+        journal: journal.map((j: any) => ({ id: j.id, title: j.description, subtitle: `Journal · ${new Date(j.entryDate).toISOString().slice(0, 10)}`, link: `/journal` })),
+        bankAccounts: bankAccounts.map((a: any) => ({ id: a.id, title: a.name, subtitle: `Bank account · ${a.kind}`, link: `/banking?account=${a.id}` })),
       },
     });
   } catch (error) {

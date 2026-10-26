@@ -276,7 +276,7 @@ export default function DeveloperPage() {
           <div>
             <h1 className="text-xl font-semibold">Developer / API Access</h1>
             <p className="text-sm text-muted-foreground">
-              Issue keys for trusted integrations to use the LedgerPro API. Owner only.
+              Issue keys for trusted integrations to use the LedgerPro API. Owner only. API access is included on the Pro and Enterprise plans (see Pricing).
             </p>
           </div>
         </div>

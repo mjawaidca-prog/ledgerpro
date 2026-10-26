@@ -1589,7 +1589,7 @@ export default function BankingPage() {
           </Button>
           <Button variant="ghost" onClick={() => setOpeningAcctId(null)}>Cancel</Button>
           <span className="text-xs text-[var(--text-muted)] ml-2">
-            Creates a journal entry to Opening Balance Equity (3900)
+            Creates a journal entry to Opening Balance Equity (3950)
           </span>
         </div>
       )}

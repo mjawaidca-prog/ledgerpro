@@ -42,7 +42,7 @@ export function LandingFeatures() {
           <h2 className="mt-3.5 text-4xl font-extrabold leading-tight text-[var(--text-strong)]">
             Everything your books need, in one place
           </h2>
-          <p className="mt-3 text-lg text-[var(--text)]">No add-ons to bolt on later. It is all here from day one.</p>
+          <p className="mt-3 text-lg text-[var(--text)]">No add-ons to bolt on later — core bookkeeping is built in from day one, and higher-volume features like bank imports, API access, and custom reports are included on Pro and above.</p>
         </div>
         <div className="grid gap-5 md:grid-cols-3">
           {FEATURES.map(({ icon: Icon, title, body }) => (
