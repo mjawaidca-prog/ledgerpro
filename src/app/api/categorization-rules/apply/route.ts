@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { Prisma } from '@prisma/client';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { buildRuleTaxSplit } from '@/lib/banking/rule-tax';
 export const dynamic = 'force-dynamic';
 
 // POST /api/categorization-rules/apply — run all active rules against unreviewed transactions
@@ -12,6 +14,7 @@ export async function POST(req: NextRequest) {
     const rules = await db.categorizationRule.findMany({
       where: { companyId, active: true },
       orderBy: { priority: 'desc' },
+      include: { category: { select: { code: true } } },
     });
 
     if (rules.length === 0) {
@@ -66,9 +69,17 @@ export async function POST(req: NextRequest) {
         }
 
         if (isMatch) {
+          // Phase 1: a tax-enabled rule also stamps its tax treatment as a
+          // single split, so posting this row splits tax exactly like a
+          // manually split row. Non-tax rules leave splits untouched.
+          const split = buildRuleTaxSplit(rule, { categoryCode: rule.category.code, amount: Number(tx.amount) });
           await db.transaction.update({
             where: { id: tx.id },
-            data: { categoryId: rule.categoryId, status: 'categorized' },
+            data: {
+              categoryId: rule.categoryId,
+              status: 'categorized',
+              ...(split ? { splits: [split] as unknown as Prisma.InputJsonValue } : {}),
+            },
           });
           await db.categorizationRule.update({
             where: { id: rule.id },

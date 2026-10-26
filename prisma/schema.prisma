@@ -1437,6 +1437,14 @@ model CategorizationRule {
   priority  Int      @default(0) // higher = checked first
   active    Boolean  @default(true)
 
+  // Phase 1 simple-path tax: when enabled, applying this rule also stamps a
+  // tax spec on the transaction (single split) so posting splits the tax —
+  // province of supply, amount basis, and GST/HST recoverability (ITC).
+  taxEnabled     Boolean @default(false)
+  taxProvince    String?
+  taxInclusive   Boolean @default(true)
+  taxRecoverable Boolean @default(true)
+
   matchCount    Int       @default(0) // how many times matched
   lastMatchedAt DateTime?
 

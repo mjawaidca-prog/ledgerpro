@@ -4,6 +4,8 @@ import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { z } from 'zod';
 export const dynamic = 'force-dynamic';
 
+import { taxFieldsSchema } from '@/lib/banking/rule-schema';
+
 const createSchema = z.object({
   name: z.string().min(1),
   pattern: z.string().min(1),
@@ -13,7 +15,7 @@ const createSchema = z.object({
   maxAmount: z.number().optional(),
   priority: z.number().default(0),
   active: z.boolean().default(true),
-});
+}).merge(taxFieldsSchema);
 
 export async function GET(req: NextRequest) {
   try {
