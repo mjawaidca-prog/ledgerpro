@@ -9,6 +9,7 @@ import { Alert } from '@/components/ui/Alert';
 import { format, addYears, subYears } from 'date-fns';
 import { Lock, CheckCircle2, AlertTriangle, Loader2, Calendar } from 'lucide-react';
 import { anchorMonthDay, fiscalYearRangeContaining, fiscalYearMonthDayLabel } from '@/lib/fiscal-year';
+import { activeCompanyFromCompaniesResponse } from '@/lib/active-company';
 
 export default function PeriodClosePage() {
   const [periods, setPeriods] = useState<any[]>([]);
@@ -31,15 +32,16 @@ export default function PeriodClosePage() {
         fetch('/api/companies').then(r => r.json()),
         fetch('/api/period-close').then(r => r.json()),
       ]);
-      // Phase 0 (P0-1/P0-5): resolve the ACTIVE company (cookie + the
-      // server's activeCompanyId when present), not data[0]; and compute
-      // the current fiscal year from the shared fiscal-year definition.
-      // The old code parsed the stored UTC-midnight start date with
-      // new Date()/getMonth()/getDate() in local time, shifting the anchor
-      // a day earlier in North America — one source of the Dec 29/30 drift.
-      const activeId = compRes.activeCompanyId
-        || document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
-      const comp = (compRes.data || []).find((c: any) => c.id === activeId) || compRes.data?.[0];
+      // Phase 0 (P0-1/P0-5): resolve the ACTIVE company via the shared
+      // active-company module (server activeCompanyId, then the switcher
+      // cookie, then session — never data[0]), because period close must
+      // describe (and close) the company the user is actually working in;
+      // and compute the current fiscal year below from the shared
+      // fiscal-year definition. The old code parsed the stored
+      // UTC-midnight start date with new Date()/getMonth()/getDate() in
+      // local time, shifting the anchor a day earlier in North America —
+      // one source of the Dec 29/30 drift.
+      const comp: any = activeCompanyFromCompaniesResponse(compRes);
       setCompany(comp);
       setPeriods(perRes.data || []);
 
