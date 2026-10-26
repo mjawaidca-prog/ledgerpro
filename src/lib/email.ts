@@ -60,7 +60,7 @@ export async function sendInvoice(
   customerName: string,
   total: number,
   dueDate: string,
-  companyName: string = 'Northwind Trading'
+  companyName: string = 'LedgerPro' // Phase 0 (P0-1): was 'Northwind Trading', a sample company — a real customer's name must come from the caller, never a hardcoded third party
 ) {
   const formattedTotal = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -129,7 +129,7 @@ export async function sendPaymentConfirmation(
   invoiceId: string,
   customerName: string,
   amount: number,
-  companyName: string = 'Northwind Trading'
+  companyName: string = 'LedgerPro' // Phase 0 (P0-1): was 'Northwind Trading', a sample company — a real customer's name must come from the caller, never a hardcoded third party
 ) {
   const formattedAmount = new Intl.NumberFormat('en-US', {
     style: 'currency',

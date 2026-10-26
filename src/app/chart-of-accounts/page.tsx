@@ -12,6 +12,7 @@ import { money } from '@/lib/money';
 import { useRouter } from 'next/navigation';
 import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink, Plus, X, Pencil } from 'lucide-react';
 import { exportChartOfAccounts } from '@/lib/export';
+import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import type { Column } from '@/components/ui/DataTable';
 
 interface COAEntry {
@@ -73,6 +74,7 @@ export default function ChartOfAccountsPage() {
   const [accounts, setAccounts] = useState<COAEntry[]>([]);
   const [summary, setSummary] = useState<Summary>({ assets: 0, liabilities: 0, equity: 0, income: 0, expenses: 0 });
   const [totalAccounts, setTotalAccounts] = useState(0);
+  const [companyName, setCompanyName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -185,6 +187,15 @@ export default function ChartOfAccountsPage() {
 
   useEffect(() => { fetchCOA(); }, [fetchCOA]);
 
+  // Phase 0 (P0-1): the heading previously hardcoded a sample company name
+  // ("Northwind Trading") regardless of whose chart this is.
+  useEffect(() => {
+    fetch('/api/companies')
+      .then(r => r.json())
+      .then(json => setCompanyName(companyDisplayName(activeCompanyFromCompaniesResponse(json), '')))
+      .catch(() => {});
+  }, []);
+
   function toggleGroup(type: string) {
     setExpandedGroups(prev => {
       const next = new Set(prev);
@@ -278,7 +289,7 @@ export default function ChartOfAccountsPage() {
       <div className="content-head">
         <div>
           <h1 className="greet">Chart of Accounts</h1>
-          <p className="sub">The complete ledger structure for Northwind Trading — {totalAccounts} accounts.</p>
+          <p className="sub">The complete ledger structure for {companyName || 'your company'} — {totalAccounts} accounts.</p>
         </div>
         <div className="spacer" />
         <Button variant="secondary" onClick={() => exportChartOfAccounts(accounts)}><Download size={16} /> Export</Button>

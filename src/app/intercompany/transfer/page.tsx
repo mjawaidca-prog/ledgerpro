@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import { Check, Info, ArrowRight } from 'lucide-react';
+import { resolveActiveCompanyId, readActiveCompanyCookie } from '@/lib/active-company';
 
 interface Company {
   id: string;
@@ -72,8 +73,18 @@ export default function TransferPage() {
         // Augment with bank info from COA if available
         setCompanies(list);
         if (list.length >= 2) {
-          setFromId(list[0].id);
-          setToId(list[1].id);
+          // Phase 0 (P0-1): the paying ("from") company defaults to the
+          // ACTIVE company — previously list[0] (the oldest membership),
+          // which silently defaulted transfers out of the wrong company.
+          const activeId = resolveActiveCompanyId({
+            responseActiveCompanyId: companiesJson.activeCompanyId,
+            cookieCompanyId: readActiveCompanyCookie(),
+            sessionActiveCompanyId: (session?.user as any)?.activeCompanyId || (session?.user as any)?.companyId,
+          });
+          const from = list.find(c => c.id === activeId) || list[0];
+          const to = list.find(c => c.id !== from.id) || list[1];
+          setFromId(from.id);
+          setToId(to.id);
         }
       } catch (e) {
         console.error('Failed to load companies', e);

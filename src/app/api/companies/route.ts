@@ -53,7 +53,11 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ data: companies });
+    // Phase 0 (P0-1): tell the client WHICH company is active, as resolved
+    // and membership-verified by requireCompany(). Clients must pick the
+    // company with this id from `data` (see src/lib/active-company.ts) —
+    // never data[0], which is simply the oldest membership.
+    return NextResponse.json({ data: companies, activeCompanyId: session.companyId });
   } catch (error) {
     console.error('GET /api/companies error:', error);
     return NextResponse.json({ error: 'Failed to fetch companies' }, { status: 500 });
