@@ -32,6 +32,5 @@
       "path": "/api/plaid/sync-cron",
       "schedule": "0 13 * * *"
     }
-  ],
-  "buildCommand": "bash scripts/vercel-build.sh"
+  ]
 }
