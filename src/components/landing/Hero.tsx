@@ -49,7 +49,7 @@ export function LandingHero() {
             <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
             <span className="ml-3 truncate text-xs font-medium text-[var(--text-muted)]">
-              ledgerpro.app / Journal / FY 2026
+              ledger.nexvarlab.com / Journal / FY 2026
             </span>
           </div>
           <div className="p-4">

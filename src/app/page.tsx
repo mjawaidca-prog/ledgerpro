@@ -39,7 +39,7 @@ export default function Home() {
       featureList: [
         'Double-entry bookkeeping',
         'Customer invoicing and vendor bills',
-        'Bank feeds and statement reconciliation',
+        'Statement import and bank reconciliation',
         'GST, HST, QST, PST, and RST tracking',
         'Financial statements and management reporting',
         'Multi-company accounting',

@@ -62,7 +62,7 @@ export default function MarketingHomePage() {
       <section className="max-w-6xl mx-auto px-5 py-16">
         <div className="text-center mb-12">
           <h2 className="text-2xl md:text-3xl font-bold text-[var(--text-strong)]">Everything your books need, in one place</h2>
-          <p className="text-[var(--text-muted)] mt-3">No add-ons to bolt on later — it's all here from day one.</p>
+          <p className="text-[var(--text-muted)] mt-3">No add-ons to bolt on later — core bookkeeping is built in from day one, and higher-volume features like bank imports, API access, and custom reports are included on Pro and above.</p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {FEATURES.map((f) => (

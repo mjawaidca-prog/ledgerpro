@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, FileText, Receipt, Users, Building2, BookOpen, Loader2 } from 'lucide-react';
+import { Search, FileText, Receipt, Users, Building2, BookOpen, Loader2, NotebookText, Landmark } from 'lucide-react';
+import { fetchWithTenantHeaders } from '@/lib/tenant-client';
 
 interface SearchResult {
   id: string;
@@ -19,6 +20,8 @@ interface SearchData {
   contacts: SearchResult[];
   transactions: SearchResult[];
   accounts: SearchResult[];
+  journal: SearchResult[];
+  bankAccounts: SearchResult[];
 }
 
 export function GlobalSearch() {
@@ -59,7 +62,12 @@ export function GlobalSearch() {
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        // Phase 0 (P0-8): was a bare fetch() — the only search surface not
+        // sending explicit tenant headers. Every other screen uses
+        // fetchWithTenantHeaders so the request carries the ACTIVE
+        // company explicitly instead of relying solely on middleware /
+        // cookie fallbacks resolving it server-side.
+        const res = await fetchWithTenantHeaders(`/api/search?q=${encodeURIComponent(query)}`);
         const json = await res.json();
         setResults(json.data);
         setSelectedIndex(0);
@@ -74,6 +82,8 @@ export function GlobalSearch() {
     ...results.bills.map(r => ({ ...r, type: 'Bill', icon: <Receipt size={14} /> })),
     ...results.contacts.map(r => ({ ...r, type: 'Contact', icon: <Users size={14} /> })),
     ...results.transactions.map(r => ({ ...r, type: 'Transaction', icon: <Building2 size={14} /> })),
+    ...(results.journal ?? []).map(r => ({ ...r, type: 'Journal Entry', icon: <NotebookText size={14} /> })),
+    ...(results.bankAccounts ?? []).map(r => ({ ...r, type: 'Bank Account', icon: <Landmark size={14} /> })),
     ...results.accounts.map(r => ({ ...r, type: 'GL Account', icon: <BookOpen size={14} /> })),
   ] : [];
 

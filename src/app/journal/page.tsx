@@ -66,7 +66,7 @@ export default function JournalListPage() {
   }
 
   async function deleteAllEntries() {
-    if (!window.confirm('Delete ALL journal entries? ALL balances will be reversed. This cannot be undone.')) return;
+    if (!window.confirm('ADMIN ONLY — permanently delete ALL journal entries?\n\nLedgerPro\'s normal correction path is to VOID an entry, which keeps a full audit trail. Bulk delete removes the trail entirely, reverses ALL balances, and cannot be undone. Only company owners and admins can do this.')) return;
     try {
       const res = await fetch('/api/journal?all=true', { method: 'DELETE' });
       const json = await res.json();
@@ -89,8 +89,8 @@ export default function JournalListPage() {
         </div>
         <div className="flex items-center gap-2">
           {entries.length > 0 && (
-            <Button variant="ghost" onClick={deleteAllEntries} className="text-[var(--danger)]">
-              Delete All
+            <Button variant="ghost" onClick={deleteAllEntries} className="text-[var(--danger)]" title="Owner/admin only. Prefer voiding entries — voiding keeps the audit trail; bulk delete does not.">
+              Delete All (Admin)
             </Button>
           )}
           <Button onClick={() => router.push('/journal/new')}>

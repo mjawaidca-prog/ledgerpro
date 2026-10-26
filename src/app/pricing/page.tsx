@@ -64,7 +64,7 @@ export default function PricingPage() {
             Simple plans for Canadian small businesses
           </h1>
           <p className="mt-4 text-lg text-[var(--text)]">
-            All self-serve plans include a free trial. Upgrade when your books, team, or client list grows. New: prefer to pay once? Get lifetime access with a one-time payment - Lifetime Basic $299 or Lifetime Pro $799 - limited to our first 250 founding customers.
+            All self-serve plans include a free trial. Upgrade when your books, team, or client list grows. New: prefer to pay once? One-time Basic $299 or One-time Pro $799 covers the lifetime of that plan tier or 5 years from purchase, whichever comes first - limited to our first 250 founding customers.
           </p>
         </div>
         <div className="mx-auto mb-8 max-w-2xl rounded-lg border border-[var(--primary)] bg-[var(--card)] px-4 py-3 text-center text-sm font-semibold text-[var(--primary)]">Limited-time offer: one-time lifetime pricing below is available for a limited period and may be withdrawn at any time.</div>

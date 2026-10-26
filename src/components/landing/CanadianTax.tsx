@@ -7,6 +7,9 @@ const CHECKS = [
   'Opening trial-balance import when you switch from another system',
 ];
 
+// Combined GST/HST/PST/QST rate per province. Phase 0 (P0-7): the panel
+// says "Every province, ready" but NL and PE were missing. Territories
+// are GST-only (5%) and are noted under the grid instead of as tiles.
 const PROVINCES = [
   ['BC', '12%'],
   ['AB', '5%'],
@@ -16,6 +19,8 @@ const PROVINCES = [
   ['QC', '14.975%'],
   ['NS', '14%'],
   ['NB', '15%'],
+  ['NL', '15%'],
+  ['PE', '15%'],
 ];
 
 export function CanadianTax() {
@@ -60,6 +65,7 @@ export function CanadianTax() {
               </div>
             ))}
           </div>
+          <p className="mt-3 text-center text-xs text-slate-400">Territories (YT · NT · NU): GST 5% only.</p>
         </div>
       </div>
     </section>

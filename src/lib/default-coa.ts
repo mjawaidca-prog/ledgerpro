@@ -28,6 +28,10 @@ export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
   { code: '3000', name: "Owner's Capital", type: 'equity', subType: 'owners_equity', detailType: "Owner's equity" },
   { code: '3100', name: 'Retained Earnings', type: 'equity', subType: 'retained_earnings', detailType: 'Retained earnings' },
   { code: '3900', name: "Owner's Draw", type: 'equity', subType: 'owners_equity', detailType: "Owner's equity" },
+  // Phase 0 (P0-8): Opening Balance Equity gets its OWN code. The
+  // opening-balance route used to get-or-create code 3900 AS
+  // "Opening Balance Equity", hijacking Owner's Draw in the template.
+  { code: '3950', name: 'Opening Balance Equity', type: 'equity', subType: 'owners_equity', detailType: 'Opening balance offset' },
   { code: '4000', name: 'Product Sales', type: 'income', detailType: 'Product sales' },
   { code: '4100', name: 'Service Revenue', type: 'income', detailType: 'Service revenue' },
   { code: '4908', name: 'Other Income', type: 'income', detailType: 'Other income' },
@@ -69,7 +73,22 @@ export async function ensureDefaultChartOfAccounts(
     select: { code: true },
   });
   const existingCodes = new Set(existing.map((account) => account.code));
-  const missingAccounts = DEFAULT_CHART_OF_ACCOUNTS.filter((account) => !existingCodes.has(account.code));
+
+  // Phase 0 (P0-8): name-collision guard. The template itself contains
+  // exactly one "Insurance" (6910) and one "Bank Fees" (6900), but if a
+  // company already has an account with the same NAME under a different
+  // code (created manually or by a trial-balance import — Muja's live
+  // chart has 5300 Insurance and 5600 Bank Charges & Interest alongside
+  // the template pair), re-running this filler must not mint a second
+  // account with the same name. Skip by name in that case.
+  const existingNamed = await client.chartOfAccount.findMany({
+    where: { companyId, active: true },
+    select: { name: true },
+  });
+  const existingNames = new Set(existingNamed.map((a: any) => a.name.trim().toLowerCase()));
+  const missingAccounts = DEFAULT_CHART_OF_ACCOUNTS.filter(
+    (account) => !existingCodes.has(account.code) && !existingNames.has(account.name.trim().toLowerCase()),
+  );
 
   if (missingAccounts.length === 0) {
     return { created: 0 };

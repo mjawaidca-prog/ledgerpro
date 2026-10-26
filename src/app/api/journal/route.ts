@@ -98,10 +98,17 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// DELETE — bulk delete all journal entries for the company
+// DELETE — bulk delete journal entries for the company.
+// Phase 0 (P0-7): the product promises "Void instead of delete — a full
+// audit trail of every reversal". A one-click bulk hard-delete available
+// to EVERY company member contradicted that promise. Bulk delete is now
+// restricted to owners/admins as a data-correction escape hatch; the
+// normal way to undo an entry remains voiding it (which posts a linked
+// reversing entry and keeps the trail). Single-entry delete lives in
+// /api/journal/[id] and is unchanged.
 export async function DELETE(req: NextRequest) {
   try {
-    const { companyId, error } = await requireCompany(req, { requireOnboarding: true });
+    const { companyId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin'] });
     if (error) return error;
 
     const { searchParams } = new URL(req.url);
