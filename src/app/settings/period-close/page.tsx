@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { format, addYears, subYears } from 'date-fns';
 import { Lock, CheckCircle2, AlertTriangle, Loader2, Calendar } from 'lucide-react';
+import { anchorMonthDay, fiscalYearRangeContaining, fiscalYearMonthDayLabel } from '@/lib/fiscal-year';
 
 export default function PeriodClosePage() {
   const [periods, setPeriods] = useState<any[]>([]);
@@ -30,31 +31,25 @@ export default function PeriodClosePage() {
         fetch('/api/companies').then(r => r.json()),
         fetch('/api/period-close').then(r => r.json()),
       ]);
-      const comp = compRes.data?.[0];
+      // Phase 0 (P0-1/P0-5): resolve the ACTIVE company (cookie + the
+      // server's activeCompanyId when present), not data[0]; and compute
+      // the current fiscal year from the shared fiscal-year definition.
+      // The old code parsed the stored UTC-midnight start date with
+      // new Date()/getMonth()/getDate() in local time, shifting the anchor
+      // a day earlier in North America — one source of the Dec 29/30 drift.
+      const activeId = compRes.activeCompanyId
+        || document.cookie.match(/(?:^|; )lp-active-company-id=([^;]*)/)?.[1];
+      const comp = (compRes.data || []).find((c: any) => c.id === activeId) || compRes.data?.[0];
       setCompany(comp);
       setPeriods(perRes.data || []);
 
-      // Default period = current fiscal year
+      // Default period = current fiscal year (shared definition)
       if (comp?.fiscalYearStart) {
-        const fyStart = new Date(comp.fiscalYearStart);
-        const now = new Date();
-        // Determine current fiscal year
-        let fyYear = fyStart.getFullYear();
-        const fyMonth = fyStart.getMonth();
-        const fyDay = fyStart.getDate();
-        // If we're past the fiscal year start this year, use this year
-        if (now.getMonth() > fyMonth || (now.getMonth() === fyMonth && now.getDate() >= fyDay)) {
-          fyYear = now.getFullYear();
-        } else {
-          fyYear = now.getFullYear() - 1;
-        }
-
-        const start = new Date(fyYear, fyMonth, fyDay);
-        const end = new Date(fyYear + 1, fyMonth, fyDay);
-        end.setDate(end.getDate() - 1);
-
-        setPeriodStart(start.toISOString().slice(0, 10));
-        setPeriodEnd(end.toISOString().slice(0, 10));
+        const anchor = anchorMonthDay(String(comp.fiscalYearStart));
+        const todayYmd = new Date().toISOString().slice(0, 10);
+        const current = fiscalYearRangeContaining(anchor, todayYmd);
+        setPeriodStart(current.start);
+        setPeriodEnd(current.end);
       } else {
         // Fallback: calendar year
         const now = new Date();
@@ -90,8 +85,14 @@ export default function PeriodClosePage() {
   );
 
   const isFuture = new Date(periodStart) > new Date();
+  // Phase 0 (P0-5): the year-end shown here is DERIVED from the start
+  // anchor (day before the start anniversary) — the stored fiscalYearEnd
+  // is no longer an independent value that can disagree with it.
   const fyLabel = company?.fiscalYearStart
-    ? `Fiscal Year: ${format(new Date(company.fiscalYearStart), 'MMM d')} — ${company.fiscalYearEnd ? format(new Date(company.fiscalYearEnd), 'MMM d') : '(not set)'}`
+    ? (() => {
+        const md = fiscalYearMonthDayLabel(anchorMonthDay(String(company.fiscalYearStart)));
+        return `Fiscal Year: ${md.startLabel} — ${md.endLabel}`;
+      })()
     : 'Calendar Year';
 
   return (

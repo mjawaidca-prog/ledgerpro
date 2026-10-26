@@ -7,6 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { BUSINESS_TYPES, PROVINCE_OPTIONS } from '@/lib/taxes';
+import { derivedFiscalYearEnd } from '@/lib/fiscal-year';
 import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar, Download, Upload, DatabaseBackup } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -143,8 +144,9 @@ export default function SettingsPage() {
                   <div className="field"><label>GST/HST Number</label><input type="text" className="input" value={form.gstNumber} onChange={e => setForm({...form, gstNumber: e.target.value})} /></div>
                 </div>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="field"><label>Fiscal Year Start</label><input type="date" className="input" value={form.fiscalYearStart} onChange={e => setForm({...form, fiscalYearStart: e.target.value})} /></div>
-                  <div className="field"><label>Fiscal Year End</label><input type="date" className="input" value={form.fiscalYearEnd} onChange={e => setForm({...form, fiscalYearEnd: e.target.value})} /></div>
+                  <div className="field"><label>Fiscal Year Start</label><input type="date" className="input" value={form.fiscalYearStart} onChange={e => { const start = e.target.value; setForm({...form, fiscalYearStart: start, fiscalYearEnd: start ? derivedFiscalYearEnd(start) : form.fiscalYearEnd}); }} /></div>
+                  {/* Phase 0 (P0-5): year-end is derived from the start (start + 1 year − 1 day) and re-derived again server-side on save — it is shown read-only so the two can never be edited apart again. */}
+                  <div className="field"><label>Fiscal Year End (derived)</label><input type="date" className="input" value={form.fiscalYearEnd} readOnly disabled title="Derived from Fiscal Year Start: start + 1 year − 1 day" /></div>
                   <div className="field"><label>Currency</label><select className="input" value={form.currency} onChange={e => setForm({...form, currency: e.target.value})}><option>CAD</option><option>USD</option><option>EUR</option><option>GBP</option></select></div>
                 </div>
                 <Button type="submit" disabled={saving}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Changes</Button>
