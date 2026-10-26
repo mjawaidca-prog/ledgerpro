@@ -37,10 +37,12 @@ async function activeGstRegistration(companyId: string) {
  * anchored on its validFrom month/day; without a registration, the
  * company's current fiscal year (via the Phase 0 fiscal-year helpers).
  */
-export async function defaultGstPeriod(companyId: string, today = new Date()): Promise<{ start: string; end: string }> {
+/** The filing period (registration frequency, else fiscal year) containing `dateStr`. */
+async function periodContaining(companyId: string, dateStr: string): Promise<{ start: string; end: string }> {
+  const date = new Date(dateStr + 'T00:00:00Z');
   const registration = await activeGstRegistration(companyId);
-  const y = today.getUTCFullYear();
-  const m = today.getUTCMonth() + 1;
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + 1;
   if (registration) {
     const anchor = registration.validFrom;
     const am = anchor.getUTCMonth() + 1;
@@ -58,7 +60,7 @@ export async function defaultGstPeriod(companyId: string, today = new Date()): P
     }
     if (registration.filingFrequency === 'annual') {
       const startThisYear = toYmd(y, am, ad);
-      const start = day(today) >= startThisYear ? startThisYear : toYmd(y - 1, am, ad);
+      const start = dateStr >= startThisYear ? startThisYear : toYmd(y - 1, am, ad);
       // Annual period: [start, start + 1 year − 1 day].
       const startDate = new Date(start + 'T00:00:00Z');
       startDate.setUTCFullYear(startDate.getUTCFullYear() + 1);
@@ -68,8 +70,33 @@ export async function defaultGstPeriod(companyId: string, today = new Date()): P
   }
   const company = await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } });
   const anchor = anchorMonthDay(company?.fiscalYearStart ?? new Date(Date.UTC(y, 0, 1)));
-  const range = fiscalYearRangeContaining(anchor, day(today));
+  const range = fiscalYearRangeContaining(anchor, dateStr);
   return { start: range.start, end: range.end };
+}
+
+export async function defaultGstPeriod(companyId: string, today = new Date()): Promise<{ start: string; end: string }> {
+  const candidate = await periodContaining(companyId, day(today));
+  // Activity-aware default: users open this report to file or review the
+  // period they actually posted in. If the latest tax-account activity is
+  // older than the current (still empty) period — the common case right
+  // after a period ends — default to the period containing that activity
+  // instead of the empty current one.
+  const accounts = await loadSimpleTaxAccounts(companyId);
+  const codes = [accounts.output, accounts.recoverable].filter(Boolean);
+  if (codes.length > 0) {
+    const latest = await db.journalEntry.findFirst({
+      where: { companyId, lines: { some: { glAccountCode: { in: codes } } } },
+      orderBy: [{ entryDate: 'desc' }, { id: 'desc' }],
+      select: { entryDate: true },
+    });
+    if (latest) {
+      const latestDay = day(latest.entryDate);
+      if (latestDay < candidate.start) {
+        return periodContaining(companyId, latestDay);
+      }
+    }
+  }
+  return candidate;
 }
 
 function addDays(ymd: string, days: number): string {

@@ -23,7 +23,9 @@ export default function CategorizationRulesPage() {
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', pattern: '', patternType: 'description_contains' as string, categoryId: '', minAmount: '', maxAmount: '', priority: '0' });
+  const [form, setForm] = useState({ name: '', pattern: '', patternType: 'description_contains' as string, categoryId: '', minAmount: '', maxAmount: '', priority: '0', taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true });
+  const [taxEditId, setTaxEditId] = useState<string | null>(null);
+  const [taxDraft, setTaxDraft] = useState({ taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true });
 
   const fetchRules = useCallback(async () => {
     const [rRes, cRes] = await Promise.all([
@@ -53,9 +55,27 @@ export default function CategorizationRulesPage() {
       minAmount: form.minAmount ? parseFloat(form.minAmount) : undefined,
       maxAmount: form.maxAmount ? parseFloat(form.maxAmount) : undefined,
       priority: parseInt(form.priority) || 0,
+      taxEnabled: form.taxEnabled,
+      taxProvince: form.taxEnabled && form.taxProvince ? form.taxProvince : null,
+      taxInclusive: form.taxInclusive,
+      taxRecoverable: form.taxRecoverable,
     };
     const res = await fetch('/api/categorization-rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (res.ok) { setShowForm(false); setForm({ name: '', pattern: '', patternType: 'description_contains', categoryId: '', minAmount: '', maxAmount: '', priority: '0' }); fetchRules(); }
+    if (res.ok) { setShowForm(false); setForm({ name: '', pattern: '', patternType: 'description_contains', categoryId: '', minAmount: '', maxAmount: '', priority: '0', taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true }); fetchRules(); }
+  }
+
+  async function handleSaveTax(id: string) {
+    const res = await fetch(`/api/categorization-rules/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        taxEnabled: taxDraft.taxEnabled,
+        taxProvince: taxDraft.taxEnabled && taxDraft.taxProvince ? taxDraft.taxProvince : null,
+        taxInclusive: taxDraft.taxInclusive,
+        taxRecoverable: taxDraft.taxRecoverable,
+      }),
+    });
+    if (res.ok) { setTaxEditId(null); fetchRules(); }
   }
 
   async function handleDelete(id: string) {
@@ -106,6 +126,23 @@ export default function CategorizationRulesPage() {
                   <option value="">Select GL account...</option>
                   {coa.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
                 </select></div>
+                <div className="border border-[var(--border)] rounded-lg p-3 space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input type="checkbox" checked={form.taxEnabled} onChange={e => setForm({...form, taxEnabled: e.target.checked})} />
+                    Split tax when this rule categorizes a transaction
+                  </label>
+                  {form.taxEnabled && (
+                    <div className="grid grid-cols-3 gap-3 items-end">
+                      <div className="field"><label>Province of supply</label><select className="input" value={form.taxProvince} onChange={e => setForm({...form, taxProvince: e.target.value})} required>
+                        <option value="">Select province...</option>
+                        {['AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT'].map(p => <option key={p} value={p}>{p}</option>)}
+                      </select></div>
+                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.taxInclusive} onChange={e => setForm({...form, taxInclusive: e.target.checked})} /> Amount includes tax</label>
+                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.taxRecoverable} onChange={e => setForm({...form, taxRecoverable: e.target.checked})} /> Claim GST/HST as ITC (purchases)</label>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-[var(--text-faint)]">GST/HST on purchases goes to the ITC recoverable account, not against the payable. PST/RST are never recoverable and are expensed.</p>
+                </div>
                 <div className="flex gap-2">
                   <Button type="submit" size="sm"><Plus size={14} /> Create Rule</Button>
                   <Button variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
@@ -132,6 +169,7 @@ export default function CategorizationRulesPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold text-[var(--text-strong)]">{rule.name}</span>
                           <Badge variant="info">{typeLabels[rule.patternType] || rule.patternType}</Badge>
+                          {rule.taxEnabled && <Badge variant="paid">Tax: {rule.taxProvince || '—'} {rule.taxInclusive ? 'incl.' : 'excl.'}{rule.taxRecoverable ? ' · ITC' : ''}</Badge>}
                         </div>
                         <p className="text-xs text-[var(--text-muted)]">
                           Pattern: <code className="font-mono text-[var(--accent)]">{rule.pattern}</code>
@@ -143,8 +181,33 @@ export default function CategorizationRulesPage() {
                         </p>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" className="text-[var(--danger)]" onClick={() => handleDelete(rule.id)}><Trash2 size={14} /></Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => { setTaxEditId(taxEditId === rule.id ? null : rule.id); setTaxDraft({ taxEnabled: !!rule.taxEnabled, taxProvince: rule.taxProvince || '', taxInclusive: rule.taxInclusive !== false, taxRecoverable: rule.taxRecoverable !== false }); }}>Tax</Button>
+                      <Button variant="ghost" size="sm" className="text-[var(--danger)]" onClick={() => handleDelete(rule.id)}><Trash2 size={14} /></Button>
+                    </div>
                   </div>
+                  {taxEditId === rule.id && (
+                    <div className="mt-3 border-t border-[var(--border)] pt-3 space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <input type="checkbox" checked={taxDraft.taxEnabled} onChange={e => setTaxDraft({...taxDraft, taxEnabled: e.target.checked})} />
+                        Split tax when this rule categorizes a transaction
+                      </label>
+                      {taxDraft.taxEnabled && (
+                        <div className="grid grid-cols-3 gap-3 items-end">
+                          <div className="field"><label>Province of supply</label><select className="input" value={taxDraft.taxProvince} onChange={e => setTaxDraft({...taxDraft, taxProvince: e.target.value})}>
+                            <option value="">Select province...</option>
+                            {['AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT'].map(p => <option key={p} value={p}>{p}</option>)}
+                          </select></div>
+                          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={taxDraft.taxInclusive} onChange={e => setTaxDraft({...taxDraft, taxInclusive: e.target.checked})} /> Amount includes tax</label>
+                          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={taxDraft.taxRecoverable} onChange={e => setTaxDraft({...taxDraft, taxRecoverable: e.target.checked})} /> Claim GST/HST as ITC (purchases)</label>
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => handleSaveTax(rule.id)}>Save tax settings</Button>
+                        <Button variant="ghost" size="sm" onClick={() => setTaxEditId(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                  )}
                 </CardBody>
               </Card>
             ))}
