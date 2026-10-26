@@ -23,6 +23,12 @@ export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
   { code: '2110', name: 'Business Credit Card', type: 'liability', subType: 'current_liability', detailType: 'Credit card', parentCode: '2000' },
   { code: '2200', name: 'Accounts Payable', type: 'liability', subType: 'current_liability', detailType: 'Accounts payable' },
   { code: '2300', name: 'Sales Tax Payable', type: 'liability', subType: 'current_liability', detailType: 'Sales tax payable' },
+  // Phase 1: recoverable GST/HST is an ASSET (input tax credits), never a
+  // reduction of the 2300 payable at posting time — netting happens in the
+  // GST/HST return computation. PST/RST collected is a separate provincial
+  // liability, never part of GST/HST line 103.
+  { code: '2310', name: 'GST/HST Recoverable — Input Tax Credits', type: 'asset', subType: 'current_asset', detailType: 'Tax recoverable' },
+  { code: '2330', name: 'Provincial Sales Tax Payable', type: 'liability', subType: 'current_liability', detailType: 'Sales tax payable' },
   { code: '2400', name: 'Payroll Liabilities', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
   { code: '2500', name: 'Loans Payable', type: 'liability', subType: 'long_term_liability', detailType: 'Loans payable' },
   { code: '3000', name: "Owner's Capital", type: 'equity', subType: 'owners_equity', detailType: "Owner's equity" },

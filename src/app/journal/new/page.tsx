@@ -18,7 +18,13 @@ interface JournalLine {
   description: string;
   debit: number;
   credit: number;
+  /** Phase 1 simple-path tax: province of supply, '' = no tax on this line. Amount is tax-inclusive. */
+  taxProvince: string;
+  /** Purchases (debit lines): claim GST/HST as an ITC. PST/RST are never recoverable. */
+  taxRecoverable: boolean;
 }
+
+const TAX_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
 
 interface COAItem {
   code: string;
@@ -33,8 +39,8 @@ export default function NewJournalEntryPage() {
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState('');
   const [lines, setLines] = useState<JournalLine[]>([
-    { id: '1', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0 },
-    { id: '2', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0 },
+    { id: '1', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true },
+    { id: '2', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true },
   ]);
   const [coa, setCoa] = useState<COAItem[]>([]);
   const [coaLoading, setCoaLoading] = useState(true);
@@ -67,7 +73,7 @@ export default function NewJournalEntryPage() {
   function addLine() {
     setLines((prev) => [
       ...prev,
-      { id: String(Date.now()), glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0 },
+      { id: String(Date.now()), glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true },
     ]);
   }
 
@@ -76,7 +82,7 @@ export default function NewJournalEntryPage() {
     setLines((prev) => prev.filter((l) => l.id !== id));
   }
 
-  function updateLine(id: string, field: keyof JournalLine, value: string | number) {
+  function updateLine(id: string, field: keyof JournalLine, value: string | number | boolean) {
     setLines((prev) =>
       prev.map((l) => {
         if (l.id !== id) return l;
@@ -136,6 +142,9 @@ export default function NewJournalEntryPage() {
             description: l.description || undefined,
             debit: l.debit,
             credit: l.credit,
+            ...(l.taxProvince
+              ? { tax: { province: l.taxProvince, priceMode: 'inclusive', recoverable: l.taxRecoverable } }
+              : {}),
           })),
         }),
       });
@@ -238,6 +247,7 @@ export default function NewJournalEntryPage() {
                     <tr className="border-b border-[var(--border)] bg-[var(--surface-2)]">
                       <th className="text-left text-micro font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] px-4 py-2.5 w-[180px]">Account</th>
                       <th className="text-left text-micro font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] px-4 py-2.5">Description</th>
+                      <th className="text-left text-micro font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] px-4 py-2.5 w-[150px]">Tax (incl.)</th>
                       <th className="text-right text-micro font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] px-4 py-2.5 w-[140px]">Debit</th>
                       <th className="text-right text-micro font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] px-4 py-2.5 w-[140px]">Credit</th>
                       <th className="w-10 px-2" />
@@ -307,6 +317,30 @@ export default function NewJournalEntryPage() {
                             className="w-full border border-transparent hover:border-[var(--border)] focus:border-[var(--border-focus)] rounded-md px-2 py-1.5 text-sm bg-transparent outline-none transition-colors"
                           />
                         </td>
+                        {/* Tax (Phase 1 simple path) */}
+                        <td className="px-4 py-2">
+                          <select
+                            value={line.taxProvince}
+                            onChange={(e) => updateLine(line.id, 'taxProvince', e.target.value)}
+                            className="w-full border border-[var(--border)] rounded-md px-2 py-1.5 text-sm bg-[var(--surface)] outline-none"
+                            title="Province of supply — the line amount is treated as tax-inclusive and split on posting"
+                          >
+                            <option value="">No tax</option>
+                            {TAX_PROVINCES.map((p) => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                          </select>
+                          {line.taxProvince && line.debit > 0 && (
+                            <label className="flex items-center gap-1 mt-1 text-[11px] text-[var(--text-muted)]" title="Claim the GST/HST on this purchase as an input tax credit">
+                              <input
+                                type="checkbox"
+                                checked={line.taxRecoverable}
+                                onChange={(e) => updateLine(line.id, 'taxRecoverable', e.target.checked)}
+                              />
+                              Claim ITC
+                            </label>
+                          )}
+                        </td>
                         {/* Debit */}
                         <td className="px-4 py-2">
                           <div className="relative">
@@ -350,7 +384,7 @@ export default function NewJournalEntryPage() {
                   </tbody>
                   <tfoot>
                     <tr className="border-t-2 border-[var(--border-strong)] bg-[var(--surface-2)]">
-                      <td colSpan={2} className="px-4 py-3">
+                      <td colSpan={3} className="px-4 py-3">
                         <button type="button" onClick={addLine} className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:text-[var(--primary)] transition-colors">
                           <Plus size={14} /> Add Line
                         </button>
@@ -364,7 +398,7 @@ export default function NewJournalEntryPage() {
                       <td />
                     </tr>
                     <tr>
-                      <td colSpan={2} className="px-4 py-2 text-right text-sm font-medium text-[var(--text-muted)]">
+                      <td colSpan={3} className="px-4 py-2 text-right text-sm font-medium text-[var(--text-muted)]">
                         Difference
                       </td>
                       <td colSpan={2} className={cn(
