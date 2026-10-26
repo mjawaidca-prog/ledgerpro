@@ -13,6 +13,13 @@ import {
 
 const reports = [
   {
+    title: 'GST/HST Return',
+    description: 'CRA GST34 working copy from the ledger: lines 101–115, drill-down to entries, record filing with the CRA confirmation.',
+    href: '/reports/gst-hst-return',
+    icon: Landmark,
+    color: 'bg-[var(--success-soft)] text-[var(--success)]',
+  },
+  {
     title: 'Tax Workpapers',
     description: 'Prepare and reconcile GST/HST, QST, PST, and RST schedules with filing evidence.',
     href: '/reports/tax-workpapers',
