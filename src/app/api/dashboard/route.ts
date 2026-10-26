@@ -76,7 +76,13 @@ export async function GET(req: NextRequest) {
       db.chartOfAccount.findMany({ where: { companyId, type: 'expense', active: true }, select: { name: true, balance: true, code: true } }),
       // COA income accounts
       db.chartOfAccount.findMany({ where: { companyId, type: 'income', active: true }, select: { name: true, balance: true, code: true } }),
-      // Bank accounts with unreconciled counts
+      // Bank accounts with unreconciled counts.
+      // Definition (shared, lib/banking/counts.ts isUnreconciled):
+      // reconciledAt IS NULL AND status != 'excluded'. NOTE: Post-to-GL
+      // sets status='reconciled' (posted) WITHOUT setting reconciledAt, so
+      // this count includes posted rows — it is a "to RECONCILE" count and
+      // must never be labelled "to review" (review = status toreview/
+      // transfer). Keep this Prisma filter in sync with counts.ts.
       db.financialAccount.findMany({
         where: { companyId, isActive: true },
         select: {

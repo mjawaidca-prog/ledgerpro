@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCompany } from '@/lib/api-helpers';
 import { db } from '@/lib/db';
+import { dedupeImportsForDisplay } from '@/lib/banking/counts';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,19 +25,25 @@ export async function GET(req: NextRequest) {
       include: { account: { select: { name: true, currency: true } } },
     });
 
-    return NextResponse.json({
-      data: imports.map((i) => ({
-        id: i.id,
-        date: i.createdAt.toISOString().slice(0, 10),
-        fileName: i.fileName,
-        accountName: i.account.name,
-        rows: i.rowsTotal,
-        skipped: i.rowsSkippedDuplicate + i.rowsSkippedLocked,
-        status: i.status,
-        reversibleUntil: i.reversibleUntil,
-        reversedAt: i.reversedAt,
-      })),
-    });
+    const mapped = imports.map((i) => ({
+      id: i.id,
+      date: i.createdAt.toISOString().slice(0, 10),
+      fileName: i.fileName,
+      accountId: i.financialAccountId,
+      accountName: i.account.name,
+      rows: i.rowsTotal,
+      imported: i.rowsImported,
+      skipped: i.rowsSkippedDuplicate + i.rowsSkippedLocked,
+      status: i.status,
+      reversibleUntil: i.reversibleUntil,
+      reversedAt: i.reversedAt,
+    }));
+
+    // Phase 0 (P0-3): the same import event was listed twice in the live
+    // UI (duplicate StatementImport rows for one file/account/day/count).
+    // Collapse exact display duplicates; genuine re-imports differ in
+    // rowsImported/status and remain listed. See counts.ts.
+    return NextResponse.json({ data: dedupeImportsForDisplay(mapped) });
   } catch (err) {
     console.error('GET /api/imports error:', err);
     return NextResponse.json({ error: 'Failed to load imports' }, { status: 500 });
