@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
 import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
+import { getGLActivity, endOfDay, coaSummaryFromActivity } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -41,22 +42,19 @@ export async function GET(req: NextRequest) {
       grouped[t].push(acct);
     }
 
-    // Roll up parent balances
-    const parents: Record<string, number> = {};
-    for (const acct of accounts) {
-      if (acct.parentCode) {
-        parents[acct.parentCode] = (parents[acct.parentCode] || 0) + Number(acct.balance);
-      }
-    }
-
-    // Summary totals
-    const summary = {
-      assets: accounts.filter(a => a.type === 'asset').reduce((s, a) => s + (a.parentCode ? 0 : Number(a.balance) + (parents[a.code] || 0)), 0),
-      liabilities: accounts.filter(a => a.type === 'liability').reduce((s, a) => s + (a.parentCode ? 0 : Number(a.balance) + (parents[a.code] || 0)), 0),
-      equity: accounts.filter(a => a.type === 'equity').reduce((s, a) => s + (a.parentCode ? 0 : Number(a.balance) + (parents[a.code] || 0)), 0),
-      income: accounts.filter(a => a.type === 'income').reduce((s, a) => s + (a.parentCode ? 0 : Number(a.balance) + (parents[a.code] || 0)), 0),
-      expenses: accounts.filter(a => a.type === 'expense').reduce((s, a) => s + (a.parentCode ? 0 : Number(a.balance) + (parents[a.code] || 0)), 0),
-    };
+    // Summary totals — Phase 0.1: computed from journal activity over ALL
+    // active accounts (never the filtered subset above), using the same
+    // signed aggregation as the Balance Sheet (see coaSummaryFromActivity).
+    // The old code summed the mutable ChartOfAccount.balance column with a
+    // parent rollup, which double-counted balances held on both a parent
+    // and its child (Muja: bank counted on 1000 AND 1010, assets overstated
+    // by exactly the $20,721.38 bank balance) and showed equity $0 because
+    // unclosed earnings were never folded in.
+    const [allAccounts, activity] = await Promise.all([
+      db.chartOfAccount.findMany({ where: { companyId, active: true }, select: { code: true, type: true } }),
+      getGLActivity(companyId, { to: endOfDay(new Date()) }),
+    ]);
+    const summary = coaSummaryFromActivity(allAccounts, activity);
 
     return NextResponse.json({
       data: accounts,

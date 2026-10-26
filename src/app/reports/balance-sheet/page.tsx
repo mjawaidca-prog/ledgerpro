@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { cn } from '@/lib/cn';
-import { money } from '@/lib/money';
+import { moneySigned } from '@/lib/money';
 import { format } from 'date-fns';
 import { ArrowLeft, Loader2, Printer, Download, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
@@ -46,6 +46,11 @@ function useDropdown() {
 }
 
 // ── Helpers ──
+// Phase 0.1: every amount on this page renders with moneySigned, never
+// money(). money() drops the sign (Math.abs), which made credit-balance
+// assets and debit-balance liabilities print positive while the totals
+// summed them signed — the printed lines did not foot to the printed
+// totals even though the sheet was, in signed terms, balanced.
 
 function ChangePct({ pct, direction, favorable }: { pct: number; direction: string; favorable: boolean | null }) {
   if (direction === 'flat' || favorable === null) return <span className="text-[var(--text-faint)] text-xs">—</span>;
@@ -59,9 +64,9 @@ function SectionTotal({ label, total, priorTotal, hasComparison, cmp }: { label:
     <div className="flex items-center justify-between py-2.5 px-3 border-t border-[var(--border)]">
       <span className="text-sm font-bold text-[var(--text-strong)]">{label}</span>
       <div className="flex items-center gap-3">
-        {hasComparison && priorTotal !== undefined && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[90px] text-right">{money(priorTotal)}</span>}
+        {hasComparison && priorTotal !== undefined && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[90px] text-right">{moneySigned(priorTotal)}</span>}
         {hasComparison && cmp && <ChangePct pct={cmp.changePct} direction={cmp.direction} favorable={cmp.favorable} />}
-        <span className="text-sm font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{money(total)}</span>
+        <span className="text-sm font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{moneySigned(total)}</span>
       </div>
     </div>
   );
@@ -193,9 +198,9 @@ export default function BalanceSheetPage() {
                   <div key={a.code} onClick={() => router.push(`/reports/general-ledger?code=${a.code}&name=${encodeURIComponent(a.name)}&start=${fy.fiscalYearStart || '2020-01-01'}&end=${asOf}`)} className="flex items-center justify-between py-1.5 px-2 rounded cursor-pointer hover:bg-[var(--primary-soft)] group">
                     <div className="flex-1 min-w-0"><span className="text-sm text-[var(--text)] truncate group-hover:text-[var(--primary)]">{a.name}</span><span className="text-xs text-[var(--text-muted)] ml-1.5">{a.code}</span></div>
                     <div className="flex items-center gap-2 ml-3">
-                      {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(a.priorBalance)}</span>}
+                      {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(a.priorBalance)}</span>}
                       {hasComparison && <ChangePct pct={a.changePct} direction={a.direction} favorable={a.favorable} />}
-                      <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{money(a.balance)}</span>
+                      <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{moneySigned(a.balance)}</span>
                     </div>
                   </div>
                 ))}
@@ -209,9 +214,9 @@ export default function BalanceSheetPage() {
                       <div key={a.code} onClick={() => router.push(`/reports/general-ledger?code=${a.code}&name=${encodeURIComponent(a.name)}&start=${fy.fiscalYearStart || '2020-01-01'}&end=${asOf}`)} className="flex items-center justify-between py-1.5 px-2 rounded cursor-pointer hover:bg-[var(--primary-soft)] group">
                         <div className="flex-1 min-w-0"><span className="text-sm text-[var(--text)] truncate group-hover:text-[var(--primary)]">{a.name}</span><span className="text-xs text-[var(--text-muted)] ml-1.5">{a.code}</span></div>
                         <div className="flex items-center gap-2 ml-3">
-                          {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(a.priorBalance)}</span>}
+                          {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(a.priorBalance)}</span>}
                           {hasComparison && <ChangePct pct={a.changePct} direction={a.direction} favorable={a.favorable} />}
-                          <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{money(a.balance)}</span>
+                          <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{moneySigned(a.balance)}</span>
                         </div>
                       </div>
                     ))}
@@ -223,9 +228,9 @@ export default function BalanceSheetPage() {
                 <div className="flex items-center justify-between py-3.5 px-3 mt-2 border-t-2 border-[var(--text-strong)]">
                   <span className="text-base font-bold text-[var(--text-strong)]">Total Assets</span>
                   <div className="flex items-center gap-2">
-                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(data.sections.assets.priorTotal)}</span>}
+                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(data.sections.assets.priorTotal)}</span>}
                     {hasComparison && <ChangePct pct={data.sections.assets.changePct} direction={data.sections.assets.changePct > 0.005 ? 'up' : data.sections.assets.changePct < -0.005 ? 'down' : 'flat'} favorable={data.sections.assets.changePct > 0.005} />}
-                    <span className="text-base font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{money(hideZeroBalances ? sumAccts(filterAccts(data.sections.assets.current.accounts)) + sumAccts(filterAccts(data.sections.assets.nonCurrent.accounts)) : data.sections.assets.total)}</span>
+                    <span className="text-base font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{moneySigned(hideZeroBalances ? sumAccts(filterAccts(data.sections.assets.current.accounts)) + sumAccts(filterAccts(data.sections.assets.nonCurrent.accounts)) : data.sections.assets.total)}</span>
                   </div>
                 </div>
               </div>
@@ -239,9 +244,9 @@ export default function BalanceSheetPage() {
                   <div key={a.code} onClick={() => router.push(`/reports/general-ledger?code=${a.code}&name=${encodeURIComponent(a.name)}&start=${fy.fiscalYearStart || '2020-01-01'}&end=${asOf}`)} className="flex items-center justify-between py-1.5 px-2 rounded cursor-pointer hover:bg-[var(--primary-soft)] group">
                     <div className="flex-1 min-w-0"><span className="text-sm text-[var(--text)] truncate group-hover:text-[var(--primary)]">{a.name}</span><span className="text-xs text-[var(--text-muted)] ml-1.5">{a.code}</span></div>
                     <div className="flex items-center gap-2 ml-3">
-                      {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(a.priorBalance)}</span>}
+                      {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(a.priorBalance)}</span>}
                       {hasComparison && <ChangePct pct={a.changePct} direction={a.direction} favorable={a.favorable} />}
-                      <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{money(a.balance)}</span>
+                      <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{moneySigned(a.balance)}</span>
                     </div>
                   </div>
                 ))}
@@ -256,9 +261,9 @@ export default function BalanceSheetPage() {
                       <div key={a.code} onClick={() => router.push(`/reports/general-ledger?code=${a.code}&name=${encodeURIComponent(a.name)}&start=${fy.fiscalYearStart || '2020-01-01'}&end=${asOf}`)} className="flex items-center justify-between py-1.5 px-2 rounded cursor-pointer hover:bg-[var(--primary-soft)] group">
                         <div className="flex-1 min-w-0"><span className="text-sm text-[var(--text)] truncate group-hover:text-[var(--primary)]">{a.name}</span><span className="text-xs text-[var(--text-muted)] ml-1.5">{a.code}</span></div>
                         <div className="flex items-center gap-2 ml-3">
-                          {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(a.priorBalance)}</span>}
+                          {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(a.priorBalance)}</span>}
                           {hasComparison && <ChangePct pct={a.changePct} direction={a.direction} favorable={a.favorable} />}
-                          <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{money(a.balance)}</span>
+                          <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{moneySigned(a.balance)}</span>
                         </div>
                       </div>
                     ))}
@@ -270,9 +275,9 @@ export default function BalanceSheetPage() {
                 <div className="flex items-center justify-between py-2.5 px-3 border-t border-[var(--border)]">
                   <span className="text-sm font-bold text-[var(--text-strong)]">Total Liabilities</span>
                   <div className="flex items-center gap-2">
-                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(data.sections.liabilities.priorTotal)}</span>}
+                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(data.sections.liabilities.priorTotal)}</span>}
                     {hasComparison && <ChangePct pct={data.sections.liabilities.changePct} direction={data.sections.liabilities.changePct > 0.005 ? 'up' : data.sections.liabilities.changePct < -0.005 ? 'down' : 'flat'} favorable={!(data.sections.liabilities.changePct > 0.005)} />}
-                    <span className="text-sm font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{money(hideZeroBalances ? sumAccts(filterAccts(data.sections.liabilities.current.accounts)) + sumAccts(filterAccts(data.sections.liabilities.nonCurrent.accounts)) : data.sections.liabilities.total)}</span>
+                    <span className="text-sm font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{moneySigned(hideZeroBalances ? sumAccts(filterAccts(data.sections.liabilities.current.accounts)) + sumAccts(filterAccts(data.sections.liabilities.nonCurrent.accounts)) : data.sections.liabilities.total)}</span>
                   </div>
                 </div>
 
@@ -285,9 +290,9 @@ export default function BalanceSheetPage() {
                       <div key={a.code || a.name} className="flex items-center justify-between py-1.5 px-2 rounded cursor-pointer hover:bg-[var(--primary-soft)] group">
                         <div className="flex-1 min-w-0"><span className="text-sm text-[var(--text)] truncate">{a.name}</span>{a.code && <span className="text-xs text-[var(--text-muted)] ml-1.5">{a.code}</span>}</div>
                         <div className="flex items-center gap-2 ml-3">
-                          {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(a.priorBalance)}</span>}
+                          {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(a.priorBalance)}</span>}
                           {hasComparison && <ChangePct pct={a.changePct} direction={a.direction} favorable={a.favorable} />}
-                          <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{money(a.balance)}</span>
+                          <span className="text-sm font-mono tabular-nums text-[var(--text)] w-[90px] text-right">{moneySigned(a.balance)}</span>
                         </div>
                       </div>
                     ))}
@@ -296,8 +301,8 @@ export default function BalanceSheetPage() {
                 <div className="flex items-center justify-between py-2.5 px-3 border-t border-[var(--border)]">
                   <span className="text-sm font-bold text-[var(--text-strong)]">Total Equity</span>
                   <div className="flex items-center gap-2">
-                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(data.sections.priorTotalEquity)}</span>}
-                    <span className="text-sm font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{money(hideZeroBalances ? Object.values(data.sections.equity).reduce((s, g) => s + sumAccts(filterAccts(g.accounts)), 0) : data.sections.totalEquity)}</span>
+                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(data.sections.priorTotalEquity)}</span>}
+                    <span className="text-sm font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{moneySigned(hideZeroBalances ? Object.values(data.sections.equity).reduce((s, g) => s + sumAccts(filterAccts(g.accounts)), 0) : data.sections.totalEquity)}</span>
                   </div>
                 </div>
 
@@ -305,8 +310,8 @@ export default function BalanceSheetPage() {
                 <div className="flex items-center justify-between py-3.5 px-3 mt-2 border-t-2 border-[var(--text-strong)] bg-[var(--surface-2)] print:bg-gray-50 rounded-lg">
                   <span className="text-base font-bold text-[var(--text-strong)]">Total Liabilities &amp; Equity</span>
                   <div className="flex items-center gap-2">
-                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{money(data.sections.priorTotalLiabilitiesAndEquity)}</span>}
-                    <span className="text-base font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{money(hideZeroBalances ? (sumAccts(filterAccts(data.sections.liabilities.current.accounts)) + sumAccts(filterAccts(data.sections.liabilities.nonCurrent.accounts)) + Object.values(data.sections.equity).reduce((s, g) => s + sumAccts(filterAccts(g.accounts)), 0)) : data.sections.totalLiabilitiesAndEquity)}</span>
+                    {hasComparison && <span className="text-xs font-mono tabular-nums text-[var(--text-faint)] w-[80px] text-right">{moneySigned(data.sections.priorTotalLiabilitiesAndEquity)}</span>}
+                    <span className="text-base font-mono font-bold tabular-nums text-[var(--text-strong)] w-[90px] text-right">{moneySigned(hideZeroBalances ? (sumAccts(filterAccts(data.sections.liabilities.current.accounts)) + sumAccts(filterAccts(data.sections.liabilities.nonCurrent.accounts)) + Object.values(data.sections.equity).reduce((s, g) => s + sumAccts(filterAccts(g.accounts)), 0)) : data.sections.totalLiabilitiesAndEquity)}</span>
                   </div>
                 </div>
 

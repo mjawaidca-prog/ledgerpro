@@ -130,6 +130,41 @@ export function balanceSheetTotals(input: {
   };
 }
 
+export interface CoaSummary {
+  assets: number;
+  liabilities: number;
+  /** Equity account balances PLUS cumulative unclosed earnings — the same equity the Balance Sheet prints. */
+  equity: number;
+  income: number;
+  expenses: number;
+}
+
+/**
+ * Chart-of-Accounts summary totals from journal activity — the SAME signed
+ * aggregation the Balance Sheet uses (Phase 0.1). The /api/coa route
+ * previously summed ChartOfAccount.balance, the mutable running-total
+ * column: it double-counted a bank balance held on both a parent (1000)
+ * and its child (1010) through the parent rollup, and it reported equity
+ * $0 because unclosed earnings were never folded in. Journal activity is
+ * per GL code, so summing it can neither double-count parent/child pairs
+ * nor drift from the statements, and equity gains the unclosed earnings.
+ */
+export function coaSummaryFromActivity(
+  accounts: EarningsAccount[],
+  activity: Record<string, AccountActivity>
+): CoaSummary {
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const sumType = (t: string) =>
+    round(accounts.filter((a) => a.type === t).reduce((s, a) => s + normalBalance(a.type as GLType, activity[a.code]), 0));
+  return {
+    assets: sumType('asset'),
+    liabilities: sumType('liability'),
+    equity: round(sumType('equity') + netEarnings(activity, accounts)),
+    income: sumType('income'),
+    expenses: sumType('expense'),
+  };
+}
+
 type ClassifiableAccount = { code: string; type: string; subType?: string | null; detailType?: string | null; name?: string | null };
 
 const NON_CURRENT_ASSET_HINTS = ['fixed asset', 'property', 'equipment', 'vehicle', 'intangible', 'long-term investment', 'long term investment'];

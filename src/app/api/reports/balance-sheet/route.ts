@@ -206,7 +206,11 @@ export async function GET(req: NextRequest) {
           totalLiabilitiesAndEquity: totalLiabEquity,
           priorTotalLiabilitiesAndEquity: priorLiabEquity,
         },
-        isBalanced: current.isBalanced,
+        // Phase 0.1: the badge must judge the numbers actually returned on
+        // this page — the section sums above — not a separately computed
+        // total set, so the badge can never say "Balanced" about figures
+        // that do not themselves agree.
+        isBalanced: Math.abs(assetsTotal - totalLiabEquity) < 0.01,
       },
     });
   } catch (error) {

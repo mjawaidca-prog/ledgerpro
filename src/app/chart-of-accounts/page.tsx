@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { Segmented } from '@/components/ui/Segmented';
 import { cn } from '@/lib/cn';
-import { money } from '@/lib/money';
+import { money, moneySigned } from '@/lib/money';
 import { useRouter } from 'next/navigation';
 import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink, Plus, X, Pencil } from 'lucide-react';
 import { exportChartOfAccounts } from '@/lib/export';
@@ -316,7 +316,10 @@ export default function ChartOfAccountsPage() {
           return (
             <div key={type} className={cn('rounded-xl p-4 border border-[var(--border)] shadow-[var(--shadow-sm)]', cm.bg)}>
               <div className="text-micro uppercase tracking-[0.08em] text-[var(--text-muted)] mb-1">{typeLabels[type]}</div>
-              <div className={cn('font-mono tabular-nums text-xl font-bold', cm.text)}>{money(val)}</div>
+              {/* Phase 0.1: signed — the summary can legitimately be negative
+                  (e.g. debit-balance liabilities) and must match the Balance
+                  Sheet's signed totals, not their absolute values. */}
+              <div className={cn('font-mono tabular-nums text-xl font-bold', cm.text)}>{moneySigned(val)}</div>
               <div className="text-xs text-[var(--text-muted)] mt-1">
                 {grouped[type]?.filter(a => !a.parentCode).length || 0} accounts
               </div>
