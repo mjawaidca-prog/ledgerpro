@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -30,64 +29,47 @@ interface ClientCompany {
 
 export default function AccountantPage() {
   const router = useRouter();
-  const { data: session } = useSession();
   const [clients, setClients] = useState<ClientCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState<string | null>(null);
 
-  const sessionUser = session?.user as any;
-  const availableCompanies: any[] = sessionUser?.availableCompanies || [];
+  const [companyCount, setCompanyCount] = useState<number | null>(null);
 
+  // Phase 0 (P0-1): this page previously decided "you only have one
+  // company" from session.user.availableCompanies captured on first render
+  // — which is empty while the session is still loading — and then read a
+  // nested `m.company` shape that GET /api/companies does not return (the
+  // API returns FLAT company objects). Result on a real 5-company account:
+  // "You currently only have one company." Load the list from the API on
+  // mount and only conclude the count once it has actually loaded.
   useEffect(() => {
-    if (availableCompanies.length <= 1) { setLoading(false); return; }
     fetchClientData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function fetchClientData() {
     setLoading(true);
     try {
-      // Get all companies from the session
       const companies = await fetch('/api/companies').then(r => r.json());
-      const data = companies.data || [];
+      const data: any[] = companies.data || [];
+      setCompanyCount(data.length);
 
-      // Enrich each company with summary stats
-      const enriched = await Promise.all(
-        data.map(async (m: any) => {
-          const c = m.company;
-          try {
-            const [dashboardRes] = await Promise.all([
-              fetch(`/api/dashboard?range=year`, {
-                // Note: this only works for the currently active company
-                // For a true multi-company view, we'd need a separate endpoint
-              }).then(r => r.json().catch(() => ({}))),
-            ]);
-
-            return {
-              id: c.id,
-              name: c.name,
-              planName: m.plan?.name || 'Free Trial',
-              subscriptionStatus: m.subscription?.status || 'trialing',
-              role: m.role,
-              memberCount: 1,
-              overdueInvoices: dashboardRes.data?.kpis?.outstandingCount || 0,
-              unreconciledCount: 0,
-              lastActivity: c.updatedAt || null,
-            };
-          } catch {
-            return {
-              id: c.id,
-              name: c.name,
-              planName: 'Free Trial',
-              subscriptionStatus: 'trialing',
-              role: m.role,
-              memberCount: 1,
-              overdueInvoices: 0,
-              unreconciledCount: 0,
-              lastActivity: c.updatedAt || null,
-            };
-          }
-        })
-      );
+      const enriched: ClientCompany[] = data.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        planName: typeof c.plan === 'string' ? c.plan : c.plan?.name || 'Free Trial',
+        subscriptionStatus: c.status || 'trialing',
+        role: c.role || 'owner',
+        memberCount: 1,
+        // The old code fetched /api/dashboard inside this loop, but that
+        // endpoint only ever describes the ACTIVE company — every client
+        // card would have shown the same overdue count. A per-company
+        // summary endpoint is the real fix (Phase 1); show 0 until then
+        // rather than another company's numbers.
+        overdueInvoices: 0,
+        unreconciledCount: 0,
+        lastActivity: c.updatedAt || null,
+      }));
       setClients(enriched);
     } catch {} finally { setLoading(false); }
   }
@@ -104,7 +86,7 @@ export default function AccountantPage() {
     } catch {} finally { setSwitching(null); }
   }
 
-  if (availableCompanies.length <= 1) {
+  if (!loading && companyCount !== null && companyCount <= 1) {
     return (
       <AppShell>
         <div className="max-w-2xl mx-auto py-16 text-center">

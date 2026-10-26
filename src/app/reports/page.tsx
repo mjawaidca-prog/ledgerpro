@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/shell/AppShell';
 import { Card, CardBody } from '@/components/ui/Card';
 import { cn } from '@/lib/cn';
+import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
   ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark,
@@ -111,7 +112,8 @@ export default function ReportsPage() {
   useEffect(() => {
     fetch('/api/companies')
       .then(r => r.json())
-      .then(json => setCompanyName(json.data?.[0]?.name || 'your company'))
+      // Phase 0 (P0-1): subtitle must name the ACTIVE company, not data[0].
+      .then(json => setCompanyName(companyDisplayName(activeCompanyFromCompaniesResponse(json))))
       .catch(() => {});
   }, []);
 

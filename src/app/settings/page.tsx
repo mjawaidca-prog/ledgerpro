@@ -7,6 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { BUSINESS_TYPES, PROVINCE_OPTIONS } from '@/lib/taxes';
+import { activeCompanyFromCompaniesResponse } from '@/lib/active-company';
 import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar, Download, Upload, DatabaseBackup } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -32,7 +33,10 @@ export default function SettingsPage() {
           fetch('/api/companies').then(r => r.json()),
           fetch('/api/subscriptions').then(r => r.json()),
         ]);
-        const comp = compRes.data?.[0];
+        // Phase 0 (P0-1): the ACTIVE company — not data[0] (the oldest
+        // membership). Saving this form PUTs to the active company, so the
+        // values displayed here must come from that same company.
+        const comp: any = activeCompanyFromCompaniesResponse(compRes);
         if (comp) {
           setCompany(comp);
           setForm({

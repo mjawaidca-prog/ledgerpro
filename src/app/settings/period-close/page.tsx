@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { format, addYears, subYears } from 'date-fns';
 import { Lock, CheckCircle2, AlertTriangle, Loader2, Calendar } from 'lucide-react';
+import { activeCompanyFromCompaniesResponse } from '@/lib/active-company';
 
 export default function PeriodClosePage() {
   const [periods, setPeriods] = useState<any[]>([]);
@@ -30,7 +31,9 @@ export default function PeriodClosePage() {
         fetch('/api/companies').then(r => r.json()),
         fetch('/api/period-close').then(r => r.json()),
       ]);
-      const comp = compRes.data?.[0];
+      // Phase 0 (P0-1): active company, not data[0] — period close must
+      // describe (and close) the company the user is actually working in.
+      const comp: any = activeCompanyFromCompaniesResponse(compRes);
       setCompany(comp);
       setPeriods(perRes.data || []);
 
