@@ -5,6 +5,8 @@ import { requireCompany, closedPeriodGuard } from '@/lib/api-helpers';
 import { emitWebhookEvent } from '@/lib/webhooks';
 import { postJournalEntry } from '@/lib/journal';
 import { suggestMirror } from '@/lib/intercompany/detect';
+import { expandJournalTaxLines, type JournalLineWithTax } from '@/lib/tax/journal-tax';
+import { ensureSimpleTaxAccounts, loadSimpleTaxAccounts } from '@/lib/tax/accounts';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
@@ -16,7 +18,7 @@ export async function POST(req: NextRequest) {
     const { entryDate, description, lines } = body as {
       entryDate: string;
       description: string;
-      lines: { glAccountCode: string; description?: string; debit: number; credit: number }[];
+      lines: JournalLineWithTax[];
     };
 
     if (!entryDate || !description || !lines?.length) {
@@ -33,17 +35,35 @@ export async function POST(req: NextRequest) {
       if (guardError) return guardError;
     }
 
+    // Phase 1: expand tax-tagged lines (inclusive) into net + tax lines.
+    // Untagged lines pass through untouched; expansion preserves each
+    // line's total, so a balanced entry stays balanced.
+    let expandedLines: { glAccountCode: string; description?: string; debit: number; credit: number }[];
+    if (lines.some((l) => l.tax)) {
+      const needsRecoverable = lines.some((l) => l.tax && (l.debit || 0) > 0 && (l.tax.recoverable ?? true));
+      const needsPst = lines.some((l) => l.tax && (l.credit || 0) > 0);
+      await ensureSimpleTaxAccounts(companyId, { recoverable: needsRecoverable, pstPayable: needsPst });
+      const taxAccounts = await loadSimpleTaxAccounts(companyId);
+      try {
+        expandedLines = expandJournalTaxLines(lines, taxAccounts, entryDate);
+      } catch (e: any) {
+        return NextResponse.json({ error: e.message }, { status: 400 });
+      }
+    } else {
+      expandedLines = lines.map((l) => ({
+        glAccountCode: l.glAccountCode,
+        description: l.description,
+        debit: l.debit || 0,
+        credit: l.credit || 0,
+      }));
+    }
+
     const entry = await postJournalEntry(
       {
         entryDate: new Date(entryDate),
         description,
         sourceType: 'manual',
-        lines: lines.map((l) => ({
-          glAccountCode: l.glAccountCode,
-          description: l.description,
-          debit: l.debit || 0,
-          credit: l.credit || 0,
-        })),
+        lines: expandedLines,
       },
       companyId
     );

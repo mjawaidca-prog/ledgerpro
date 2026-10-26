@@ -11,6 +11,7 @@ import { resolveRate } from '@/lib/fx/rate';
 import { buildPostingLines, computeSplitTaxes, round2 } from './splits';
 import { postJournalEntry, postTransactionToLedger } from '@/lib/journal';
 import { assertReviewedBankTaxAdapter } from '@/lib/tax/bank-adapter';
+import { ensureSimpleTaxAccounts } from '@/lib/tax/accounts';
 
 export interface BankRow {
   id: string;
@@ -22,7 +23,7 @@ export interface BankRow {
   currency: string;
   fxRate: Prisma.Decimal | null;
   amountHome: Prisma.Decimal | null;
-  splits: { categoryCode: string; amount: number; taxCode: string | null; taxRate: number | null; taxInclusive: boolean; memo?: string }[] | null;
+  splits: { categoryCode: string; amount: number; taxCode: string | null; taxRate: number | null; taxInclusive: boolean; memo?: string; taxProvince?: string | null; taxRecoverable?: boolean }[] | null;
   categoryId: string | null;
   account: { glAccountCode: string | null; currency: string } | null;
   category: { code: string; name: string } | null;
@@ -52,9 +53,16 @@ export async function postBankRow(opts: { row: BankRow; companyId: string; homeC
     throw new Error("The row's bank account has no linked GL account code. Link it in Chart of Accounts before posting.");
   }
 
-  // Splits path — one journal entry with one line per split (+ tax on 2300).
+  // Splits path — one journal entry with one line per split + routed tax
+  // lines (Phase 1: purchase GST/HST → ITC recoverable account, sales tax →
+  // output account, PST/RST collected → PST payable; never all to 2300).
   if (row.splits && row.splits.length > 0) {
-    const computed = computeSplitTaxes(row.splits);
+    const direction = row.amount > 0 ? 'in' : 'out';
+    const computed = computeSplitTaxes(row.splits, direction);
+    const taxAccounts = await ensureSimpleTaxAccounts(companyId, {
+      recoverable: computed.some((c) => c.tax.recoverableGstHst > 0 || c.tax.recoverableQst > 0),
+      pstPayable: computed.some((c) => c.tax.outputPstRst > 0),
+    });
     const isFx = row.currency !== homeCurrency;
     let fxRate: number | null = null;
     if (isFx) {
@@ -66,8 +74,9 @@ export async function postBankRow(opts: { row: BankRow; companyId: string; homeC
     }
 
     const lines = buildPostingLines({
-      splits: computed.map((c) => ({ categoryCode: c.categoryCode, net: c.net, taxAmount: c.taxAmount, taxCode: c.taxCode })),
-      direction: row.amount > 0 ? 'in' : 'out',
+      splits: computed.map((c) => ({ categoryCode: c.categoryCode, net: c.net, taxAmount: c.taxAmount, taxCode: c.taxCode, tax: c.tax })),
+      direction,
+      taxAccounts,
       bankAccountCode: glCode,
       total: Math.abs(Number(row.amount)),
       description: row.description,
