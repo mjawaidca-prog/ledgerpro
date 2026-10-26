@@ -1,6 +1,12 @@
 /**
  * Shared balance computation for financial statements.
  *
+ * Fiscal-year definition: see src/lib/fiscal-year.ts (Phase 0, P0-5) —
+ * anchored only on the month/day of Company.fiscalYearStart, labelled by
+ * the calendar year the fiscal year begins. The helpers below implement
+ * that same definition for server-side Date inputs; do not introduce a
+ * second definition here.
+ *
  * Balance Sheet and P&L both need account balances as of / over a date
  * range that isn't "now" — but ChartOfAccount.balance is a single mutable
  * running total, not time-scoped. These helpers derive real point-in-time

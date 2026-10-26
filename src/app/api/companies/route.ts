@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { getServerSession } from '@/lib/auth';
 import { createCompanyForUser } from '@/lib/create-company';
+import { derivedFiscalYearEnd } from '@/lib/fiscal-year';
 export const dynamic = 'force-dynamic';
 
 // GET — list companies for the current user (with full details for settings)
@@ -158,6 +159,20 @@ export async function PUT(req: NextRequest) {
     }
     if (data.fiscalYearEnd && typeof data.fiscalYearEnd === 'string') {
       data.fiscalYearEnd = new Date(data.fiscalYearEnd);
+    }
+
+    // Phase 0 (P0-5): fiscalYearEnd is DERIVED from fiscalYearStart
+    // (start + 1 year − 1 day), never an independent value. Settings used
+    // to let the two be edited separately, so they drifted apart (start
+    // Oct 2, end Dec 31) and every surface computed a different year.
+    // Re-derive on every save that touches either field; this also
+    // self-heals companies whose stored end is already wrong.
+    if (data.fiscalYearStart || data.fiscalYearEnd) {
+      const startForDerivation: Date = data.fiscalYearStart
+        ?? (await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } }))?.fiscalYearStart;
+      if (startForDerivation) {
+        data.fiscalYearEnd = new Date(`${derivedFiscalYearEnd(startForDerivation)}T00:00:00.000Z`);
+      }
     }
 
     const updated = await db.company.update({

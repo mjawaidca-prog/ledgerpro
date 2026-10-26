@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { anchorMonthDay, fiscalYearRangeContaining } from '@/lib/fiscal-year';
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
@@ -8,43 +9,25 @@ function getCookie(name: string): string | null {
 }
 
 interface FiscalYearInfo {
-  fiscalYearStart: string; // e.g. "2025-12-01" (current FY start)
-  fiscalYearEnd: string;   // e.g. "2026-11-30" (current FY end)
-  defaultYear: string;     // e.g. "2025" (start year of current FY)
+  /** Default fiscal year for report pages: the FY with the most recent income/expense activity (Phase 0), else the current FY. */
+  fiscalYearStart: string; // e.g. "2025-10-02"
+  fiscalYearEnd: string;   // e.g. "2026-10-01"
+  defaultYear: string;     // e.g. "2025" (start year of the default FY — the "FY 2025" label)
   loaded: boolean;
 }
 
-/** Given a fiscal year start date string, compute the current fiscal year period.
- *  Parses the date string by splitting on '-' to avoid timezone shift —
- *  new Date('2024-12-01') parses as UTC midnight which becomes Nov 30 in
- *  North American timezones. */
-function computeCurrentFY(storedStart: string): { start: string; end: string; defaultYear: string } {
-  // Safe parse: extract Y/M/D directly from the ISO prefix to avoid UTC→local shift
-  const parts = storedStart.slice(0, 10).split('-').map(Number);
-  const startMonth = parts[1] - 1; // 0-indexed (January = 0)
-  const startDay = parts[2];
-
-  const today = new Date();
-  const thisYear = today.getFullYear();
-
-  // This year's fiscal start
-  const thisFYStart = new Date(thisYear, startMonth, startDay);
-
-  // If today is before this year's FY start, current FY started last year
-  const fyStartYear = today < thisFYStart ? thisYear - 1 : thisYear;
-
-  const fyStart = new Date(fyStartYear, startMonth, startDay);
-  // FY end = FY start + 1 year - 1 day
-  const fyEnd = new Date(fyStartYear + 1, startMonth, startDay);
-  fyEnd.setDate(fyEnd.getDate() - 1);
-
-  return {
-    start: fyStart.toISOString().slice(0, 10),
-    end: fyEnd.toISOString().slice(0, 10),
-    defaultYear: String(fyStartYear),
-  };
-}
-
+/**
+ * Fiscal-year info for report pages.
+ *
+ * Phase 0 (P0-5): defaults now come from GET /api/reports/fiscal-defaults,
+ * which resolves ONE fiscal-year definition server-side (anchored on the
+ * active company's fiscalYearStart month/day) and picks the fiscal year
+ * with the latest income/expense activity as the default — so report
+ * pages open on the year that has the books in it, not an empty current
+ * year, and the "FY <year>" label (the year the FY begins) means the same
+ * thing on every report. The /api/companies fallback below preserves the
+ * old current-FY behaviour if the endpoint is unavailable.
+ */
 export function useFiscalYear(): FiscalYearInfo {
   const [info, setInfo] = useState<FiscalYearInfo>({
     fiscalYearStart: '',
@@ -54,25 +37,52 @@ export function useFiscalYear(): FiscalYearInfo {
   });
 
   useEffect(() => {
-    fetch('/api/companies')
-      .then(res => res.json())
-      .then(json => {
-        const companies = json.data || [];
-        // /api/companies lists every company this user belongs to — with
-        // multi-company support, companies[0] is whichever was created
-        // first, not necessarily the one currently active. Match against
-        // the active-company cookie (same one AppShell resolves against)
-        // so the fiscal year shown here always matches the company on screen.
-        const activeId = getCookie('lp-active-company-id');
-        const active = companies.find((c: any) => c.id === activeId) || companies[0];
+    let cancelled = false;
+
+    async function loadFromDefaults() {
+      const res = await fetch('/api/reports/fiscal-defaults');
+      if (!res.ok) throw new Error('fiscal-defaults unavailable');
+      const json = await res.json();
+      const def = json.data?.default;
+      if (!def) throw new Error('fiscal-defaults empty');
+      if (!cancelled) {
+        setInfo({
+          fiscalYearStart: def.start,
+          fiscalYearEnd: def.end,
+          defaultYear: String(def.labelYear),
+          loaded: true,
+        });
+      }
+    }
+
+    async function loadFallback() {
+      const res = await fetch('/api/companies');
+      const json = await res.json();
+      const companies = json.data || [];
+      const activeId = json.activeCompanyId || getCookie('lp-active-company-id');
+      const active = companies.find((c: any) => c.id === activeId) || companies[0];
+      if (!cancelled) {
         if (active?.fiscalYearStart) {
-          const fy = computeCurrentFY(active.fiscalYearStart);
-          setInfo({ fiscalYearStart: fy.start, fiscalYearEnd: fy.end, defaultYear: fy.defaultYear, loaded: true });
+          const anchor = anchorMonthDay(String(active.fiscalYearStart));
+          const today = new Date().toISOString().slice(0, 10);
+          const current = fiscalYearRangeContaining(anchor, today);
+          setInfo({
+            fiscalYearStart: current.start,
+            fiscalYearEnd: current.end,
+            defaultYear: String(current.labelYear),
+            loaded: true,
+          });
         } else {
           setInfo(prev => ({ ...prev, loaded: true }));
         }
-      })
-      .catch(() => setInfo(prev => ({ ...prev, loaded: true })));
+      }
+    }
+
+    loadFromDefaults().catch(() => loadFallback().catch(() => {
+      if (!cancelled) setInfo(prev => ({ ...prev, loaded: true }));
+    }));
+
+    return () => { cancelled = true; };
   }, []);
 
   return info;
