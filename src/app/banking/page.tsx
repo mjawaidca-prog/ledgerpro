@@ -350,7 +350,8 @@ export default function BankingPage() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'danger' } | null>(null);
   // Banking-overhaul state
-  const [recentImports, setRecentImports] = useState<{ id: string; date: string; fileName: string; accountName: string; rows: number; skipped: number; status: string }[]>([]);
+  const [recentImports, setRecentImports] = useState<{ id: string; date: string; fileName: string; accountName: string; rows: number; skipped: number; status: string; reversibleUntil?: string | null; reversedAt?: string | null }[]>([]);
+  const [undoingImportId, setUndoingImportId] = useState<string | null>(null);
   const [reminder, setReminder] = useState<{ cadence: string; dayOfMonth: number | null; dayOfWeek: number | null; accountIds: string[]; nextRunAt: string } | null>(null);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [addAccountOpen, setAddAccountOpen] = useState(false);
@@ -693,6 +694,27 @@ export default function BankingPage() {
   const [openingAmount, setOpeningAmount] = useState('');
   const [openingDate, setOpeningDate] = useState(new Date().toISOString().slice(0, 10));
   const [settingBalance, setSettingBalance] = useState(false);
+
+  // Phase 0 (P0-3): Undo Import — wired to the existing
+  // POST /api/imports/[id]/reverse backend. Its rules are enforced
+  // server-side (24-hour window; blocked if any imported row has been
+  // posted/matched) and its error message is shown verbatim so the user
+  // learns WHY an import cannot be undone instead of hitting a dead end.
+  async function undoImport(imp: { id: string; fileName: string }) {
+    if (!confirm(`Undo the import of "${imp.fileName}"? Its transactions will be removed. This only works within 24 hours of importing and before any of its rows are posted.`)) return;
+    setUndoingImportId(imp.id);
+    try {
+      const res = await fetchWithTenantHeaders(`/api/imports/${imp.id}/reverse`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to undo this import.');
+      setToast({ message: 'Import undone — its transactions were removed.', type: 'success' });
+      fetchAccounts();
+    } catch (e: any) {
+      setToast({ message: e?.message || 'Failed to undo this import.', type: 'danger' });
+    } finally {
+      setUndoingImportId(null);
+    }
+  }
 
   async function setOpeningBalance() {
     if (!openingAcctId || !openingAmount || isNaN(parseFloat(openingAmount))) return;
@@ -1514,10 +1536,24 @@ export default function BankingPage() {
                   {imp.skipped > 0 ? imp.skipped : '—'}
                 </span>
                 <span className="w-[120px] text-right">
-                  {imp.status === 'all_duplicates' ? (
+                  {imp.reversedAt ? (
+                    <Badge variant="overdue">Undone</Badge>
+                  ) : imp.status === 'all_duplicates' ? (
                     <Badge variant="overdue">All duplicates</Badge>
                   ) : (
                     <Badge variant="paid">Imported</Badge>
+                  )}
+                </span>
+                <span className="w-[92px] text-right">
+                  {!imp.reversedAt && (
+                    <button
+                      onClick={() => undoImport(imp)}
+                      disabled={undoingImportId === imp.id}
+                      className="text-xs font-medium text-[var(--danger)] hover:underline disabled:opacity-50"
+                      title="Reverse this import (24-hour window, and only before its rows are posted)"
+                    >
+                      {undoingImportId === imp.id ? 'Undoing…' : 'Undo import'}
+                    </button>
                   )}
                 </span>
               </div>

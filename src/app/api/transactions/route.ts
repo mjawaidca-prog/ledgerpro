@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+import { TO_REVIEW_STATUSES } from '@/lib/banking/counts';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
@@ -23,7 +24,9 @@ export async function GET(req: NextRequest) {
     if (accountId) where.financialAccountId = accountId;
     if (status) {
       if (status === 'needsreview') {
-        where.status = { in: ['toreview', 'transfer'] };
+        // Shared definition (lib/banking/counts.ts) — the queue filter and
+        // the summary count below MUST use the same status set.
+        where.status = { in: [...TO_REVIEW_STATUSES] };
       } else {
         where.status = status;
       }
@@ -54,7 +57,10 @@ export async function GET(req: NextRequest) {
         },
       }),
       db.transaction.count({ where }),
-      db.transaction.count({ where: { ...where, status: 'toreview' } }),
+      // Phase 0 (P0-3): was status:'toreview' only, which excluded
+      // 'transfer' rows that the needsreview queue includes — the summary
+      // count and the queue could never agree.
+      db.transaction.count({ where: { ...where, status: { in: [...TO_REVIEW_STATUSES] } } }),
     ]);
 
     return NextResponse.json({

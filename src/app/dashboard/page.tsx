@@ -304,7 +304,8 @@ export default function DashboardPage() {
               <div className="flex items-center gap-1 mt-2 text-xs font-medium text-[var(--text-muted)]">
                 <span>{d.bankAccounts.length} account{d.bankAccounts.length !== 1 ? 's' : ''}</span>
                 {totalUnreconciled > 0 && (
-                  <Badge variant="pending" className="ml-1">{totalUnreconciled} to review</Badge>
+                  /* Phase 0 (P0-3): this count is unreconciled rows (reconciledAt null) — the same count the bank cards below label "to reconcile". It previously said "to review" here while the Banking review queue (a different definition) said 0. */
+                  <Badge variant="pending" className="ml-1">{totalUnreconciled} to reconcile</Badge>
                 )}
               </div>
             </button>

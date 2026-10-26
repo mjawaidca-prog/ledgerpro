@@ -242,7 +242,7 @@ export default function ReconcilePage({ params }: { params: { accountId: string 
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--r-xl)] overflow-hidden">
             <div className="px-4 py-3 bg-[var(--surface-2)] border-b border-[var(--border)]">
               <div className="text-sm font-semibold text-[var(--text-strong)]">Tick off what the statement shows</div>
-              <div className="text-xs text-[var(--text-muted)] mt-0.5">Imported rows are pre-ticked. Untick anything the bank has not actually cleared.</div>
+              <div className="text-xs text-[var(--text-muted)] mt-0.5">{openRec ? 'Rows start ticked when a reconciliation is opened. Untick anything the bank has not actually cleared.' : 'Start a reconciliation (right) to begin ticking rows — rows start ticked, then untick anything the bank has not actually cleared.'}</div>
               <div className="font-mono text-[11px] text-[var(--text-faint)] mt-1.5">{ticked.size} of {candidates?.length ?? 0} ticked</div>
             </div>
             <div className="grid grid-cols-[36px_86px_1fr_120px_112px] px-4 py-2 border-b border-[var(--border)] font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--text-faint)]">
@@ -308,7 +308,8 @@ export default function ReconcilePage({ params }: { params: { accountId: string 
                   <div className="text-[13px] text-[var(--text-muted)]">No open reconciliation for this account.</div>
                   <div className="field">
                     <label>Statement closing balance</label>
-                    <input type="number" step="0.01" value={statementBalance} onChange={(e) => setStatementBalance(e.target.value)} className="input" placeholder="84,210.55" />
+                    {/* Phase 0 (P0-3): the placeholder was a specific-looking number (84,210.55) that read as a pre-filled balance. Placeholders must never look like data. */}
+                    <input type="number" step="0.01" value={statementBalance} onChange={(e) => setStatementBalance(e.target.value)} className="input" placeholder="Enter the closing balance from your statement" />
                   </div>
                   <button onClick={openReconciliation} disabled={busy} className="w-full rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--text-faint)] text-white text-[13.5px] font-semibold px-5 py-2.5 transition-all active:translate-y-[1px]">
                     Start reconciliation
