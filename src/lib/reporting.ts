@@ -47,6 +47,120 @@ export function normalBalance(type: GLType, activity: AccountActivity | undefine
   return type === 'asset' || type === 'expense' ? debits - credits : credits - debits;
 }
 
+export type EarningsAccount = { code: string; type: string };
+
+/**
+ * Net earnings (income − expense) implied by a set of journal activity.
+ * This is THE shared earnings definition for every balance-sheet builder:
+ * income/expense accounts are stated in their normal-balance direction, so
+ * the result is exactly the amount that must sit in equity for the balance
+ * sheet to balance when no closing entries have been posted. When closing
+ * entries HAVE been posted they debit income / credit expense and credit
+ * retained earnings, so this figure automatically shrinks to the unclosed
+ * remainder — it never double-counts closed earnings.
+ */
+export function netEarnings(
+  activity: Record<string, AccountActivity>,
+  accounts: EarningsAccount[]
+): number {
+  let total = 0;
+  for (const a of accounts) {
+    if (a.type === 'income') total += normalBalance('income', activity[a.code]);
+    else if (a.type === 'expense') total -= normalBalance('expense', activity[a.code]);
+  }
+  return Math.round(total * 100) / 100;
+}
+
+export interface UnclosedEarnings {
+  /** Earnings from every period in `activityToDate` (all activity up to as-of). */
+  cumulative: number;
+  /** Earnings inside the current fiscal year only. */
+  currentYear: number;
+  /** Earnings before the current fiscal year that have not been closed to a named equity account. */
+  priorYears: number;
+}
+
+/**
+ * Phase 0 fix (P0-2): the balance sheet previously added ONLY the current
+ * fiscal year's earnings to equity. Any income earned in a prior fiscal year
+ * (e.g. a business whose year-end has passed but whose books were never
+ * formally closed) vanished from equity, so Assets ≠ Liabilities + Equity
+ * even though the trial balance — which lists income/expense accounts
+ * directly — balanced perfectly.
+ */
+export function unclosedEarnings(
+  activityToDate: Record<string, AccountActivity>,
+  currentYearActivity: Record<string, AccountActivity>,
+  accounts: EarningsAccount[]
+): UnclosedEarnings {
+  const cumulative = netEarnings(activityToDate, accounts);
+  const currentYear = netEarnings(currentYearActivity, accounts);
+  const priorYears = Math.round((cumulative - currentYear) * 100) / 100;
+  return { cumulative, currentYear, priorYears };
+}
+
+/**
+ * Balance-sheet totals from normal-balance account balances plus the
+ * CUMULATIVE unclosed earnings. Shared by the dashboard route and the v1
+ * API builder so the two can never disagree about whether a company balances.
+ */
+export function balanceSheetTotals(input: {
+  assetBalances: number[];
+  liabilityBalances: number[];
+  equityAccountBalances: number[];
+  cumulativeUnclosedEarnings: number;
+}): { totalAssets: number; totalLiabilities: number; totalEquity: number; totalLiabilitiesAndEquity: number; isBalanced: boolean } {
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const totalAssets = round(input.assetBalances.reduce((s, n) => s + n, 0));
+  const totalLiabilities = round(input.liabilityBalances.reduce((s, n) => s + n, 0));
+  const totalEquity = round(input.equityAccountBalances.reduce((s, n) => s + n, 0) + input.cumulativeUnclosedEarnings);
+  const totalLiabilitiesAndEquity = round(totalLiabilities + totalEquity);
+  return {
+    totalAssets,
+    totalLiabilities,
+    totalEquity,
+    totalLiabilitiesAndEquity,
+    isBalanced: Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01,
+  };
+}
+
+type ClassifiableAccount = { code: string; type: string; subType?: string | null; detailType?: string | null; name?: string | null };
+
+const NON_CURRENT_ASSET_HINTS = ['fixed asset', 'property', 'equipment', 'vehicle', 'intangible', 'long-term investment', 'long term investment'];
+const NON_CURRENT_LIABILITY_HINTS = ['long-term', 'long term', 'loan', 'mortgage', 'note payable'];
+
+/**
+ * Current vs non-current classification, shared by the balance sheet.
+ *
+ * Phase 0 fix (P0-2): the previous fallback classified an asset purely by
+ * code range (`code < 2000`), so a legitimately-created asset account coded
+ * in the 3xxx range (e.g. 3010 "Due from Shareholder / Shareholder Draws",
+ * created because the 1xxx range was full or by an accountant's own chart)
+ * was silently shown as a NON-current asset. Explicit subType still wins;
+ * otherwise detail/name hints win; only then does a narrow code fallback
+ * apply (15xx–18xx fixed-asset range for assets, 25xx+ for liabilities).
+ * A due-from-shareholder balance is a current asset by default: it is
+ * repayable on demand in the small-corporation charts this product serves.
+ */
+export function isCurrentAccount(a: ClassifiableAccount): boolean {
+  if (a.subType) {
+    if (a.type === 'asset') return a.subType === 'current_asset';
+    if (a.type === 'liability') return a.subType === 'current_liability';
+  }
+  const hint = `${a.detailType ?? ''} ${a.name ?? ''}`.toLowerCase();
+  if (hint.includes('shareholder') || hint.includes('due from')) return true;
+  const n = parseInt(a.code, 10);
+  if (a.type === 'asset') {
+    if (NON_CURRENT_ASSET_HINTS.some((h) => hint.includes(h))) return false;
+    return !(n >= 1500 && n < 1900);
+  }
+  if (a.type === 'liability') {
+    if (NON_CURRENT_LIABILITY_HINTS.some((h) => hint.includes(h))) return false;
+    return !(n >= 2500 && n < 3000);
+  }
+  return true;
+}
+
 export function endOfDay(date: Date): Date {
   const d = new Date(date);
   d.setHours(23, 59, 59, 999);
