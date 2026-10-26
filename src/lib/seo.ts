@@ -63,14 +63,14 @@ export const SEO_FEATURES: Record<string, SeoFeature> = {
     title: 'Bank reconciliation built for clean, reviewable books',
     metaTitle: 'Bank Reconciliation Software for Canadian Businesses | LedgerPro',
     description:
-      'Import or sync bank activity, match transfers, categorize transactions, and reconcile Canadian business accounts in LedgerPro.',
+      'Import bank statements, match transfers, categorize transactions, and reconcile Canadian business accounts in LedgerPro. Direct bank feeds are not live yet — statement import is the supported path today.',
     eyebrow: 'Bank reconciliation software',
     intro:
       'LedgerPro brings bank and credit-card activity into a controlled accounting workflow. Review suggestions, match transfers between your own accounts, and reconcile to the statement without losing the audit trail.',
     benefits: [
       {
-        title: 'Direct bank feeds and statement import',
-        body: 'Connect eligible bank accounts or import CSV, OFX, QFX, and PDF statements for a practical path from bank activity to reviewed books.',
+        title: 'Statement import today; bank feeds coming',
+        body: 'Import CSV, OFX, QFX, and PDF statements for a practical path from bank activity to reviewed books. Direct bank feeds are not live yet — statement import is the supported way to bring activity in.',
       },
       {
         title: 'Transfer and duplicate controls',
@@ -86,7 +86,7 @@ export const SEO_FEATURES: Record<string, SeoFeature> = {
       },
     ],
     workflow: [
-      'Connect an eligible account or upload a supported statement.',
+      'Upload a supported bank or credit-card statement.',
       'Review duplicate, transfer, and category suggestions.',
       'Post approved transactions to the correct accounts.',
       'Complete the reconciliation against the statement balance.',
@@ -97,8 +97,8 @@ export const SEO_FEATURES: Record<string, SeoFeature> = {
         answer: 'LedgerPro supports CSV, OFX, QFX, and PDF statement workflows for bank and credit-card accounts.',
       },
       {
-        question: 'Are bank-feed transactions posted automatically?',
-        answer: 'LedgerPro uses a review-first workflow. Suggested categories and matches can be checked before transactions are posted to the books.',
+        question: 'Does LedgerPro connect directly to my bank?',
+        answer: 'Not yet. Direct bank feeds are not live yet; today you import CSV, OFX, QFX, or PDF statements instead. Either way LedgerPro uses a review-first workflow — suggested categories and matches can be checked before transactions are posted to the books.',
       },
     ],
   },
