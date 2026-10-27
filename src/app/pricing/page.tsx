@@ -36,7 +36,7 @@ const plans = [
     price: '$79',
     period: '/mo',
     annualPrice: '$790/yr', oneTime: '$799 one-time',
-    features: ['10 users', '5 companies', '10,000 transactions', 'Bank imports', 'Custom reports', 'Budget vs actual', 'API access'],
+    features: ['10 users', '5 companies', '10,000 transactions', 'Bank imports', 'Custom reports', 'Budget vs actual', 'API access', 'Payroll sync with Nexvar Pay'],
     cta: 'Start Free Trial',
     href: '/register',
     featured: true,
@@ -46,7 +46,7 @@ const plans = [
     price: '$199',
     period: '/mo',
     annualPrice: '$1,990/yr', oneTime: '$1,999 one-time',
-    features: ['50 users', '25 companies', 'Unlimited transactions', 'White label', 'API access', 'Dedicated support'],
+    features: ['50 users', '25 companies', 'Unlimited transactions', 'White label', 'API access', 'Payroll sync with Nexvar Pay', 'Dedicated support'],
     cta: 'Contact Sales',
     href: 'mailto:hello@nexvarlab.online',
     featured: false,
@@ -120,6 +120,50 @@ export default function PricingPage() {
           ))}
         </div>
         <p className="mx-auto mt-8 max-w-3xl text-center text-xs text-[var(--text-muted)]">One-time (lifetime) purchases include access to the current product tier for the lifetime of that tier or 5 years from purchase, whichever comes first, and are limited to our first 250 founding customers. This one-time offer is available for a limited period only and may be withdrawn at any time. Annual pricing reflects two months free versus paying monthly.</p>
+
+        <div className="mx-auto mt-16 max-w-5xl rounded-xl border border-[var(--border)] bg-[var(--card)] p-7 shadow-[var(--shadow-sm)] md:p-9">
+          <div className="max-w-2xl">
+            <span className="text-xs font-bold uppercase text-[var(--primary)]">Add payroll</span>
+            <h2 className="mt-2 text-2xl font-extrabold text-[var(--text-strong)]">Need payroll too? Add Nexvar Pay.</h2>
+            <p className="mt-3 text-[15px] leading-relaxed text-[var(--text)]">
+              Payroll runs in <strong>Nexvar Pay</strong>, our Canadian payroll product — and the two connect:
+              finalize a pay run there and the balanced journal posts itself here, labelled Payroll — Nexvar Pay.
+              No forced bundle and no re-typing totals. The sync uses the API access included in Pro and Enterprise.
+            </p>
+          </div>
+
+          <div className="mt-6 overflow-x-auto">
+            <table className="w-full min-w-[560px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-left text-[var(--text-muted)]">
+                  <th className="py-2 pr-3 font-semibold">Employees</th>
+                  <th className="py-2 pr-3 font-semibold">Nexvar Pay Solo</th>
+                  <th className="py-2 pr-3 font-semibold">Nexvar Pay Growth</th>
+                  <th className="py-2 font-semibold">LedgerPro Pro + Growth, combined</th>
+                </tr>
+              </thead>
+              <tbody className="text-[var(--text)]">
+                <tr className="border-b border-[var(--border)]"><td className="py-2 pr-3">1</td><td className="py-2 pr-3">$9/mo</td><td className="py-2 pr-3">$21/mo</td><td className="py-2">$100/mo</td></tr>
+                <tr className="border-b border-[var(--border)]"><td className="py-2 pr-3">5</td><td className="py-2 pr-3">$17/mo</td><td className="py-2 pr-3">$29/mo</td><td className="py-2">$108/mo</td></tr>
+                <tr className="border-b border-[var(--border)]"><td className="py-2 pr-3">10</td><td className="py-2 pr-3">$27/mo</td><td className="py-2 pr-3">$39/mo</td><td className="py-2">$118/mo</td></tr>
+                <tr><td className="py-2 pr-3">25</td><td className="py-2 pr-3">$57/mo</td><td className="py-2 pr-3">$69/mo</td><td className="py-2">$148/mo</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-[var(--text-muted)]">
+            Nexvar Pay: Solo $7/mo + $2 per employee; Growth $19/mo + $2 per employee; Accountant $49/mo + $1.50 per employee for firms running many companies.
+            Combined column pairs LedgerPro Pro ($79/mo) with Nexvar Pay Growth. Prices in CAD, before tax.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <a href="https://nexvarpay.nexvarlab.com" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-lg bg-[var(--primary)] px-4 py-3 text-sm font-semibold text-white no-underline hover:bg-[var(--primary-hover)]">
+              Start Nexvar Pay free trial
+            </a>
+            <Link href="/payroll" className="inline-flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-semibold text-[var(--text-strong)] no-underline hover:border-[var(--primary)]">
+              See how the sync works
+            </Link>
+          </div>
+          <p className="mt-3 text-xs text-[var(--text-muted)]">Nexvar Pay starts with a 14-day free trial, no credit card required. Already a LedgerPro customer? The Payroll page in your account shows your connection status.</p>
+        </div>
       </section>
       <LandingFooter />
     </main>
