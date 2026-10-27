@@ -97,6 +97,8 @@ export async function POST(req: NextRequest) {
 
     await auditLog(companyId, userId, 'import.create', 'StatementImport', result.importId, {
       fileName, newCount: result.newCount, skippedDuplicate: result.skippedDuplicate, skippedLocked: result.skippedLocked,
+      categorizationMatched: result.categorization.matched,
+      categorizationSkippedLocked: result.categorization.skippedLocked,
     } as any);
 
     await notifyImportComplete(companyId, account?.name ?? 'Account', result.newCount, result.importId);
