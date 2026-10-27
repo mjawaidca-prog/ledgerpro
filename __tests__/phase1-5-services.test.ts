@@ -227,7 +227,7 @@ describe('tax setup service', () => {
       filingFrequency: 'annual', validFrom: new Date('2025-10-02T00:00:00Z'), validTo: null, active: true,
       reviewedById: null, reviewedAt: null, createdAt: new Date(), updatedAt: new Date(),
     };
-    mockDb.companyTaxRegistration.findUnique.mockResolvedValue(existing);
+    mockDb.companyTaxRegistration.findFirst.mockResolvedValue(existing);
     mockDb.companyTaxRegistration.update.mockImplementation(async ({ data }: any) => ({ ...existing, ...data, reviewedAt: data.reviewedAt ?? existing.reviewedAt }));
     const reviewed = await updateTaxRegistration({ companyId: 'muja', userId: 'u9', role: null, registrationId: 'reg-1', data: { reviewed: true } });
     expect(reviewed.reviewed).toBe(true);
@@ -235,7 +235,7 @@ describe('tax setup service', () => {
 
     jest.clearAllMocks();
     mockDb.membership.findUnique.mockResolvedValue({ role: 'owner' });
-    mockDb.companyTaxRegistration.findUnique.mockResolvedValue({ ...existing, reviewedById: 'u9', reviewedAt: new Date() });
+    mockDb.companyTaxRegistration.findFirst.mockResolvedValue({ ...existing, reviewedById: 'u9', reviewedAt: new Date() });
     mockDb.companyTaxRegistration.update.mockImplementation(async ({ data }: any) => ({ ...existing, ...data }));
     mockDb.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(mockDb));
     await updateTaxRegistration({ companyId: 'muja', userId: 'u9', role: null, registrationId: 'reg-1', data: { registrationNumber: 'B' } });

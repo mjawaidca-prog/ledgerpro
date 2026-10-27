@@ -165,7 +165,7 @@ export async function loadTaxSetup(companyId: string, userId: string | null, rol
     db.companyTaxConfiguration.findUnique({ where: { companyId }, include: configInclude }),
     db.companyTaxRegistration.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } }),
     db.taxCodeVersion.count({
-      where: { status: 'approved', taxCode: { companyId }, effectiveFrom: { lte: new Date() }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }] },
+      where: { reviewStatus: 'approved', taxCode: { companyId, active: true }, effectiveFrom: { lte: new Date() }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }] },
     }),
   ]);
   if (!company) throw new TaxPostingError('company_not_found', 'Company not found.', 404);
@@ -372,8 +372,11 @@ export async function updateTaxRegistration(input: {
   const { companyId, userId, registrationId, data } = input;
   try {
     return await db.$transaction(async (tx) => {
-      const existing = await tx.companyTaxRegistration.findUnique({
-        where: { companyId_id: { companyId, id: registrationId } },
+      // CompanyTaxRegistration has no @@unique([companyId, id]) in the
+      // schema, so a scoped findFirst is the company-safe lookup (the
+      // workpaper service does the same).
+      const existing = await tx.companyTaxRegistration.findFirst({
+        where: { id: registrationId, companyId },
       });
       if (!existing) throw new TaxPostingError('registration_not_found', 'Tax registration not found.', 404);
 
@@ -429,7 +432,7 @@ export async function updateTaxRegistration(input: {
       }
 
       const updated = await tx.companyTaxRegistration.update({
-        where: { companyId_id: { companyId, id: registrationId } },
+        where: { id: registrationId },
         data: values,
       });
       await tx.auditLog.create({
