@@ -77,6 +77,8 @@ export const COMPANY_PURGE_DELEGATES = [
   'contact',
   'periodClose',
   'auditLog',
+  'subscriberFollowUp', // CC-3: per-company follow-up record
+  'platformAuditEvent', // CC-1: platform audit rows that reference this company
   'notification', // companyId column but NO FK relation — orphans otherwise
   'chartOfAccount',
   'financialAccount',
@@ -186,6 +188,8 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
     { delegate: 'contact', run: (tx) => tx.contact.deleteMany(byCompany) },
     { delegate: 'periodClose', run: (tx) => tx.periodClose.deleteMany(byCompany) },
     { delegate: 'auditLog', run: (tx) => tx.auditLog.deleteMany(byCompany) },
+    { delegate: 'subscriberFollowUp', run: (tx) => tx.subscriberFollowUp.deleteMany(byCompany) },
+    { delegate: 'platformAuditEvent', run: (tx) => tx.platformAuditEvent.deleteMany(byCompany) },
     { delegate: 'notification', run: (tx) => tx.notification.deleteMany(byCompany) },
     { delegate: 'chartOfAccount', run: (tx) => tx.chartOfAccount.deleteMany(byCompany) },
     { delegate: 'financialAccount', run: (tx) => tx.financialAccount.deleteMany(byCompany) },

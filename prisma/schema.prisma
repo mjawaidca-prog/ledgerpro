@@ -53,6 +53,12 @@ model User {
   taxWorkpapersReviewed    TaxReturnWorkpaper[]       @relation("TaxWorkpaperReviewer")
   taxWorkpaperRemittances  TaxWorkpaperRemittance[]   @relation("TaxWorkpaperRemittanceCreator")
   apiKeysCreated           ApiKey[]                   @relation("ApiKeyCreator")
+
+  platformAdmin            PlatformAdmin?
+  platformAuditEvents      PlatformAuditEvent[]       @relation("PlatformAuditActor")
+  platformAdminsCreated    PlatformAdmin[]            @relation("PlatformAdminCreator")
+  followUpsAssigned        SubscriberFollowUp[]       @relation("FollowUpAssignee")
+  followUpsCreated         SubscriberFollowUp[]       @relation("FollowUpCreator")
 }
 
 model Company {
@@ -112,6 +118,9 @@ model Company {
   taxCodes            TaxCode[]
   taxSnapshots        DocumentLineTaxSnapshot[]
   taxPostings         TaxPosting[]
+  platformAuditEvents PlatformAuditEvent[]
+  subscriberFollowUps SubscriberFollowUp[]
+
   taxWorkpapers       TaxReturnWorkpaper[]
   taxWorkpaperRemittances TaxWorkpaperRemittance[]
 
@@ -1982,4 +1991,82 @@ model BankFeedTransaction {
 
   @@unique([providerAccountId, providerTransactionId])
   @@index([connectionId, createdAt])
+}
+
+// ─── PLATFORM CONTROL CENTER (CC-1/CC-3) ────────────────────
+
+// Platform administration is deliberately separate from company Membership:
+// a company owner/admin role NEVER grants platform access. Only a row here
+// does. v1 has exactly one role (owner) and, initially, one administrator.
+enum PlatformRole {
+  owner
+}
+
+model PlatformAdmin {
+  id          String       @id @default(cuid())
+  userId      String       @unique
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        PlatformRole @default(owner)
+  createdById String?
+  createdBy   User?        @relation("PlatformAdminCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([role])
+}
+
+// Platform-level audit trail. Separate from AuditLog because AuditLog.companyId
+// is a required FK, while platform actions may have no company (console entry)
+// or span many. metadata must be sanitized by the caller: no secrets, no
+// customer financial data, no payloads.
+model PlatformAuditEvent {
+  id           String   @id @default(cuid())
+  adminUserId  String
+  adminUser    User     @relation("PlatformAuditActor", fields: [adminUserId], references: [id], onDelete: Cascade)
+  action       String // e.g. "control_center.enter", "follow_up.update"
+  targetType   String // e.g. "platform", "subscriber_follow_up", "company"
+  targetId     String?
+  companyId    String?
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([adminUserId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([action, createdAt])
+}
+
+enum FollowUpStatus {
+  new
+  reviewing
+  contacted
+  follow_up_due
+  converted
+  closed
+}
+
+// One follow-up record per COMPANY (conversion happens per company
+// subscription, not per user). `note` is the current internal note; dated
+// history entries are appended by the API into `history` (Json array of
+// { at, byUserId, action, note? }) so no separate history table is needed.
+model SubscriberFollowUp {
+  id              String         @id @default(cuid())
+  companyId       String
+  company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  status          FollowUpStatus @default(new)
+  assignedAdminId String?
+  assignedAdmin   User?          @relation("FollowUpAssignee", fields: [assignedAdminId], references: [id], onDelete: SetNull)
+  note            String?
+  history         Json?
+  nextFollowUpAt  DateTime?
+  lastContactedAt DateTime?
+  contactOptOut   Boolean        @default(false)
+  createdById     String?
+  createdBy       User?          @relation("FollowUpCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([companyId])
+  @@index([status, nextFollowUpAt])
+  @@index([assignedAdminId])
 }

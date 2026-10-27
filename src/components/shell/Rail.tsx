@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
@@ -67,6 +68,14 @@ export function Rail({ companyName, companyPlan, companyId, userName, userEmail,
   const { data: session } = useSession();
   const availableCompanies = (session?.user as any)?.availableCompanies || [];
   const isAccountant = availableCompanies.length > 1;
+  // Control Center link is visible ONLY to platform admins. The server is the
+  // enforcement boundary (/api/platform/me returns 403 for everyone else,
+  // including company owners/admins); this fetch is purely for visibility.
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  useEffect(() => {
+    if (!session) { setIsPlatformAdmin(false); return; }
+    fetch('/api/platform/me').then((r) => setIsPlatformAdmin(r.ok)).catch(() => setIsPlatformAdmin(false));
+  }, [session]);
 
   function renderLink(item: { href: string; label: string; icon: any }) {
     const Icon = item.icon;
@@ -90,6 +99,9 @@ export function Rail({ companyName, companyPlan, companyId, userName, userEmail,
 
         {/* Accountant — only visible for multi-company users */}
         {isAccountant && renderLink({ href: '/accountant', label: 'Accountant', icon: Briefcase })}
+
+        {/* Control Center — platform admins only (see /api/platform/me) */}
+        {isPlatformAdmin && renderLink({ href: '/control-center', label: 'Control Center', icon: ShieldCheck })}
 
         {settingsNavItems.map(renderLink)}
       </nav>
