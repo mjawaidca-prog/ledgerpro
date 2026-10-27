@@ -4,6 +4,7 @@ import { requireCompany, closedPeriodGuard, auditLog } from '@/lib/api-helpers';
 import { postTransactionToLedger } from '@/lib/journal';
 import { resolveRate } from '@/lib/fx/rate';
 import { assertReviewedBankTaxAdapter, type LegacyBankTaxInput } from '@/lib/tax/bank-adapter';
+import { assertNoFiledLock } from '@/lib/tax/filed-lock';
 export const dynamic = 'force-dynamic';
 
 // POST — post categorized bank transactions to the General Ledger
@@ -71,6 +72,20 @@ export async function POST(req: NextRequest) {
       }
 
       try {
+        // Filed-period hard lock: this legacy batch path posts directly
+        // via postTransactionToLedger (bypassing postBankRow), so guard
+        // here. That posting produces exactly two lines — bank + the
+        // row's category — so the lock triggers when either lands on a
+        // resolved tax account. (Split tax specs are not posted by this
+        // path; split rows post through postBankRow, which is guarded.)
+        await assertNoFiledLock({
+          companyId: companyId!,
+          date: tx.date,
+          lines: [
+            { accountCode: tx.category.code },
+            ...(glCode ? [{ accountCode: glCode }] : []),
+          ],
+        });
         assertReviewedBankTaxAdapter({ reviewedTaxEnabled, row: { taxCode: tx.taxCode, taxRate: Number(tx.taxRate ?? 0), taxAmount: Number(tx.taxAmount ?? 0) }, splits: Array.isArray(tx.splits) ? tx.splits as LegacyBankTaxInput[] : null });
         const entry = await postTransactionToLedger(
           {

@@ -1444,6 +1444,11 @@ model CategorizationRule {
   taxProvince    String?
   taxInclusive   Boolean @default(true)
   taxRecoverable Boolean @default(true)
+  // Phase 1 cleanup (partial recovery): fractional recovery 0–100.
+  // Nullable — null keeps the boolean taxRecoverable semantics; when set
+  // it wins over the boolean and is stamped into the split JSON as
+  // taxRecoveryPercent when the rule applies.
+  taxRecoveryPercent Decimal? @db.Decimal(5, 2)
 
   matchCount    Int       @default(0) // how many times matched
   lastMatchedAt DateTime?

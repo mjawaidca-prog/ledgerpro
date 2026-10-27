@@ -18,6 +18,13 @@ export interface JournalTaxSpec {
   province: Province;
   priceMode?: 'inclusive' | 'exclusive';
   recoverable?: boolean;
+  /**
+   * Fractional recovery 0–100 for purchase (debit) lines. When present it
+   * wins over `recoverable` (see SimpleTaxSpec.recoveryPercent); validated
+   * 0–100 by computeSimpleLineTax, whose error the journal API returns as
+   * a 400.
+   */
+  recoveryPercent?: number | null;
 }
 
 export interface JournalLineWithTax {
@@ -54,6 +61,7 @@ export function expandJournalTaxLines(
       priceMode: 'inclusive',
       direction: isDebit ? 'purchase' : 'sale',
       recoverable: line.tax.recoverable ?? true,
+      recoveryPercent: line.tax.recoveryPercent ?? undefined,
       date,
     });
     const desc = line.description;

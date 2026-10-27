@@ -20,6 +20,13 @@ const reports = [
     color: 'bg-[var(--success-soft)] text-[var(--success)]',
   },
   {
+    title: 'QST Return',
+    description: 'Revenu Québec FP-500-V QST working copy from the ledger: lines 101 and 203–213, ITR drill-down, record filing with the Revenu Québec confirmation.',
+    href: '/reports/qst-return',
+    icon: Landmark,
+    color: 'bg-[var(--success-soft)] text-[var(--success)]',
+  },
+  {
     title: 'Tax Workpapers',
     description: 'Prepare and reconcile GST/HST, QST, PST, and RST schedules with filing evidence.',
     href: '/reports/tax-workpapers',

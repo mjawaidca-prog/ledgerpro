@@ -23,9 +23,9 @@ export default function CategorizationRulesPage() {
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', pattern: '', patternType: 'description_contains' as string, categoryId: '', minAmount: '', maxAmount: '', priority: '0', taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true });
+  const [form, setForm] = useState({ name: '', pattern: '', patternType: 'description_contains' as string, categoryId: '', minAmount: '', maxAmount: '', priority: '0', taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true, taxRecoveryPercent: '' });
   const [taxEditId, setTaxEditId] = useState<string | null>(null);
-  const [taxDraft, setTaxDraft] = useState({ taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true });
+  const [taxDraft, setTaxDraft] = useState({ taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true, taxRecoveryPercent: '' });
 
   const fetchRules = useCallback(async () => {
     const [rRes, cRes] = await Promise.all([
@@ -59,9 +59,10 @@ export default function CategorizationRulesPage() {
       taxProvince: form.taxEnabled && form.taxProvince ? form.taxProvince : null,
       taxInclusive: form.taxInclusive,
       taxRecoverable: form.taxRecoverable,
+      taxRecoveryPercent: form.taxEnabled && form.taxRecoveryPercent !== '' ? parseFloat(form.taxRecoveryPercent) : null,
     };
     const res = await fetch('/api/categorization-rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (res.ok) { setShowForm(false); setForm({ name: '', pattern: '', patternType: 'description_contains', categoryId: '', minAmount: '', maxAmount: '', priority: '0', taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true }); fetchRules(); }
+    if (res.ok) { setShowForm(false); setForm({ name: '', pattern: '', patternType: 'description_contains', categoryId: '', minAmount: '', maxAmount: '', priority: '0', taxEnabled: false, taxProvince: '', taxInclusive: true, taxRecoverable: true, taxRecoveryPercent: '' }); fetchRules(); }
   }
 
   async function handleSaveTax(id: string) {
@@ -73,6 +74,7 @@ export default function CategorizationRulesPage() {
         taxProvince: taxDraft.taxEnabled && taxDraft.taxProvince ? taxDraft.taxProvince : null,
         taxInclusive: taxDraft.taxInclusive,
         taxRecoverable: taxDraft.taxRecoverable,
+        taxRecoveryPercent: taxDraft.taxEnabled && taxDraft.taxRecoveryPercent !== '' ? parseFloat(taxDraft.taxRecoveryPercent) : null,
       }),
     });
     if (res.ok) { setTaxEditId(null); fetchRules(); }
@@ -139,9 +141,10 @@ export default function CategorizationRulesPage() {
                       </select></div>
                       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.taxInclusive} onChange={e => setForm({...form, taxInclusive: e.target.checked})} /> Amount includes tax</label>
                       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.taxRecoverable} onChange={e => setForm({...form, taxRecoverable: e.target.checked})} /> Claim GST/HST as ITC (purchases)</label>
+                      <div className="field"><label>Recovery % (optional)</label><input type="number" min={0} max={100} step="0.01" className="input" value={form.taxRecoveryPercent} onChange={e => setForm({...form, taxRecoveryPercent: e.target.value})} placeholder="Blank = ITC checkbox" /></div>
                     </div>
                   )}
-                  <p className="text-[10px] text-[var(--text-faint)]">GST/HST on purchases goes to the ITC recoverable account, not against the payable. PST/RST are never recoverable and are expensed.</p>
+                  <p className="text-[10px] text-[var(--text-faint)]">GST/HST on purchases goes to the ITC recoverable account, not against the payable. PST/RST are never recoverable and are expensed. A Recovery % (e.g. 50 for meals) overrides the ITC checkbox: that fraction is recovered and the rest expensed.</p>
                 </div>
                 <div className="flex gap-2">
                   <Button type="submit" size="sm"><Plus size={14} /> Create Rule</Button>
@@ -169,7 +172,7 @@ export default function CategorizationRulesPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold text-[var(--text-strong)]">{rule.name}</span>
                           <Badge variant="info">{typeLabels[rule.patternType] || rule.patternType}</Badge>
-                          {rule.taxEnabled && <Badge variant="paid">Tax: {rule.taxProvince || '—'} {rule.taxInclusive ? 'incl.' : 'excl.'}{rule.taxRecoverable ? ' · ITC' : ''}</Badge>}
+                          {rule.taxEnabled && <Badge variant="paid">Tax: {rule.taxProvince || '—'} {rule.taxInclusive ? 'incl.' : 'excl.'}{rule.taxRecoverable ? ' · ITC' : ''}{rule.taxRecoveryPercent != null ? ` · ${Number(rule.taxRecoveryPercent)}% rec.` : ''}</Badge>}
                         </div>
                         <p className="text-xs text-[var(--text-muted)]">
                           Pattern: <code className="font-mono text-[var(--accent)]">{rule.pattern}</code>
@@ -182,7 +185,7 @@ export default function CategorizationRulesPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => { setTaxEditId(taxEditId === rule.id ? null : rule.id); setTaxDraft({ taxEnabled: !!rule.taxEnabled, taxProvince: rule.taxProvince || '', taxInclusive: rule.taxInclusive !== false, taxRecoverable: rule.taxRecoverable !== false }); }}>Tax</Button>
+                      <Button variant="ghost" size="sm" onClick={() => { setTaxEditId(taxEditId === rule.id ? null : rule.id); setTaxDraft({ taxEnabled: !!rule.taxEnabled, taxProvince: rule.taxProvince || '', taxInclusive: rule.taxInclusive !== false, taxRecoverable: rule.taxRecoverable !== false, taxRecoveryPercent: rule.taxRecoveryPercent != null ? String(Number(rule.taxRecoveryPercent)) : '' }); }}>Tax</Button>
                       <Button variant="ghost" size="sm" className="text-[var(--danger)]" onClick={() => handleDelete(rule.id)}><Trash2 size={14} /></Button>
                     </div>
                   </div>
@@ -200,6 +203,7 @@ export default function CategorizationRulesPage() {
                           </select></div>
                           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={taxDraft.taxInclusive} onChange={e => setTaxDraft({...taxDraft, taxInclusive: e.target.checked})} /> Amount includes tax</label>
                           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={taxDraft.taxRecoverable} onChange={e => setTaxDraft({...taxDraft, taxRecoverable: e.target.checked})} /> Claim GST/HST as ITC (purchases)</label>
+                          <div className="field"><label>Recovery % (optional)</label><input type="number" min={0} max={100} step="0.01" className="input" value={taxDraft.taxRecoveryPercent} onChange={e => setTaxDraft({...taxDraft, taxRecoveryPercent: e.target.value})} placeholder="Blank = ITC checkbox" /></div>
                         </div>
                       )}
                       <div className="flex gap-2">

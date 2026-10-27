@@ -39,8 +39,8 @@ const REGIMES = [
 const MAPPING_FIELDS: { key: string; label: string; types: string[]; hint: string }[] = [
   { key: 'gstHstOutput', label: 'GST/HST collected (output)', types: ['liability'], hint: 'Default chart code 2300 — Sales Tax Payable.' },
   { key: 'gstHstRecoverable', label: 'GST/HST recoverable (ITCs)', types: ['asset'], hint: 'Default chart code 2310 — GST/HST Recoverable.' },
-  { key: 'qstOutput', label: 'QST collected (output)', types: ['liability'], hint: 'Optional. Only needed for a QST registration.' },
-  { key: 'qstRecoverable', label: 'QST recoverable', types: ['asset'], hint: 'Optional. Only needed for a QST registration.' },
+  { key: 'qstOutput', label: 'QST collected (output)', types: ['liability'], hint: 'Default chart code 2340 — QST Payable.' },
+  { key: 'qstRecoverable', label: 'QST recoverable', types: ['asset'], hint: 'Default chart code 2350 — QST Recoverable (ITRs).' },
   { key: 'pstRstPayable', label: 'PST/RST payable', types: ['liability'], hint: 'Default chart code 2330 — Provincial Sales Tax Payable.' },
   { key: 'rounding', label: 'Tax rounding', types: ['expense'], hint: 'Expense account. Required to enable the tax workflow (a database rule), and before reviewed document postings are fully ready.' },
   { key: 'clearing', label: 'Tax clearing', types: ['asset', 'liability'], hint: 'Optional clearing account used by the reviewed engine.' },
@@ -54,7 +54,7 @@ const CONFIG_FIELD_BY_PURPOSE: Record<string, string> = {
   rounding: 'taxRoundingAccountId',
   clearing: 'taxClearingAccountId',
 };
-const DEFAULT_CODE_BY_PURPOSE: Record<string, string> = { gstHstOutput: '2300', gstHstRecoverable: '2310', pstRstPayable: '2330' };
+const DEFAULT_CODE_BY_PURPOSE: Record<string, string> = { gstHstOutput: '2300', gstHstRecoverable: '2310', pstRstPayable: '2330', qstOutput: '2340', qstRecoverable: '2350' };
 
 export default function TaxSetupPage() {
   const router = useRouter();

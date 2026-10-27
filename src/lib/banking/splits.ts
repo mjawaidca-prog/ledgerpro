@@ -46,6 +46,13 @@ export interface SplitLine {
   taxProvince?: string | null;
   /** Purchases: claim GST/HST (and QST) as ITC/ITR. Default true. PST/RST are never recoverable. */
   taxRecoverable?: boolean;
+  /**
+   * Purchases: fractional recovery 0–100 (e.g. 50 for meals). When present
+   * it wins over `taxRecoverable` (see SimpleTaxSpec.recoveryPercent in
+   * src/lib/tax/simple.ts); the recoverable fraction goes to the ITC/ITR
+   * account(s) and the rest is expensed as non-recoverable.
+   */
+  taxRecoveryPercent?: number | null;
 }
 
 /** Where each dollar of a split's tax belongs in the GL. All zero for untaxed splits. */
@@ -78,6 +85,7 @@ export interface ComputedSplit {
   memo?: string;
   taxProvince?: string | null;
   taxRecoverable?: boolean;
+  taxRecoveryPercent?: number | null;
   tax: SplitTaxBreakdown;
 }
 
@@ -95,6 +103,7 @@ export function computeSplitTaxes(splits: SplitLine[], direction: 'in' | 'out' =
     memo: s.memo,
     taxProvince: s.taxProvince ?? null,
     taxRecoverable: s.taxRecoverable,
+    taxRecoveryPercent: s.taxRecoveryPercent ?? null,
     tax: emptyTaxBreakdown(),
   }));
 
@@ -108,6 +117,7 @@ export function computeSplitTaxes(splits: SplitLine[], direction: 'in' | 'out' =
         priceMode: s.taxInclusive ? 'inclusive' : 'exclusive',
         direction: direction === 'in' ? 'sale' : 'purchase',
         recoverable: s.taxRecoverable ?? true,
+        recoveryPercent: s.taxRecoveryPercent ?? undefined,
       });
       c.net = r.net;
       c.taxAmount = r.tax;
@@ -179,8 +189,8 @@ const DEFAULT_TAX_ACCOUNTS: ResolvedTaxAccounts = {
   output: SIMPLE_TAX_ACCOUNT_CODES.output,
   recoverable: SIMPLE_TAX_ACCOUNT_CODES.recoverable,
   pstPayable: SIMPLE_TAX_ACCOUNT_CODES.pstPayable,
-  qstOutput: SIMPLE_TAX_ACCOUNT_CODES.output,
-  qstRecoverable: SIMPLE_TAX_ACCOUNT_CODES.recoverable,
+  qstOutput: SIMPLE_TAX_ACCOUNT_CODES.qstOutput,
+  qstRecoverable: SIMPLE_TAX_ACCOUNT_CODES.qstRecoverable,
 };
 
 export function buildPostingLines(input: {

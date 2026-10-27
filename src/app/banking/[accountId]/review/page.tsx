@@ -62,7 +62,7 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
   const [catMemo, setCatMemo] = useState('');
   const [catRemember, setCatRemember] = useState(false);
   // Split form
-  const [splitLines, setSplitLines] = useState<{ categoryCode: string; amount: number; taxCode: string | null; taxRate: number | null; taxInclusive: boolean }[]>([]);
+  const [splitLines, setSplitLines] = useState<{ categoryCode: string; amount: number; taxCode: string | null; taxRate: number | null; taxInclusive: boolean; taxProvince: string | null; taxRecoverable: boolean; taxRecoveryPercent: number }[]>([]);
   // Find form
   const [findQuery, setFindQuery] = useState('');
   const [findCandidates, setFindCandidates] = useState<{ id: string; ref: string; contactName: string; dueDate: string | null; outstanding: number }[]>([]);
@@ -102,7 +102,7 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
     } else {
       setMode('categorize');
     }
-    setSplitLines([{ categoryCode: '', amount: Math.abs(row.amount), taxCode: null, taxRate: null, taxInclusive: true }]);
+    setSplitLines([{ categoryCode: '', amount: Math.abs(row.amount), taxCode: null, taxRate: null, taxInclusive: true, taxProvince: null, taxRecoverable: true, taxRecoveryPercent: 100 }]);
   };
 
   const postCategorize = async (post: boolean) => {
@@ -144,7 +144,7 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
       const res = await fetchWithTenantHeaders(`/api/bank-transactions/${selected.id}/split`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ splits: splitLines.map((s) => ({ ...s, amount: Number(s.amount) })), post: true }),
+        body: JSON.stringify({ splits: splitLines.map((s) => ({ ...s, amount: Number(s.amount), taxProvince: s.taxProvince || null, taxRecoverable: s.taxRecoveryPercent > 0, taxRecoveryPercent: s.taxProvince ? s.taxRecoveryPercent : null })), post: true }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed');
@@ -383,9 +383,43 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
                         onChange={(e) => setSplitLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, amount: parseFloat(e.target.value) || 0 } : l)))}
                         className="w-full border border-[var(--border)] rounded-[var(--r-md)] bg-[var(--surface)] px-2 py-1.5 font-mono text-[13px] text-right text-[var(--text)] outline-none"
                       />
+                      {/* Tax panel (Phase 1 province path + partial recovery) */}
+                      <select
+                        value={line.taxProvince || ''}
+                        onChange={(e) => setSplitLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, taxProvince: e.target.value || null } : l)))}
+                        className="w-full border border-[var(--border)] rounded-[var(--r-md)] bg-[var(--surface)] px-2 py-1.5 text-[12.5px] text-[var(--text)] outline-none"
+                        title="Province of supply — split this line's tax on posting"
+                      >
+                        <option value="">No tax</option>
+                        {['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'].map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                      {line.taxProvince && (
+                        <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
+                          <label className="flex items-center gap-1">
+                            <input type="checkbox" checked={line.taxInclusive} onChange={(e) => setSplitLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, taxInclusive: e.target.checked } : l)))} />
+                            Includes tax
+                          </label>
+                          {selected.amount < 0 && (
+                            <label className="flex items-center gap-1" title="Fraction of GST/HST (and QST) recoverable as ITC/ITR — e.g. 50 for meals. The rest is expensed.">
+                              Recovery %
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step="0.01"
+                                value={line.taxRecoveryPercent}
+                                onChange={(e) => setSplitLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, taxRecoveryPercent: parseFloat(e.target.value) || 0, taxRecoverable: (parseFloat(e.target.value) || 0) > 0 } : l)))}
+                                className="w-16 border border-[var(--border)] rounded-[var(--r-md)] bg-[var(--surface)] px-1.5 py-0.5 text-[11px] text-[var(--text)] outline-none"
+                              />
+                            </label>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
-                  <button onClick={() => setSplitLines((prev) => [...prev, { categoryCode: '', amount: 0, taxCode: null, taxRate: null, taxInclusive: true }])} className="flex items-center gap-1 text-xs font-medium text-[var(--primary)] hover:text-[var(--primary-hover)] transition-colors">
+                  <button onClick={() => setSplitLines((prev) => [...prev, { categoryCode: '', amount: 0, taxCode: null, taxRate: null, taxInclusive: true, taxProvince: null, taxRecoverable: true, taxRecoveryPercent: 100 }])} className="flex items-center gap-1 text-xs font-medium text-[var(--primary)] hover:text-[var(--primary-hover)] transition-colors">
                     <Plus size={12} /> Add a split line
                   </button>
                   <div className="rounded-[var(--r-lg)] bg-[var(--surface-2)] border border-[var(--border)] p-3 space-y-1 text-[12.5px]">

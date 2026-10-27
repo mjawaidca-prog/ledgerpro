@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
 import { voidJournalEntry } from '@/lib/journal';
+import { assertNoFiledLock, isFiledPeriodLockedError } from '@/lib/tax/filed-lock';
 export const dynamic = 'force-dynamic';
 
 // GET — single journal entry with full line details
@@ -99,6 +100,27 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       debit: Number(l.debit),
       credit: Number(l.credit),
     }));
+
+    // Filed-period hard lock (EDIT): check BOTH sides — removing a
+    // tax-affecting entry from a filed period changes the filed figures
+    // just as much as adding one, so the stored entry (stored date +
+    // stored lines, incl. any tax-expansion lines) and the replacement
+    // (new date + new lines) are each guarded.
+    try {
+      await assertNoFiledLock({
+        companyId: companyId!,
+        date: existing.entryDate,
+        lines: existing.lines.map((l) => ({ accountCode: l.glAccountCode })),
+      });
+      await assertNoFiledLock({
+        companyId: companyId!,
+        date: entryDate ? new Date(entryDate) : existing.entryDate,
+        lines: newLines.map((l) => ({ accountCode: l.glAccountCode, hasTaxSpec: Boolean((l as { tax?: unknown }).tax) })),
+      });
+    } catch (e) {
+      if (isFiledPeriodLockedError(e)) return NextResponse.json({ error: (e as Error).message, code: 'filed_period_locked' }, { status: 409 });
+      throw e;
+    }
 
     // Validate balance
     const totalDebit = newLines.reduce((s, l) => s + l.debit, 0);
@@ -205,6 +227,20 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         { error: `This entry was auto-generated. Void ${sourceLabel} instead.` },
         { status: 400 }
       );
+    }
+
+    // Filed-period hard lock: voiding (this route's delete) a
+    // tax-affecting entry dated inside a filed GST/HST period is
+    // blocked; voiding a tax-neutral entry in the period is allowed.
+    try {
+      await assertNoFiledLock({
+        companyId: companyId!,
+        date: existing.entryDate,
+        lines: existing.lines.map((l) => ({ accountCode: l.glAccountCode })),
+      });
+    } catch (e) {
+      if (isFiledPeriodLockedError(e)) return NextResponse.json({ error: (e as Error).message, code: 'filed_period_locked' }, { status: 409 });
+      throw e;
     }
 
     const guardError = await closedPeriodGuard(companyId, new Date());

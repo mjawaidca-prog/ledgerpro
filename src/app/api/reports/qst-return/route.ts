@@ -1,0 +1,81 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { requireCompany } from '@/lib/api-helpers';
+import { db } from '@/lib/db';
+import { computeQstReturnView, defaultQstPeriod, markQstReturnFiled } from '@/lib/tax/qst-return-service';
+import { qstReturnCsv } from '@/lib/tax/qst-return';
+import { taxPeriodDate } from '@/lib/tax/workpaper';
+import { TaxPostingError } from '@/lib/tax/posting-service';
+
+export const dynamic = 'force-dynamic';
+
+const periodSchema = z.object({ from: taxPeriodDate, to: taxPeriodDate });
+
+const filedSchema = z.object({
+  periodStart: taxPeriodDate,
+  periodEnd: taxPeriodDate,
+  confirmation: z.string().trim().min(1).max(200),
+  registrationId: z.string().min(1).optional(),
+  createRegistration: z.object({
+    registrationNumber: z.string().trim().min(1).max(50),
+    filingFrequency: z.enum(['monthly', 'quarterly', 'annual']),
+  }).optional(),
+}).strict();
+
+export async function GET(req: NextRequest) {
+  try {
+    const { companyId, error } = await requireCompany(req);
+    if (error) return error;
+    const params = req.nextUrl.searchParams;
+    const from = params.get('from');
+    const to = params.get('to');
+    let period: { start: string; end: string };
+    if (from && to) {
+      const parsed = periodSchema.safeParse({ from, to });
+      if (!parsed.success) return NextResponse.json({ error: 'Use valid YYYY-MM-DD dates for from and to.' }, { status: 400 });
+      period = { start: from, end: to };
+    } else {
+      period = await defaultQstPeriod(companyId!);
+    }
+    const view = await computeQstReturnView(companyId!, period.start, period.end);
+
+    if (params.get('format') === 'csv') {
+      const company = await db.company.findUnique({ where: { id: companyId! }, select: { name: true } });
+      const csv = qstReturnCsv({
+        companyName: company?.name ?? 'Company',
+        periodStart: view.periodStart,
+        periodEnd: view.periodEnd,
+        filedLabel: view.filed
+          ? `FILED — recorded ${view.filed.filedAt.slice(0, 10)}, confirmation ${view.filed.filingConfirmation ?? ''}`
+          : 'NOT FILED — working copy',
+        result: view.result,
+      });
+      return new NextResponse(csv, {
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="qst-return-${view.periodStart}-to-${view.periodEnd}.csv"`,
+        },
+      });
+    }
+    return NextResponse.json({ data: view });
+  } catch (e) {
+    if (e instanceof TaxPostingError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.status });
+    console.error(e);
+    return NextResponse.json({ error: 'Failed to compute QST return.' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { companyId, userId, error } = await requireCompany(req, { roles: ['owner', 'admin', 'bookkeeper'], requireOnboarding: true });
+    if (error) return error;
+    const parsed = filedSchema.safeParse(await req.json());
+    if (!parsed.success) return NextResponse.json({ error: 'Invalid mark-as-filed request.', details: parsed.error.flatten() }, { status: 400 });
+    const { workpaperId } = await markQstReturnFiled({ companyId: companyId!, userId: userId!, ...parsed.data });
+    return NextResponse.json({ data: { workpaperId } }, { status: 201 });
+  } catch (e) {
+    if (e instanceof TaxPostingError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.status });
+    console.error(e);
+    return NextResponse.json({ error: 'Failed to record the filing.' }, { status: 500 });
+  }
+}

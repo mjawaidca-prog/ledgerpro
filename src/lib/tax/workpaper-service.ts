@@ -62,6 +62,14 @@ export async function loadWorkpaperSource(companyId:string,registrationId:string
 
 export async function calculateCurrent(companyId:string,registrationId:string,start:Date,end:Date,inputs:WorkpaperInputs){
   const source=await loadWorkpaperSource(companyId,registrationId,start,end);
+  // GL simple-path bridge (Phase 1 cleanup): the workpaper's own
+  // inputs.simpleAdjustments (the same JSON the GST/HST Return report
+  // saves for this period) are passed through `inputs` into
+  // calculateWorkpaper, which — in GL mode only — feeds them to
+  // computeGstHstReturn so workpaper lines 104/107/110/111 agree with
+  // the GST/HST Return page. Adjustments are not classifications, so
+  // the GL-mode classification blocker is not tripped. Reviewed-snapshot
+  // mode ignores simpleAdjustments entirely.
   return {calculated:calculateWorkpaper(source,inputs),sourceHash:sourceHash(source)};
 }
 async function role(companyId:string,userId:string){return (await db.membership.findUnique({where:{userId_companyId:{userId,companyId}},select:{role:true}}))?.role;}

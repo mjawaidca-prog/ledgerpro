@@ -6,9 +6,12 @@
  *
  * Scope (see docs + audit-2026-10-26/phase1-gst-design.md): one province of
  * supply per line (place-of-supply defaulting to the company province),
- * treatment implicitly `taxable` at that province's rates, GST/HST (and QST)
- * recoverability is all-or-nothing per purchase line, PST/RST are never
- * recoverable (the engine enforces this). Zero-rated / exempt / out-of-scope
+ * treatment implicitly `taxable` at that province's rates. GST/HST (and QST)
+ * recoverability defaults to all-or-nothing per purchase line, but a line
+ * may carry a fractional `recoveryPercent` (Phase 1 cleanup, partial
+ * recovery — e.g. 50 for meals & entertainment) which then wins over the
+ * boolean. PST/RST are never recoverable (the engine enforces this).
+ * Zero-rated / exempt / out-of-scope
  * lines simply carry no tax spec in this path; the reviewed document path
  * (posting-service + snapshots) remains the evidenced-treatment tool.
  */
@@ -23,6 +26,16 @@ export interface SimpleTaxSpec {
   priceMode: SimplePriceMode;
   /** Purchases only: claim the GST/HST (and QST) component as an ITC/ITR. Default true. Ignored for sales. */
   recoverable?: boolean;
+  /**
+   * Purchases only: fractional recovery, 0–100 (may be fractional, e.g.
+   * 50 or 50.5). When present (not undefined/null) it WINS over
+   * `recoverable`; when absent, the boolean applies (true → 100%,
+   * false → 0%), and when both are absent behaviour is exactly the
+   * pre-partial-recovery behaviour (100%). Out-of-range or non-finite
+   * values throw a clear error (no clamping — a silently clamped ITC
+   * fraction would misstate the return). Ignored for sales.
+   */
+  recoveryPercent?: number | null;
   /** Tax-point / transaction date for the effective-rate lookup. Defaults to today. */
   date?: Date | string;
 }
@@ -62,14 +75,33 @@ const toMajor = (n: number): number => n / 100;
  * is QST (9.975%, on the price excluding GST — the engine's same-base math
  * matches); BC/SK/MB yield GST + PST/RST with recovery forced to zero.
  */
+/**
+ * Recovery basis points (10000 = 100%) for GST/HST + QST components.
+ * `recoveryPercent`, when present, wins over the `recoverable` boolean.
+ * Throws on out-of-range / non-finite percents (see SimpleTaxSpec).
+ */
+export function recoveryBasisPoints(recoverable: boolean, recoveryPercent?: number | null): number {
+  if (recoveryPercent !== undefined && recoveryPercent !== null) {
+    if (typeof recoveryPercent !== 'number' || !Number.isFinite(recoveryPercent) || recoveryPercent < 0 || recoveryPercent > 100) {
+      throw new Error(`recoveryPercent must be a number between 0 and 100 (got ${String(recoveryPercent)})`);
+    }
+    return Math.round(recoveryPercent * 100);
+  }
+  return recoverable ? 10000 : 0;
+}
+
 export function provinceComponents(
   province: Province,
   direction: SimpleDirection,
   recoverable: boolean,
   date?: Date | string,
+  recoveryPercent?: number | null,
 ): TaxComponentDecision[] {
   const rates = getTaxRate(province, date ?? new Date());
-  const recovery = direction === 'purchase' && recoverable ? 10000 : 0;
+  // Validate the percent even for sales (where recovery is forced to 0 by
+  // the engine) so a malformed value fails loudly instead of being ignored.
+  const purchaseRecovery = recoveryBasisPoints(recoverable, recoveryPercent);
+  const recovery = direction === 'purchase' ? purchaseRecovery : 0;
   const out: TaxComponentDecision[] = [];
   if (rates.hst > 0) {
     out.push({ kind: 'HST', treatment: 'taxable', rateMilliPercent: Math.round(rates.hst * 1000), recoveryBasisPoints: recovery });
@@ -98,7 +130,7 @@ export function provinceComponents(
  * Rounding: per component, half away from zero, inside the engine.
  */
 export function computeSimpleLineTax(amount: number, spec: SimpleTaxSpec & { direction: SimpleDirection }): SimpleTaxResult {
-  const components = provinceComponents(spec.province, spec.direction, spec.recoverable ?? true, spec.date);
+  const components = provinceComponents(spec.province, spec.direction, spec.recoverable ?? true, spec.date, spec.recoveryPercent);
   if (components.length === 0) {
     // Province with no applicable components (defensive; every province has GST/HST today).
     return { net: amount, tax: 0, gross: amount, recoverableTax: 0, nonrecoverableTax: 0, outputGstHst: 0, outputPstRst: 0, outputQst: 0, components: [] };
@@ -136,6 +168,8 @@ export const SIMPLE_TAX_ACCOUNT_CODES = {
   output: '2300', // Sales Tax Payable (existing default COA account)
   recoverable: '2310', // GST/HST Recoverable — Input Tax Credits (Phase 1 default COA)
   pstPayable: '2330', // Provincial Sales Tax Payable (Phase 1 default COA)
+  qstOutput: '2340', // QST Payable (Phase 1 cleanup default COA)
+  qstRecoverable: '2350', // QST Recoverable — Input Tax Refunds (Phase 1 cleanup default COA)
 } as const;
 
 export interface ResolvedTaxAccounts {
@@ -167,7 +201,10 @@ export function resolveSimpleTaxAccounts(input: {
     output: c?.gstHstOutputAccount?.code ?? SIMPLE_TAX_ACCOUNT_CODES.output,
     recoverable: c?.gstHstRecoverableAccount?.code ?? SIMPLE_TAX_ACCOUNT_CODES.recoverable,
     pstPayable: c?.pstRstPayableAccount?.code ?? SIMPLE_TAX_ACCOUNT_CODES.pstPayable,
-    qstOutput: c?.qstOutputAccount?.code ?? SIMPLE_TAX_ACCOUNT_CODES.output,
-    qstRecoverable: c?.qstRecoverableAccount?.code ?? SIMPLE_TAX_ACCOUNT_CODES.recoverable,
+    // QST defaults are its OWN accounts (2340/2350), not the GST/HST pair:
+    // before the QST-return cleanup, unmapped QST fell back to 2300/2310
+    // and mixed into the GST/HST balances. Config mappings still win.
+    qstOutput: c?.qstOutputAccount?.code ?? SIMPLE_TAX_ACCOUNT_CODES.qstOutput,
+    qstRecoverable: c?.qstRecoverableAccount?.code ?? SIMPLE_TAX_ACCOUNT_CODES.qstRecoverable,
   };
 }

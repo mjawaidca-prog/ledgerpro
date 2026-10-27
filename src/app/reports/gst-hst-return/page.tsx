@@ -27,6 +27,38 @@ const LABELS: Record<string, string> = {
 };
 const SUBTOTAL_LINES = new Set(['105', '108', '109', '112']);
 
+type AdjItem = { amount: number; note: string };
+type AdjDraft = { add: AdjItem[]; deduct: AdjItem[]; instalments: AdjItem[]; rebates: AdjItem[] };
+const ADJ_GROUPS: { key: keyof AdjDraft; line: string; label: string; hint: string }[] = [
+  { key: 'add', line: '104', label: 'Add to net tax', hint: 'e.g. bad-debt recovery, adjustments increasing net tax' },
+  { key: 'deduct', line: '107', label: 'Deduct from net tax', hint: 'e.g. bad debt written off, credit notes not in the GL' },
+  { key: 'instalments', line: '110', label: 'Instalments and other payments', hint: 'instalments already paid for this period' },
+  { key: 'rebates', line: '111', label: 'Rebates', hint: 'e.g. rebates claimed as an offset on this return' },
+];
+const emptyAdj = (): AdjDraft => ({ add: [], deduct: [], instalments: [], rebates: [] });
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const adjTotal = (items: AdjItem[]) => round2(items.reduce((s, i) => s + (Number(i.amount) || 0), 0));
+function draftFromServer(adj: any): AdjDraft {
+  if (!adj) return emptyAdj();
+  const pick = (v: any): AdjItem[] => (Array.isArray(v) ? v.map((i: any) => ({ amount: Number(i.amount) || 0, note: String(i.note ?? '') })) : []);
+  return { add: pick(adj.add), deduct: pick(adj.deduct), instalments: pick(adj.instalments), rebates: pick(adj.rebates) };
+}
+/** Recompute the derived return lines from the GL base lines (101/103/106) + draft adjustments. */
+function previewLines(base: Record<string, number>, draft: AdjDraft): Record<string, number> {
+  const t104 = adjTotal(draft.add), t107 = adjTotal(draft.deduct), t110 = adjTotal(draft.instalments), t111 = adjTotal(draft.rebates);
+  const l105 = round2((base['103'] ?? 0) + t104);
+  const l108 = round2((base['106'] ?? 0) + t107);
+  const l109 = round2(l105 - l108);
+  const l112 = round2(t110 + t111);
+  const balance = round2(l109 - l112);
+  return {
+    ...base,
+    '104': t104, '105': l105, '107': t107, '108': l108, '109': l109,
+    '110': t110, '111': t111, '112': l112,
+    '114': Math.max(0, -balance), '115': Math.max(0, balance),
+  };
+}
+
 export default function GstHstReturnPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -39,14 +71,19 @@ export default function GstHstReturnPage() {
   const [regFrequency, setRegFrequency] = useState('annual');
   const [filing, setFiling] = useState(false);
   const [filedMsg, setFiledMsg] = useState<string | null>(null);
+  const [adjDraft, setAdjDraft] = useState<AdjDraft>(emptyAdj());
+  const [adjSaving, setAdjSaving] = useState(false);
+  const [adjMsg, setAdjMsg] = useState<string | null>(null);
+  const [adjError, setAdjError] = useState<string | null>(null);
 
   const load = useCallback(async (f?: string, t?: string) => {
-    setLoading(true); setError(null); setFiledMsg(null);
+    setLoading(true); setError(null); setFiledMsg(null); setAdjMsg(null); setAdjError(null);
     try {
       const qs = f && t ? `?from=${f}&to=${t}` : '';
       const res = await fetch(`/api/reports/gst-hst-return${qs}`).then(r => r.json());
       if (res.error) { setError(res.error); return; }
       setData(res.data);
+      setAdjDraft(draftFromServer(res.data.adjustments ?? res.data.result?.adjustments));
       setFrom(res.data.periodStart);
       setTo(res.data.periodEnd);
     } catch { setError('Failed to load the GST/HST return.'); }
@@ -74,9 +111,32 @@ export default function GstHstReturnPage() {
     } finally { setFiling(false); }
   }
 
+  async function handleSaveAdjustments() {
+    if (!data) return;
+    setAdjSaving(true); setAdjMsg(null); setAdjError(null);
+    try {
+      const body: any = { periodStart: data.periodStart, periodEnd: data.periodEnd, adjustments: adjDraft };
+      if (!data.registration) body.createRegistration = { registrationNumber: regNumber, filingFrequency: regFrequency };
+      const res = await fetch('/api/reports/gst-hst-return', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+      if (res.error) { setAdjError(res.error); return; }
+      setAdjMsg('Adjustments saved for this period. The same amounts flow into a GL simple-path Tax Workpaper for this period.');
+      load(data.periodStart, data.periodEnd);
+    } catch { setAdjError('Failed to save adjustments.'); }
+    finally { setAdjSaving(false); }
+  }
+
+  const setAdjRow = (key: keyof AdjDraft, idx: number, patch: Partial<AdjItem>) =>
+    setAdjDraft(d => ({ ...d, [key]: d[key].map((row, i) => (i === idx ? { ...row, ...patch } : row)) }));
+  const addAdjRow = (key: keyof AdjDraft) => setAdjDraft(d => ({ ...d, [key]: [...d[key], { amount: 0, note: '' }] }));
+  const removeAdjRow = (key: keyof AdjDraft, idx: number) => setAdjDraft(d => ({ ...d, [key]: d[key].filter((_, i) => i !== idx) }));
+
   if (loading && !data) return <AppShell><div className="flex justify-center py-20"><Loader2 size={24} className="animate-spin text-[var(--text-muted)]" /></div></AppShell>;
 
-  const lines = data?.result?.lines ?? {};
+  const lines = data ? previewLines(data.result?.lines ?? {}, adjDraft) : {};
   const drill = data?.result?.drillDown ?? {};
 
   return (
@@ -111,9 +171,9 @@ export default function GstHstReturnPage() {
           </CardBody>
         </Card>
 
-        {data?.filed && (
+        {(data?.locked || data?.filed) && (
           <Alert variant="success" className="mb-4">
-            <span className="flex items-center gap-2"><CheckCircle2 size={16} /> Filed — recorded {data.filed.filedAt?.slice(0, 10)} · CRA confirmation: {data.filed.filingConfirmation || '—'}. Changes to this period should be made with care.</span>
+            <span className="flex items-center gap-2"><CheckCircle2 size={16} /> Period locked — return filed {(data.lockedFiled?.filedAt ?? data.filed?.filedAt)?.slice(0, 10)} (confirmation {data.lockedFiled?.filingConfirmation ?? data.filed?.filingConfirmation ?? '—'}). Postings that would change these figures are blocked.</span>
           </Alert>
         )}
         {data?.overlappingFiled?.length > 0 && (
@@ -175,6 +235,60 @@ export default function GstHstReturnPage() {
             <p className="text-[10px] text-[var(--text-faint)] mt-3">Line 101 is rounded to the nearest whole dollar, as CRA requires. PST/RST and QST amounts are tracked in their own accounts and never enter these lines. Line definitions per CRA GST34 / Info Sheet GI-066.</p>
           </CardBody>
         </Card>
+
+        {data && (
+          <Card className="mb-4">
+            <CardHeader><h3 className="t-h3">Adjustments — lines 104 / 107 / 110 / 111</h3></CardHeader>
+            <CardBody>
+              <p className="text-sm text-[var(--text-muted)] mb-3">
+                Period-level adjustments for this return (not journal postings). They update the return lines above live, are stored on this period&apos;s workpaper, and flow into a GL simple-path Tax Workpaper for the same period. Amounts must be $0 or more, each with a short note.
+              </p>
+              {adjMsg && <Alert variant="success" className="mb-3">{adjMsg}</Alert>}
+              {adjError && <Alert variant="danger" className="mb-3">{adjError}</Alert>}
+              {data.filed ? (
+                <Alert variant="info">This period is recorded as filed — adjustments are read-only.</Alert>
+              ) : (
+                <>
+                  {ADJ_GROUPS.map(group => (
+                    <div key={group.key} className="mb-4">
+                      <div className="flex items-baseline gap-2 mb-1">
+                        <h4 className="text-sm font-semibold">Line {group.line} — {group.label}</h4>
+                        <span className="text-xs text-[var(--text-muted)]">{group.hint}</span>
+                        <span className="spacer" />
+                        <span className="text-sm font-mono tabular-nums">Total {money(adjTotal(adjDraft[group.key]))}</span>
+                      </div>
+                      {adjDraft[group.key].map((row, idx) => (
+                        <div key={idx} className="flex items-end gap-2 mb-2">
+                          <div className="field w-36"><label>Amount ($)</label>
+                            <input type="number" min="0" step="0.01" className="input" value={row.amount}
+                              onChange={e => setAdjRow(group.key, idx, { amount: Number(e.target.value) })} />
+                          </div>
+                          <div className="field flex-1"><label>Note (required)</label>
+                            <input className="input" value={row.note} placeholder="e.g. Bad-debt recovery — invoice 1042"
+                              onChange={e => setAdjRow(group.key, idx, { note: e.target.value })} />
+                          </div>
+                          <Button variant="secondary" onClick={() => removeAdjRow(group.key, idx)}>Remove</Button>
+                        </div>
+                      ))}
+                      <Button variant="secondary" onClick={() => addAdjRow(group.key)}>+ Add row</Button>
+                    </div>
+                  ))}
+                  {!data.registration && (
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div className="field"><label>GST/HST registration (RT) number — needed to save</label><input className="input" value={regNumber} onChange={e => setRegNumber(e.target.value)} placeholder="123456789RT0001" /></div>
+                      <div className="field"><label>Filing frequency</label><select className="input" value={regFrequency} onChange={e => setRegFrequency(e.target.value)}>
+                        <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option>
+                      </select></div>
+                    </div>
+                  )}
+                  <Button onClick={handleSaveAdjustments} disabled={adjSaving}>
+                    {adjSaving ? <Loader2 size={14} className="animate-spin" /> : null} Save adjustments
+                  </Button>
+                </>
+              )}
+            </CardBody>
+          </Card>
+        )}
 
         {!data?.filed && data && (
           <Card>

@@ -22,6 +22,8 @@ interface JournalLine {
   taxProvince: string;
   /** Purchases (debit lines): claim GST/HST as an ITC. PST/RST are never recoverable. */
   taxRecoverable: boolean;
+  /** Purchases (debit lines): fractional recovery % (0–100, default 100). Sent as recoveryPercent, which wins over the boolean; kept in sync with the Claim ITC checkbox (unchecked ⇔ 0%). */
+  taxRecoveryPercent: number;
 }
 
 const TAX_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
@@ -39,8 +41,8 @@ export default function NewJournalEntryPage() {
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState('');
   const [lines, setLines] = useState<JournalLine[]>([
-    { id: '1', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true },
-    { id: '2', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true },
+    { id: '1', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true, taxRecoveryPercent: 100 },
+    { id: '2', glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true, taxRecoveryPercent: 100 },
   ]);
   const [coa, setCoa] = useState<COAItem[]>([]);
   const [coaLoading, setCoaLoading] = useState(true);
@@ -73,7 +75,7 @@ export default function NewJournalEntryPage() {
   function addLine() {
     setLines((prev) => [
       ...prev,
-      { id: String(Date.now()), glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true },
+      { id: String(Date.now()), glAccountCode: '', glAccountName: '', description: '', debit: 0, credit: 0, taxProvince: '', taxRecoverable: true, taxRecoveryPercent: 100 },
     ]);
   }
 
@@ -90,6 +92,17 @@ export default function NewJournalEntryPage() {
         if (field === 'glAccountCode') {
           const acct = coa.find((a) => a.code === value);
           return { ...l, glAccountCode: value as string, glAccountName: acct?.name || '' };
+        }
+
+        // Keep the ITC checkbox and Recovery % in sync: the percent is
+        // what is sent (it wins over the boolean), so unchecked ⇔ 0%
+        // and any % > 0 ⇔ checked.
+        if (field === 'taxRecoverable') {
+          return { ...l, taxRecoverable: Boolean(value), taxRecoveryPercent: value ? 100 : 0 };
+        }
+        if (field === 'taxRecoveryPercent') {
+          const pct = Number(value) || 0;
+          return { ...l, taxRecoveryPercent: pct, taxRecoverable: pct > 0 };
         }
 
         // Auto-clear opposite field
@@ -143,7 +156,7 @@ export default function NewJournalEntryPage() {
             debit: l.debit,
             credit: l.credit,
             ...(l.taxProvince
-              ? { tax: { province: l.taxProvince, priceMode: 'inclusive', recoverable: l.taxRecoverable } }
+              ? { tax: { province: l.taxProvince, priceMode: 'inclusive', recoverable: l.taxRecoverable, recoveryPercent: l.taxRecoveryPercent } }
               : {}),
           })),
         }),
@@ -331,14 +344,28 @@ export default function NewJournalEntryPage() {
                             ))}
                           </select>
                           {line.taxProvince && line.debit > 0 && (
-                            <label className="flex items-center gap-1 mt-1 text-[11px] text-[var(--text-muted)]" title="Claim the GST/HST on this purchase as an input tax credit">
-                              <input
-                                type="checkbox"
-                                checked={line.taxRecoverable}
-                                onChange={(e) => updateLine(line.id, 'taxRecoverable', e.target.checked)}
-                              />
-                              Claim ITC
-                            </label>
+                            <>
+                              <label className="flex items-center gap-1 mt-1 text-[11px] text-[var(--text-muted)]" title="Claim the GST/HST on this purchase as an input tax credit">
+                                <input
+                                  type="checkbox"
+                                  checked={line.taxRecoverable}
+                                  onChange={(e) => updateLine(line.id, 'taxRecoverable', e.target.checked)}
+                                />
+                                Claim ITC
+                              </label>
+                              <label className="flex items-center gap-1 mt-1 text-[11px] text-[var(--text-muted)]" title="Fraction of GST/HST (and QST) recoverable — e.g. 50 for meals & entertainment. The rest is expensed.">
+                                Recovery %
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  step="0.01"
+                                  value={line.taxRecoveryPercent}
+                                  onChange={(e) => updateLine(line.id, 'taxRecoveryPercent', parseFloat(e.target.value) || 0)}
+                                  className="w-16 border border-[var(--border)] rounded-md px-1.5 py-0.5 text-[11px] bg-[var(--surface)] outline-none"
+                                />
+                              </label>
+                            </>
                           )}
                         </td>
                         {/* Debit */}

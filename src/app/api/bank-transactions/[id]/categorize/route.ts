@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCompany, auditLog, closedPeriodGuard, accountLockedGuard } from '@/lib/api-helpers';
 import { db } from '@/lib/db';
+import { isFiledPeriodLockedError } from '@/lib/tax/filed-lock';
 import { inclusiveTaxAmount } from '@/lib/banking/splits';
 
 export const dynamic = 'force-dynamic';
@@ -122,6 +123,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ data: { categorized: true, entryId, appliedRuleId } });
   } catch (err: any) {
     console.error('POST /api/bank-transactions/[id]/categorize error:', err);
+    if (isFiledPeriodLockedError(err)) return NextResponse.json({ error: err.message, code: 'filed_period_locked' }, { status: 409 });
     return NextResponse.json({ error: err.message || 'Failed to categorize' }, { status: 500 });
   }
 }

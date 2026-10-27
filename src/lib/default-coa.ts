@@ -29,6 +29,12 @@ export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
   // liability, never part of GST/HST line 103.
   { code: '2310', name: 'GST/HST Recoverable — Input Tax Credits', type: 'asset', subType: 'current_asset', detailType: 'Tax recoverable' },
   { code: '2330', name: 'Provincial Sales Tax Payable', type: 'liability', subType: 'current_liability', detailType: 'Sales tax payable' },
+  // Phase 1 cleanup (QST return): QST gets its OWN accounts, following the
+  // 2300/2310/2330 precedent — QST collected is a Revenu Québec liability,
+  // never part of GST/HST line 103, and QST ITRs are an asset, netted only
+  // in the QST return computation (lines 206–209), never in GL postings.
+  { code: '2340', name: 'QST Payable', type: 'liability', subType: 'current_liability', detailType: 'Sales tax payable' },
+  { code: '2350', name: 'QST Recoverable — Input Tax Refunds', type: 'asset', subType: 'current_asset', detailType: 'Tax recoverable' },
   { code: '2400', name: 'Payroll Liabilities', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
   { code: '2500', name: 'Loans Payable', type: 'liability', subType: 'long_term_liability', detailType: 'Loans payable' },
   { code: '3000', name: "Owner's Capital", type: 'equity', subType: 'owners_equity', detailType: "Owner's equity" },
