@@ -36,6 +36,17 @@ export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
   { code: '2340', name: 'QST Payable', type: 'liability', subType: 'current_liability', detailType: 'Sales tax payable' },
   { code: '2350', name: 'QST Recoverable — Input Tax Refunds', type: 'asset', subType: 'current_asset', detailType: 'Tax recoverable' },
   { code: '2400', name: 'Payroll Liabilities', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
+  // Payroll sync L1 (Nexvar Pay → LedgerPro v1): granular source-deduction
+  // payables under the 2400 Payroll Liabilities umbrella, so a payroll
+  // journal can split CPP / EI / income tax / net pay instead of lumping
+  // everything into 2400. Codes follow the 2300-series precedent: each new
+  // code is free in the template and unique per company
+  // (@@unique([companyId, code])), so ensureDefaultChartOfAccounts()
+  // backfills existing companies idempotently by code.
+  { code: '2410', name: 'CPP Payable', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
+  { code: '2420', name: 'EI Payable', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
+  { code: '2430', name: 'Income Tax Payable', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
+  { code: '2440', name: 'Wages Payable', type: 'liability', subType: 'current_liability', detailType: 'Payroll liabilities' },
   { code: '2500', name: 'Loans Payable', type: 'liability', subType: 'long_term_liability', detailType: 'Loans payable' },
   { code: '3000', name: "Owner's Capital", type: 'equity', subType: 'owners_equity', detailType: "Owner's equity" },
   { code: '3100', name: 'Retained Earnings', type: 'equity', subType: 'retained_earnings', detailType: 'Retained earnings' },
@@ -63,6 +74,15 @@ export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
   { code: '6910', name: 'Insurance', type: 'expense', detailType: 'Insurance' },
   { code: '6920', name: 'Payroll Expense', type: 'expense', detailType: 'Payroll expenses' },
   { code: '6930', name: 'Repairs & Maintenance', type: 'expense', detailType: 'Repairs & maintenance' },
+  // Payroll sync L1: employer payroll taxes (employer CPP/CPP2/EI) get
+  // their OWN expense account, distinct from 6920 Payroll Expense (gross
+  // wages). NOTE ON THE CODE: the payroll-sync scoping doc proposed 6930,
+  // but 6930 is already Repairs & Maintenance above and codes are unique
+  // per company — a second 6930 could never be created (backfill skips
+  // existing codes, and new companies would get only one of the two).
+  // 6940 is the next free expense code, so it is used instead; the
+  // Nexvar Pay mapping default must point at 6940, not 6930.
+  { code: '6940', name: 'Employer Payroll Taxes Expense', type: 'expense', detailType: 'Payroll expenses' },
   { code: '6990', name: 'Miscellaneous Expense', type: 'expense', detailType: 'Other expense' },
 ];
 
