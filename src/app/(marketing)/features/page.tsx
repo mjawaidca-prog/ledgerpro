@@ -7,7 +7,7 @@ import {
 export const metadata = {
   title: 'Accounting Software Features',
   description: 'A tour of everything LedgerPro handles: invoicing, bills, bank reconciliation, Canadian tax reports, multi-company support, and audit-ready controls.',
-  alternates: { canonical: 'https://ledger.nexvarlab.com/features' },
+  alternates: { canonical: 'https://ledgerpro.nexvarlab.com/features' },
 };
 
 const CATEGORIES = [

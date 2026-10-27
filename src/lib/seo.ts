@@ -1,4 +1,4 @@
-export const LEDGERPRO_URL = 'https://ledger.nexvarlab.com';
+export const LEDGERPRO_URL = 'https://ledgerpro.nexvarlab.com';
 export const NEXVAR_URL = 'https://www.nexvarlab.online';
 
 export type SeoFeature = {

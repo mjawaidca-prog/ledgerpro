@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
             passwordResetExpiresAt: new Date(Date.now() + 30 * 60_000),
           },
         });
-        const base = process.env.NEXTAUTH_URL ?? 'https://ledger.nexvarlab.com';
+        const base = process.env.NEXTAUTH_URL ?? 'https://ledgerpro.nexvarlab.com';
         await sendPasswordReset(user.email, `${base}/reset-password?token=${token}`);
       }
     } catch (error) {

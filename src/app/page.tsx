@@ -62,7 +62,7 @@ export default function Home() {
       email: 'hello@nexvarlab.online',
       brand: [
         { '@type': 'Brand', name: 'LedgerPro', url: LEDGERPRO_URL },
-        { '@type': 'Brand', name: 'Nexvar Pay', url: 'https://pay.nexvarlab.com' },
+        { '@type': 'Brand', name: 'Nexvar Pay', url: 'https://nexvarpay.nexvarlab.com' },
       ],
     },
   ];

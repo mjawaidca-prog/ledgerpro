@@ -6,7 +6,7 @@ import { LEDGERPRO_URL } from '@/lib/seo';
 export const metadata = {
   title: 'Accounting Software FAQ',
   description: 'Answers to common questions about LedgerPro: pricing, trials, data security, Canadian tax support, and migrating from another system.',
-  alternates: { canonical: 'https://ledger.nexvarlab.com/faq' },
+  alternates: { canonical: 'https://ledgerpro.nexvarlab.com/faq' },
 };
 
 const FAQS = [

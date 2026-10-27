@@ -35,7 +35,7 @@ export function openapiDocument(): object {
       description:
         'Versioned public API for LedgerPro accounting. Financial values are decimal strings with explicit currencies; reports carry their reporting period, accounting basis and generation time. Versioning policy: v1 is stable; breaking changes arrive as a new major version with a documented deprecation period.',
     },
-    servers: [{ url: 'https://ledger.nexvarlab.com/api/v1' }],
+    servers: [{ url: 'https://ledgerpro.nexvarlab.com/api/v1' }],
     security: [{ apiKey: [] }],
     paths: {
       '/': {

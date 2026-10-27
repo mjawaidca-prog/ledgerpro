@@ -10,7 +10,7 @@ export async function GET() {
       version: 'v1',
       description: 'Versioned public API for LedgerPro accounting.',
       openapi: '/api/v1/openapi.json',
-      docs: 'https://ledger.nexvarlab.com/help',
+      docs: 'https://ledgerpro.nexvarlab.com/help',
       webhooks: 'Signed HMAC-SHA256 events; see the OpenAPI document for verification.',
       auth: 'Authorization: Bearer lp_live_… (Settings → Developer / API Access)',
     },

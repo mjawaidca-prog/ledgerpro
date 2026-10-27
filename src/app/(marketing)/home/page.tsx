@@ -7,7 +7,7 @@ import {
 export const metadata = {
   title: 'LedgerPro — Accounting Software for Canadian Small Businesses',
   description: 'Double-entry accounting, invoicing, bank reconciliation, and tax-ready reports built for Canadian small businesses. Start your free 30-day trial.',
-  alternates: { canonical: 'https://ledger.nexvarlab.com' },
+  alternates: { canonical: 'https://ledgerpro.nexvarlab.com' },
   robots: { index: false, follow: true },
 };
 
@@ -147,7 +147,7 @@ export default function MarketingHomePage() {
               <Code2 size={18} className="text-[var(--primary)]" />
               <span className="text-xs font-semibold text-[var(--text-strong)]">One line to your books</span>
             </div>
-            <pre className="text-xs text-[var(--text-muted)] leading-relaxed overflow-x-auto">{`curl https://ledger.nexvarlab.com/api/v1/company \\
+            <pre className="text-xs text-[var(--text-muted)] leading-relaxed overflow-x-auto">{`curl https://ledgerpro.nexvarlab.com/api/v1/company \\
   -H "Authorization: Bearer lp_live_…"
 
 { "id": "…", "name": "Acme Ltd.",

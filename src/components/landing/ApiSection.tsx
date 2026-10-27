@@ -47,7 +47,7 @@ export function ApiSection() {
           </div>
           <h3 className="mb-2.5 text-center text-xl font-extrabold text-white">One line to your books</h3>
           <pre className="overflow-x-auto rounded-xl bg-black/40 p-5 text-[13px] leading-relaxed text-slate-200">
-{`curl https://ledger.nexvarlab.com/api/v1/company \\
+{`curl https://ledgerpro.nexvarlab.com/api/v1/company \\
   -H "Authorization: Bearer lp_live_…"
 
 { "id": "…", "name": "Acme Ltd.",

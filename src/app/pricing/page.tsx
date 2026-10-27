@@ -7,7 +7,7 @@ import { LandingNavbar } from '@/components/landing/Navbar';
 export const metadata: Metadata = {
   title: 'Pricing for Canadian Small Business Accounting',
   description: 'Compare LedgerPro accounting plans for Canadian small businesses, bookkeepers, and accountants. Start with a free 30-day trial.',
-  alternates: { canonical: 'https://ledger.nexvarlab.com/pricing' },
+  alternates: { canonical: 'https://ledgerpro.nexvarlab.com/pricing' },
 };
 
 const plans = [
