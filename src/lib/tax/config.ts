@@ -62,7 +62,9 @@ export interface TaxReadinessResult {
   issues: TaxReadinessIssue[];
 }
 
-const allowedAccountTypes: Record<TaxAccountPurpose, readonly MappedAccountType[]> = {
+/** GL account types each tax mapping purpose may point at. Exported so the
+ * Tax Setup API validates a mapping exactly the way readiness does. */
+export const TAX_ACCOUNT_ALLOWED_TYPES: Record<TaxAccountPurpose, readonly MappedAccountType[]> = {
   gstHstOutput: ['liability'],
   gstHstRecoverable: ['asset'],
   qstOutput: ['liability'],
@@ -119,7 +121,7 @@ export function assessCompanyTaxReadiness(input: CompanyTaxReadinessInput): TaxR
       add('account_company_mismatch', `mappings.${purpose}`, 'Mapped account must belong to the configured company.');
     }
     if (!account.active) add('account_inactive', `mappings.${purpose}`, 'Mapped account must be active.');
-    if (!allowedAccountTypes[purpose].includes(account.type)) {
+    if (!TAX_ACCOUNT_ALLOWED_TYPES[purpose].includes(account.type)) {
       add('account_type_invalid', `mappings.${purpose}`, `Mapped account type is invalid for ${purpose}.`);
     }
   }

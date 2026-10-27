@@ -221,6 +221,9 @@ export default function SettingsPage() {
                 <Button variant="ghost" onClick={() => router.push('/settings/currencies')} className="text-sm">
                   Currency Setup (home currency, rate source, FX accounts)
                 </Button>
+                <Button variant="ghost" onClick={() => router.push('/settings/tax')} className="text-sm">
+                  Tax Setup (registrations, GST/HST accounts, Tax Workpapers)
+                </Button>
               </div>
               <p className="text-xs text-[var(--text-faint)] mt-3">
                 Restoring always creates a brand-new company — it never overwrites an existing one. Bank feed connections, audit
