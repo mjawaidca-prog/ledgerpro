@@ -5,6 +5,7 @@ import { pageParamsFrom, cursorPage, prismaCursor } from '@/lib/api/pagination';
 import { moneyString, isoDate } from '@/lib/api/serialize';
 import { journalCreateSchema, validationErrorResponse, parseDateField } from '@/lib/api/validation';
 import { idempotencyContextFrom, withIdempotency, idempotencyRejection } from '@/lib/api/idempotency';
+import { journalSourceForIdempotencyKey } from '@/lib/api/journal-source';
 import { postJournalEntry } from '@/lib/journal';
 import { closedPeriodGuard } from '@/lib/api-helpers';
 import type { Prisma } from '@prisma/client';
@@ -88,6 +89,8 @@ export async function POST(req: NextRequest) {
   const idem = idempotencyContextFrom(req, { apiKeyId: context!.apiKeyId, companyId: context!.companyId }, requestBody);
   if ('error' in idem) return idem.error;
 
+  const sourceType = journalSourceForIdempotencyKey(req.headers.get('idempotency-key'));
+
   let outcome;
   try {
     outcome = await withIdempotency(idem.context, async (tx) => {
@@ -99,7 +102,7 @@ export async function POST(req: NextRequest) {
         {
           entryDate,
           description: parsed.data.description,
-          sourceType: 'manual',
+          sourceType,
           lines: parsed.data.lines.map((line) => ({
             glAccountCode: line.glAccountCode,
             description: line.description ?? undefined,
@@ -115,7 +118,7 @@ export async function POST(req: NextRequest) {
         resourceType: 'journal_entry',
         resourceId: entry.id,
         statusCode: 201,
-        body: { data: { id: entry.id, entryDate: entryDate.toISOString(), description: parsed.data.description, sourceType: 'manual' } },
+        body: { data: { id: entry.id, entryDate: entryDate.toISOString(), description: parsed.data.description, sourceType } },
       };
     }, { audit: { action: 'api.journal.create', entityType: 'journal_entry', apiKeyName: context!.apiKeyName }, eventType: 'journal.posted' });
   } catch (err: any) {

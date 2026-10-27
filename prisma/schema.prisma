@@ -1102,6 +1102,7 @@ enum JournalSource {
   transfer
   manual
   revaluation
+  payroll
 }
 
 model JournalLine {

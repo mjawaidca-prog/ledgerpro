@@ -19,9 +19,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     outcome = await withIdempotency(idem.context, async (tx) => {
       const entry = await tx.journalEntry.findFirst({ where: { id: params.id, companyId: context!.companyId } });
       if (!entry) throw new Error('Journal entry not found');
-      if (entry.sourceType !== 'manual' || entry.reversalOfId) {
+      if ((entry.sourceType !== 'manual' && entry.sourceType !== 'payroll') || entry.reversalOfId) {
         return { resourceType: 'journal_void', resourceId: params.id, statusCode: 409,
-          body: { error: { code: 'source_workflow_required', message: 'Only original manual journals can be voided here. Use the source document or payment reversal workflow.' } } };
+          body: { error: { code: 'source_workflow_required', message: 'Only original manual or payroll journals can be voided here. Use the source document or payment reversal workflow.' } } };
       }
       const guard = await closedPeriodGuard(context!.companyId, new Date(), tx);
       if (guard) return { resourceType: 'journal_void', resourceId: params.id, statusCode: guard.status, body: await guard.json() };

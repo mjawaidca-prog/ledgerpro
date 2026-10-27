@@ -50,7 +50,7 @@ export default function JournalListPage() {
 
   const sourceLabels: Record<string, string> = {
     invoice: 'Invoice', bill: 'Bill', payment: 'Payment',
-    transfer: 'Transfer', manual: 'Manual',
+    transfer: 'Transfer', manual: 'Manual', payroll: 'Payroll \u2014 Nexvar Pay',
   };
 
   async function deleteEntry(id: string) {
@@ -123,6 +123,7 @@ export default function JournalListPage() {
                           'w-9 h-9 rounded-lg grid place-items-center flex-none',
                           entry.sourceType === 'manual' ? 'bg-[var(--warning-soft)] text-[var(--warning)]' :
                           entry.sourceType === 'invoice' ? 'bg-[var(--primary-soft)] text-[var(--accent)]' :
+                          entry.sourceType === 'payroll' ? 'bg-[var(--success-soft)] text-[var(--success)]' :
                           'bg-[var(--neutral-soft)] text-[var(--text-muted)]'
                         )}>
                           <FileText size={16} />
