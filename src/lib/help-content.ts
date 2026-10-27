@@ -586,7 +586,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
         heading: 'Not currently available',
         notes: [
           'Direct automatic bank feeds.',
-          'A public third-party API with published endpoints and rate limits.',
+          'A public app marketplace or self-serve developer portal. (The public third-party API itself is available on the Pro and Enterprise plans for integrations — see the Developer API articles — but there is no public developer signup or published rate-limit schedule yet.)',
           'Direct Bill.com, Procore, or comparable integration.',
           'Payroll processing inside LedgerPro — pay is calculated in Nexvar Pay, and its finalized totals post here through the payroll sync (see “Payroll sync with Nexvar Pay”).',
           'Direct CRA, Revenu Québec, or provincial return submission or tax-authority payment initiation.',
