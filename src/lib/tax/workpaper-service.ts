@@ -22,7 +22,6 @@ export async function loadWorkpaperSource(companyId:string,registrationId:string
   ]);
   if(!company||!registration) throw new TaxPostingError('registration_not_found','Tax registration not found.',404);
   const blockers:string[]=[];
-  if(!configuration?.enabled) blockers.push('The reviewed tax workflow is not enabled for this company.');
   if(!registration.active||!registration.reviewedAt||registration.validFrom>start||(registration.validTo&&registration.validTo<end)) blockers.push('The reviewed registration must be active for the full filing period.');
   const roleAccounts:Record<string,{code:string}|null|undefined>=registration.regime==='gst_hst'
     ?{output:configuration?.gstHstOutputAccount,recovery:configuration?.gstHstRecoverableAccount,clearing:configuration?.taxClearingAccount}
@@ -39,13 +38,26 @@ export async function loadWorkpaperSource(companyId:string,registrationId:string
     db.journalLine.findMany({where:{journalEntry:{companyId,entryDate:{lt:start}},glAccountCode:{in:Object.values(accountCodes)}},select:{glAccountCode:true,debit:true,credit:true}}),
   ]);
   if(snapshots.some(s=>!s.posting)) blockers.push('A tax snapshot is not linked to its source journal and requires review.');
+  // Phase 1.5 bridge: a GST/HST period with no reviewed snapshots and no
+  // reviewed tax postings is a simple-path period. Its workpaper totals come
+  // from the GL (see calculateWorkpaper), never from fabricated snapshots.
+  // Any reviewed posting in the period keeps the period on the reviewed path.
+  const sourceMode = registration.regime==='gst_hst' && snapshots.length===0 && !journals.some(j=>j.taxPosting)
+    ? 'gl_simple_path' as const : 'reviewed_snapshots' as const;
+  // Reviewed document-posting enablement gates only the reviewed-source
+  // path. A GST/HST GL simple-path workpaper is a reporting bridge over
+  // already-posted GL data; requiring enablement would change bank,
+  // invoice and bill posting behaviour for the simple-path companies it
+  // is meant to serve (their rule-tax splits are rejected by the reviewed
+  // bank adapter once the workflow is enabled).
+  if(!configuration?.enabled && sourceMode==='reviewed_snapshots') blockers.push('The reviewed tax workflow is not enabled for this company.');
   const roleByCode=new Map<string,'output'|'recovery'|'clearing'|'income'>();
   Object.entries(accountCodes).forEach(([r,c])=>roleByCode.set(c,r as 'output'|'recovery'|'clearing'));
   income.forEach(a=>{if(!roleByCode.has(a.code))roleByCode.set(a.code,'income');});
   return {company,registration:{...registration,regime:registration.regime,province:registration.province},start:day(start),end:day(end),
     sources:snapshots.map(s=>({id:s.id,postingId:s.postingId??`unlinked:${s.id}`,journalId:s.posting?.journalEntryId??'',documentId:s.posting?.journalEntry.sourceId??null,sourceType:s.posting?.journalEntry.sourceType??'unlinked',date:day(s.taxPointDate),direction:s.direction,jurisdiction:s.jurisdiction,treatment:s.treatment,netMinor:cents(s.netHome),homeCurrency:s.homeCurrency,reversalOfId:s.reversalOfId,components:s.components.map(c=>({type:c.type,treatment:c.treatment,outputMinor:cents(c.outputTaxHome),recoveryMinor:cents(c.recoverableTaxHome),nonrecoverableMinor:cents(c.nonrecoverableTaxHome)}))})),
     ledger:journals.flatMap(j=>j.lines.map(l=>({id:l.id,journalId:j.id,date:day(j.entryDate),code:l.glAccountCode,role:roleByCode.get(l.glAccountCode)!,debitMinor:cents(l.debit),creditMinor:cents(l.credit),postingId:j.taxPosting?.id??null,description:l.description??j.description}))),
-    opening:openingLines.reduce<Record<string,number>>((a,l)=>{a[l.glAccountCode]=(a[l.glAccountCode]??0)+cents(l.debit)-cents(l.credit);return a;},{}),accountCodes,blockers};
+    opening:openingLines.reduce<Record<string,number>>((a,l)=>{a[l.glAccountCode]=(a[l.glAccountCode]??0)+cents(l.debit)-cents(l.credit);return a;},{}),accountCodes,blockers,sourceMode};
 }
 
 export async function calculateCurrent(companyId:string,registrationId:string,start:Date,end:Date,inputs:WorkpaperInputs){
