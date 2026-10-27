@@ -19,7 +19,7 @@ export function LandingFooter() {
             </p>
           </div>
           <FooterCol title="Product" links={[['Features', '/#features'], ['Pricing', '/pricing'], ['Start Free Trial', '/register']]} />
-          <FooterCol title="Nexvar Lab" links={[['Company Website', 'https://www.nexvarlab.online'], ['Nexvar Pay Payroll', 'https://pay.nexvarlab.com'], ['Contact', 'mailto:hello@nexvarlab.online']]} />
+          <FooterCol title="Nexvar Lab" links={[['Company Website', 'https://www.nexvarlab.online'], ['Nexvar Pay Payroll', 'https://nexvarpay.nexvarlab.com'], ['Contact', 'mailto:hello@nexvarlab.online']]} />
           <FooterCol title="Platform" links={[['Dashboard', '/dashboard'], ['Canadian Tax', '/#canadian'], ['Bank Reconciliation', '/#features']]} />
         </div>
         <div className="mt-10 flex flex-col justify-between border-t border-[var(--border)] pt-5 text-[13.5px] text-[var(--text-muted)] sm:flex-row">

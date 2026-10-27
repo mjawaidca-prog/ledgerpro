@@ -584,7 +584,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
     sections: [
       {
         heading: 'What the API is',
-        text: 'LedgerPro has a versioned public API at https://ledger.nexvarlab.com/api/v1 for authorized applications and accountants. "Public" means documented access for approved integrations — it never opens customer financial data to unauthenticated callers.',
+        text: 'LedgerPro has a versioned public API at https://ledgerpro.nexvarlab.com/api/v1 for authorized applications and accountants. "Public" means documented access for approved integrations — it never opens customer financial data to unauthenticated callers.',
       },
       {
         heading: 'What it covers',
@@ -601,7 +601,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'Open Settings → Developer / API Access (owners only).',
           'Enable API access for the company and create a key with the permissions your integration needs.',
           'Copy the secret once — only its SHA-256 hash is stored.',
-          'Call https://ledger.nexvarlab.com/api/v1/company with Authorization: Bearer lp_live_… to confirm (the root /api/v1 returns a JSON index).',
+          'Call https://ledgerpro.nexvarlab.com/api/v1/company with Authorization: Bearer lp_live_… to confirm (the root /api/v1 returns a JSON index).',
           'The full endpoint reference is at /api/v1/openapi.json.',
         ],
       },
