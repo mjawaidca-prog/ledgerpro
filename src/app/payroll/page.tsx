@@ -173,6 +173,9 @@ export default function PayrollPage() {
             No re-typing totals, no year-end scramble — and if a run is ever reversed, the reversing entry
             posts automatically too.
           </p>
+          <p className="text-sm mt-1">
+            <Link href="/help" className="text-[var(--accent)] font-medium">Read the Help article: Payroll sync with Nexvar Pay →</Link>
+          </p>
         </div>
 
         {failed && (

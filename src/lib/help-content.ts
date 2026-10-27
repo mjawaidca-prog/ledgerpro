@@ -327,6 +327,56 @@ export const HELP_ARTICLES: HelpArticle[] = [
     action: { label: 'Open journals', href: '/journal' },
   },
   {
+    slug: 'payroll-sync-nexvar-pay',
+    title: 'Payroll sync with Nexvar Pay',
+    category: 'Accounting controls',
+    summary: 'Connect Nexvar Pay so every finalized pay run posts its own balanced journal — labelled Payroll — Nexvar Pay — with nothing to re-type.',
+    keywords: ['payroll', 'nexvar pay', 'sync', 'pay run', 'wages', 'cpp', 'ei', 'remittance', 'integration'],
+    sections: [
+      {
+        heading: 'What it does',
+        text: 'Nexvar Pay is Nexvar Lab’s payroll product: it calculates pay, CPP, EI, and taxes and produces pay stubs and T4s. LedgerPro does not calculate payroll. When the two are connected, finalizing a pay run in Nexvar Pay posts one balanced journal entry here automatically, so the books always match the payroll — no re-typing totals and no year-end reconstruction.',
+      },
+      {
+        heading: 'What posts',
+        notes: [
+          'One aggregate journal per finalized pay run, dated on the pay date and labelled Payroll — Nexvar Pay in the journal list.',
+          'Mode 2 (granular, recommended): wages to 6920 Salaries & Wages, the employer CPP/EI share to 6940 Employer Payroll Taxes, and amounts owed to 2410 CPP Payable, 2420 EI Payable, 2430 Income Tax Payable, and 2440 Wages Payable.',
+          'Mode 1 (simple): the whole cost to one payroll expense account and the amounts owed to one or two payables — for charts without the granular payroll accounts.',
+          'Only totals cross over. Employee names, SINs, bank details, and pay stubs never leave Nexvar Pay.',
+        ],
+      },
+      {
+        heading: 'Connect the two products',
+        steps: [
+          'Open Payroll in the main menu — it shows this company’s connection status.',
+          'In LedgerPro, open Settings → Developer / API and create a key with Read and Write posting permissions (API access must be enabled for the company, and your plan must include it).',
+          'In Nexvar Pay, open the matching company → Settings → Integrations, paste the key, and choose the mapping mode.',
+          'Use Test Connection — it confirms every mapped account exists and is active in this company’s chart.',
+          'Turn on “Sync pay runs to LedgerPro”. From then on, finalized pay runs post here on their own.',
+        ],
+      },
+      {
+        heading: 'Reversals and safeguards',
+        notes: [
+          'The sync is off by default and is switched on per company, in Nexvar Pay.',
+          'Reversing or deleting a finalized run in Nexvar Pay posts an equal-and-opposite reversing entry here. Payroll journals cannot be voided from the LedgerPro journal screen — reverse them in Nexvar Pay so the two products stay in sync.',
+          'A run dated in a closed or filed period is held back, never forced in; the sync record shows FAILED or BLOCKED with the reason.',
+          'Nothing can post twice: every run carries a unique posting key, and a retry after a failure replays safely against it.',
+        ],
+      },
+      {
+        heading: 'If a run does not post',
+        notes: [
+          'Open the pay run in Nexvar Pay and read its sync badge — FAILED shows the cause (for example a revoked key, API access switched off, or an inactive account).',
+          'Fix the cause, then press Retry on the run. Retrying is safe and never creates a duplicate entry.',
+          'The Payroll page in LedgerPro shows how many runs have posted and when the most recent one landed.',
+        ],
+      },
+    ],
+    action: { label: 'Open the Payroll page', href: '/payroll' },
+  },
+  {
     slug: 'foreign-currency',
     title: 'Work with foreign currencies',
     category: 'Accounting controls',
@@ -538,7 +588,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'Direct automatic bank feeds.',
           'A public third-party API with published endpoints and rate limits.',
           'Direct Bill.com, Procore, or comparable integration.',
-          'Payroll processing.',
+          'Payroll processing inside LedgerPro — pay is calculated in Nexvar Pay, and its finalized totals post here through the payroll sync (see “Payroll sync with Nexvar Pay”).',
           'Direct CRA, Revenu Québec, or provincial return submission or tax-authority payment initiation.',
           'Automatic conversion of every historical transaction from another accounting system.',
           'Partial-ownership consolidation.',
