@@ -60,9 +60,18 @@ export async function ensureTaxAccount(companyId: string, code: string): Promise
  */
 export async function ensureSimpleTaxAccounts(
   companyId: string,
-  needs: { recoverable?: boolean; pstPayable?: boolean },
+  needs: { recoverable?: boolean; pstPayable?: boolean; qstOutput?: boolean; qstRecoverable?: boolean },
 ): Promise<ResolvedTaxAccounts> {
   if (needs.recoverable) await ensureTaxAccount(companyId, SIMPLE_TAX_ACCOUNT_CODES.recoverable);
   if (needs.pstPayable) await ensureTaxAccount(companyId, SIMPLE_TAX_ACCOUNT_CODES.pstPayable);
+  // QST accounts are only auto-created when the RESOLVED code is still the
+  // default — a company that mapped QST to a custom account already has it.
+  const resolved = await loadSimpleTaxAccounts(companyId);
+  if (needs.qstOutput && resolved.qstOutput === SIMPLE_TAX_ACCOUNT_CODES.qstOutput) {
+    await ensureTaxAccount(companyId, SIMPLE_TAX_ACCOUNT_CODES.qstOutput);
+  }
+  if (needs.qstRecoverable && resolved.qstRecoverable === SIMPLE_TAX_ACCOUNT_CODES.qstRecoverable) {
+    await ensureTaxAccount(companyId, SIMPLE_TAX_ACCOUNT_CODES.qstRecoverable);
+  }
   return loadSimpleTaxAccounts(companyId);
 }

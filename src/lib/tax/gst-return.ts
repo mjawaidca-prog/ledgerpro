@@ -9,16 +9,19 @@
  *   103 GST/HST collected or collectible — credits − debits on the
  *       GST/HST output (payable) account. PST/RST lives in its own
  *       payable account and QST in its own accounts: neither enters 103.
- *   104 Adjustments (add) — 0 in the simple path (manual adjustments are
- *       classified in Tax Workpapers).
+ *   104 Adjustments (add) — sum of the optional `adjustments.add` items
+ *       (Phase 1 cleanup: simple-path adjustments stored on the period's
+ *       TaxReturnWorkpaper inputs as `simpleAdjustments`; distinct from
+ *       reviewed-workpaper manual classifications). 0 when absent.
  *   105 = 103 + 104
  *   106 Input tax credits — debits − credits on the GST/HST recoverable
  *       (ITC) account. Netting happens HERE, in the return — postings
  *       never net ITCs against the payable in the GL.
- *   107 Adjustments (deduct) — 0 in the simple path.
+ *   107 Adjustments (deduct) — sum of `adjustments.deduct`. 0 when absent.
  *   108 = 106 + 107;  109 Net tax = 105 − 108.
- *   110 Instalments / 111 Rebates — 0 in the simple path (recorded via
- *       Tax Workpapers); 112 = 110 + 111; balance 113C = 109 − 112;
+ *   110 Instalments — sum of `adjustments.instalments`; 111 Rebates —
+ *       sum of `adjustments.rebates`; 112 = 110 + 111;
+ *       balance 113C = 109 − 112;
  *       114 refund = max(0, −113C); 115 payment = max(0, 113C).
  *
  * Line definitions verified against CRA Info Sheet GI-066 (Canada.ca,
@@ -50,9 +53,87 @@ export interface GstDrillItem {
   amount: number;
 }
 
+/** One simple-path adjustment row: a dollar amount with a required short note. */
+export interface GstAdjustmentItem {
+  amount: number;
+  note: string;
+}
+
+/**
+ * Optional simple-path adjustments for lines 104 / 107 / 110 / 111.
+ * Amounts are major units (dollars) and must be >= 0 (validated at the
+ * API/service boundary); the pure computation sums them exactly via
+ * integer minor arithmetic. This is a distinct concept from the reviewed
+ * workpaper's manual GL classifications — adjustments never classify a
+ * journal line, so they do not trip the GL bridge's classification guard.
+ */
+export interface GstAdjustmentsInput {
+  add?: GstAdjustmentItem[];
+  deduct?: GstAdjustmentItem[];
+  instalments?: GstAdjustmentItem[];
+  rebates?: GstAdjustmentItem[];
+}
+
+/** Normalized adjustments: all four groups always present. */
+export interface GstAdjustments {
+  add: GstAdjustmentItem[];
+  deduct: GstAdjustmentItem[];
+  instalments: GstAdjustmentItem[];
+  rebates: GstAdjustmentItem[];
+  totals: Record<'104' | '107' | '110' | '111', number>;
+}
+
+export const EMPTY_GST_ADJUSTMENTS: GstAdjustments = {
+  add: [], deduct: [], instalments: [], rebates: [],
+  totals: { '104': 0, '107': 0, '110': 0, '111': 0 },
+};
+
+const cleanItems = (items?: GstAdjustmentItem[]): GstAdjustmentItem[] =>
+  (items ?? []).map((i) => ({ amount: major(minor(Number(i.amount) || 0)), note: String(i.note ?? '') }));
+
+/** Normalize an optional adjustments input into all-groups + CRA-line totals. */
+export function normalizeGstAdjustments(input?: GstAdjustmentsInput | null): GstAdjustments {
+  const add = cleanItems(input?.add);
+  const deduct = cleanItems(input?.deduct);
+  const instalments = cleanItems(input?.instalments);
+  const rebates = cleanItems(input?.rebates);
+  const total = (items: GstAdjustmentItem[]) => major(items.reduce((s, i) => s + minor(i.amount), 0));
+  return {
+    add, deduct, instalments, rebates,
+    totals: { '104': total(add), '107': total(deduct), '110': total(instalments), '111': total(rebates) },
+  };
+}
+
+/**
+ * Validate adjustments for storage. Returns an error message, or null when
+ * valid. Rules (task spec): every amount finite and >= 0, every note a
+ * required short string, bounded list sizes.
+ */
+export function validateGstAdjustments(input?: GstAdjustmentsInput | null): string | null {
+  if (input == null) return null;
+  const groups: [string, GstAdjustmentItem[] | undefined][] = [
+    ['add (line 104)', input.add], ['deduct (line 107)', input.deduct],
+    ['instalments (line 110)', input.instalments], ['rebates (line 111)', input.rebates],
+  ];
+  for (const [label, items] of groups) {
+    if (items == null) continue;
+    if (!Array.isArray(items)) return `Adjustments ${label} must be a list.`;
+    if (items.length > 50) return `Adjustments ${label} may contain at most 50 rows.`;
+    for (const item of items) {
+      if (typeof item?.amount !== 'number' || !Number.isFinite(item.amount) || item.amount < 0) {
+        return `Each adjustment in ${label} must have an amount of $0 or more.`;
+      }
+      const note = typeof item?.note === 'string' ? item.note.trim() : '';
+      if (!note || note.length > 500) return `Each adjustment in ${label} needs a short note (1–500 characters).`;
+    }
+  }
+  return null;
+}
+
 export interface GstReturnResult {
   lines: Record<'101' | '103' | '104' | '105' | '106' | '107' | '108' | '109' | '110' | '111' | '112' | '114' | '115', number>;
   drillDown: Record<string, GstDrillItem[]>;
+  adjustments: GstAdjustments;
 }
 
 const minor = (n: number): number => Math.round(n * 100);
@@ -79,6 +160,7 @@ export function computeGstHstReturn(input: {
   lines: GstJournalLine[];
   outputAccountCode: string;
   recoverableAccountCode: string;
+  adjustments?: GstAdjustmentsInput | null;
 }): GstReturnResult {
   const drillDown: Record<string, GstDrillItem[]> = { '101': [], '103': [], '106': [] };
   const push = (craLine: string, l: GstJournalLine, amountMinor: number) => {
@@ -120,23 +202,34 @@ export function computeGstHstReturn(input: {
   // CRA: line 101 is reported to the nearest whole dollar (workpaper parity).
   const line101Minor = Math.sign(revenueMinor) * Math.floor((Math.abs(revenueMinor) + 50) / 100) * 100;
 
+  const adjustments = normalizeGstAdjustments(input.adjustments);
+  const adj104Minor = minor(adjustments.totals['104']);
+  const adj107Minor = minor(adjustments.totals['107']);
+  const adj110Minor = minor(adjustments.totals['110']);
+  const adj111Minor = minor(adjustments.totals['111']);
+  const line105Minor = outputMinorTotal + adj104Minor;
+  const line108Minor = itcMinorTotal + adj107Minor;
+  const line109Minor = line105Minor - line108Minor;
+  const line112Minor = adj110Minor + adj111Minor;
+  const balanceMinor = line109Minor - line112Minor; // 113C
+
   const lines: GstReturnResult['lines'] = {
     '101': major(line101Minor),
     '103': major(outputMinorTotal),
-    '104': 0,
-    '105': major(outputMinorTotal), // 103 + 104
+    '104': major(adj104Minor),
+    '105': major(line105Minor),
     '106': major(itcMinorTotal),
-    '107': 0,
-    '108': major(itcMinorTotal), // 106 + 107
-    '109': major(outputMinorTotal - itcMinorTotal),
-    '110': 0,
-    '111': 0,
-    '112': 0,
-    '114': major(Math.max(0, -(outputMinorTotal - itcMinorTotal))),
-    '115': major(Math.max(0, outputMinorTotal - itcMinorTotal)),
+    '107': major(adj107Minor),
+    '108': major(line108Minor),
+    '109': major(line109Minor),
+    '110': major(adj110Minor),
+    '111': major(adj111Minor),
+    '112': major(line112Minor),
+    '114': major(Math.max(0, -balanceMinor)),
+    '115': major(Math.max(0, balanceMinor)),
   };
 
-  return { lines, drillDown };
+  return { lines, drillDown, adjustments };
 }
 
 /** Working-copy CSV for the return (drill-down appended). Labelled by the caller with filing status. */
@@ -162,6 +255,16 @@ export function gstReturnCsv(input: {
   ];
   for (const [line, amount] of Object.entries(input.result.lines)) {
     rows.push([line, GST_RETURN_LABELS[line] ?? '', amount.toFixed(2)]);
+  }
+  const adj = input.result.adjustments;
+  if (adj && (adj.add.length || adj.deduct.length || adj.instalments.length || adj.rebates.length)) {
+    rows.push([], ['Adjustments', 'CRA line', 'Note', 'Amount']);
+    const groups: [string, GstAdjustmentItem[]][] = [
+      ['104', adj.add], ['107', adj.deduct], ['110', adj.instalments], ['111', adj.rebates],
+    ];
+    for (const [line, items] of groups) {
+      for (const item of items) rows.push(['Adjustment', line, item.note, item.amount.toFixed(2)]);
+    }
   }
   rows.push([], ['Drill-down', 'Journal line', 'Journal entry', 'Date', 'Account', 'Description', 'Debit', 'Credit', 'Contribution']);
   for (const [craLine, items] of Object.entries(input.result.drillDown)) {

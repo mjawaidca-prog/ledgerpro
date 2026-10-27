@@ -1,9 +1,19 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { isTaxDate } from './date';
-import { computeGstHstReturn } from './gst-return';
+import { computeGstHstReturn, normalizeGstAdjustments } from './gst-return';
 
 export const taxPeriodDate = z.string().refine(value => /^\d{4}-\d{2}-\d{2}$/.test(value) && isTaxDate(value), 'Use a valid YYYY-MM-DD date.');
+const simpleAdjustmentItem = z.object({
+  amount: z.number().finite().min(0),
+  note: z.string().trim().min(1).max(500),
+}).strict();
+export const simpleAdjustmentsSchema = z.object({
+  add: z.array(simpleAdjustmentItem).max(50).default([]),
+  deduct: z.array(simpleAdjustmentItem).max(50).default([]),
+  instalments: z.array(simpleAdjustmentItem).max(50).default([]),
+  rebates: z.array(simpleAdjustmentItem).max(50).default([]),
+}).strict();
 export const workpaperInputs = z.object({
   classifications: z.array(z.object({
     lineId: z.string().min(1),
@@ -13,6 +23,15 @@ export const workpaperInputs = z.object({
   }).strict()).max(1000).default([]),
   periodEvidence: z.string().trim().min(5).max(2000),
   reviewNote: z.string().trim().max(2000).default(''),
+  /**
+   * Phase 1 cleanup — simple-path adjustments (CRA 104/107/110/111),
+   * stored under `inputs.simpleAdjustments`. A distinct concept from
+   * `classifications`: adjustments are period-level dollar rows, not GL
+   * line classifications, so in GL mode they do NOT trip the manual-
+   * classification blocker. Only the GL simple-path calculation reads
+   * them; the reviewed-snapshot calculation ignores them entirely.
+   */
+  simpleAdjustments: simpleAdjustmentsSchema.optional(),
 }).strict();
 export type WorkpaperInputs = z.infer<typeof workpaperInputs>;
 export interface SourceLine {
@@ -67,7 +86,9 @@ export function calculateWorkpaper(source: WorkpaperSource, input: WorkpaperInpu
   let outputMinor = safeSum(selected.map(c => c.outputMinor));
   let recoveryMinor = safeSum(selected.map(c => c.recoveryMinor));
   let revenueMinor = safeSum(source.sources.filter(s => s.direction === 'sale' && s.treatment !== 'out_of_scope' && (regime === 'gst_hst' || s.components.some(c => matches(c.type,s.jurisdiction)))).map(s => s.netMinor));
-  const lines: Record<string,number> = { '101': revenueMinor, '103': outputMinor, '104':0, '106':recoveryMinor, '107':0, '110':0 };
+  const lines: Record<string,number> = { '101': revenueMinor, '103': outputMinor, '104':0, '106':recoveryMinor, '107':0, '110':0, '111':0 };
+  // Simple-path adjustments apply only in GL mode; reviewed mode is untouched.
+  const simpleAdjustments = glMode ? normalizeGstAdjustments(input.simpleAdjustments) : null;
   if (glMode) {
     // GL simple-path bridge: reuse the GST/HST Return computation so the
     // workpaper and the report can never disagree. Line 101 is the net
@@ -84,13 +105,18 @@ export function calculateWorkpaper(source: WorkpaperSource, input: WorkpaperInpu
       })),
       outputAccountCode: source.accountCodes.output ?? '',
       recoverableAccountCode: source.accountCodes.recovery,
+      adjustments: input.simpleAdjustments,
     });
     revenueMinor = safeSum(source.ledger.filter(l => l.role === 'income').map(l => l.creditMinor - l.debitMinor));
     outputMinor = Math.round(gst.lines['103'] * 100);
     recoveryMinor = Math.round(gst.lines['106'] * 100);
     lines['101'] = Math.round(gst.lines['101'] * 100);
     lines['103'] = outputMinor;
+    lines['104'] = Math.round(gst.lines['104'] * 100);
     lines['106'] = recoveryMinor;
+    lines['107'] = Math.round(gst.lines['107'] * 100);
+    lines['110'] = Math.round(gst.lines['110'] * 100);
+    lines['111'] = Math.round(gst.lines['111'] * 100);
     if (input.classifications.length) {
       blockers.push('Manual classifications are not used in a GL simple-path workpaper: its totals already include every GL line in the mapped income, output and recoverable accounts. Remove the classifications, or switch the company to reviewed tax postings.');
     }
@@ -132,11 +158,14 @@ export function calculateWorkpaper(source: WorkpaperSource, input: WorkpaperInpu
   lines['105']=safeSum([lines['103'],lines['104']]);
   lines['108']=safeSum([lines['106'],lines['107']]);
   lines['109']=safeSum([lines['105'],-lines['108']]);
-  lines['112']=lines['110']; // Rebates and self-assessment are explicitly outside this release.
+  // Line 112 = instalments (110) + rebates (111). In reviewed mode 111
+  // stays 0 (rebates/self-assessment outside that release, as before);
+  // in GL mode 110/111 come from inputs.simpleAdjustments above.
+  lines['112']=safeSum([lines['110'],lines['111'] ?? 0]);
   lines['113A']=safeSum([lines['109'],-lines['112']]);
   lines['113B']=0; lines['113C']=lines['113A'];
   lines['114']=Math.max(0,-lines['113C']); lines['115']=Math.max(0,lines['113C']);
-  if (['101','103','104','106','107','110'].some(k=>lines[k]<0)) blockers.push('Negative return input requires accountant treatment outside the supported ordinary return workflow.');
+  if (['101','103','104','106','107','110','111'].some(k=>lines[k]<0)) blockers.push('Negative return input requires accountant treatment outside the supported ordinary return workflow.');
   const balances = Object.entries(source.accountCodes).map(([role,code])=> {
     const openingMinor=source.opening[code]??0;
     const movementMinor=safeSum(source.ledger.filter(l=>l.code===code).map(l=>l.debitMinor-l.creditMinor));
@@ -145,6 +174,7 @@ export function calculateWorkpaper(source: WorkpaperSource, input: WorkpaperInpu
   return { schemaVersion:1, ...source, sourceMode, inputs:input, lines, outputMinor,recoveryMinor,revenueMinor,
     netTaxMinor:lines['109'], balanceDueMinor:lines['113C'],
     scheduleOnly:regime!=='gst_hst', postingChecks, balances, unclassified,
+    simpleAdjustments,
     simplePath: glMode ? {
       ledgerLineCount: source.ledger.length,
       journalCount: new Set(source.ledger.map(l => l.journalId)).size,
@@ -162,6 +192,12 @@ export function workpaperCsv(w: CalculatedWorkpaper, status: string, confirmatio
   const rows:unknown[][]=[['LedgerPro tax workpaper',status==='filed_recorded'?'EXTERNAL FILING RECORDED':'NOT FILED'],['Company',w.company.name],['Registration',w.registration.registrationNumber],['Regime',w.registration.regime],['Period',w.start,w.end],['Filing confirmation',confirmation??''],['Amounts','CAD'],['Blockers',w.blockers.join(' | ')],['Schedule',w.scheduleOnly?'Supporting schedule only; not a provincial return form':'Regular GST/HST'],['Source mode',w.sourceMode==='gl_simple_path'?'GL simple path — period totals from general-ledger income and mapped tax control accounts; no reviewed tax snapshots':'Reviewed tax snapshots'],[],['Return line','CAD amount']];
   if (!w.scheduleOnly) Object.entries(w.lines).forEach(([k,v])=>rows.push([k,(v/100).toFixed(2)]));
   else rows.push(['Output tax',(w.outputMinor/100).toFixed(2)],['Recoverable tax',(w.recoveryMinor/100).toFixed(2)],['Net with reviewed adjustments',(w.netTaxMinor/100).toFixed(2)]);
+  const adj = (w as { simpleAdjustments?: { add: { amount: number; note: string }[]; deduct: { amount: number; note: string }[]; instalments: { amount: number; note: string }[]; rebates: { amount: number; note: string }[] } | null }).simpleAdjustments;
+  if (adj && (adj.add.length || adj.deduct.length || adj.instalments.length || adj.rebates.length)) {
+    rows.push([],['Adjustments','CRA line','Note','CAD amount']);
+    const groups: [string, { amount: number; note: string }[]][] = [['104',adj.add],['107',adj.deduct],['110',adj.instalments],['111',adj.rebates]];
+    for (const [line,items] of groups) for (const item of items) rows.push(['Adjustment',line,item.note,item.amount.toFixed(2)]);
+  }
   rows.push([],['Control role','Account','Opening debit balance','Movement debit balance','Closing debit balance']);
   w.balances.forEach(b=>rows.push([b.role,b.code,b.openingMinor/100,b.movementMinor/100,b.closingMinor/100]));
   rows.push([],['Snapshot','Document','Journal','Tax date','Direction','Province','Net CAD','Component','Treatment','Output CAD','Recoverable CAD','Nonrecoverable CAD','Reversal of']);

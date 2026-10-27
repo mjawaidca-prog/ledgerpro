@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireCompany, auditLog, closedPeriodGuard, accountLockedGuard } from '@/lib/api-helpers';
 import { db } from '@/lib/db';
 import { postBankRow } from '@/lib/banking/posting';
+import { isFiledPeriodLockedError } from '@/lib/tax/filed-lock';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ data: { posted: true, entryId } }, { status: 201 });
   } catch (err: any) {
     console.error('POST /api/bank-transactions/[id]/post error:', err);
+    if (isFiledPeriodLockedError(err)) return NextResponse.json({ error: err.message, code: 'filed_period_locked' }, { status: 409 });
     return NextResponse.json({ error: err.message || 'Failed to post' }, { status: 500 });
   }
 }

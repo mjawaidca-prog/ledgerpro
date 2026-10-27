@@ -7,6 +7,7 @@ import { postJournalEntry } from '@/lib/journal';
 import { suggestMirror } from '@/lib/intercompany/detect';
 import { expandJournalTaxLines, type JournalLineWithTax } from '@/lib/tax/journal-tax';
 import { ensureSimpleTaxAccounts, loadSimpleTaxAccounts } from '@/lib/tax/accounts';
+import { assertNoFiledLock, isFiledPeriodLockedError } from '@/lib/tax/filed-lock';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
@@ -35,14 +36,31 @@ export async function POST(req: NextRequest) {
       if (guardError) return guardError;
     }
 
+    // Filed-period hard lock: reject a tax-affecting entry dated inside
+    // a filed GST/HST period (a line on a resolved tax account, or a
+    // line carrying a tax spec that expansion would land on one).
+    try {
+      await assertNoFiledLock({
+        companyId: companyId!,
+        date: entryDate,
+        lines: lines.map((l) => ({ accountCode: l.glAccountCode, hasTaxSpec: Boolean(l.tax) })),
+      });
+    } catch (e) {
+      if (isFiledPeriodLockedError(e)) return NextResponse.json({ error: (e as Error).message, code: 'filed_period_locked' }, { status: 409 });
+      throw e;
+    }
+
     // Phase 1: expand tax-tagged lines (inclusive) into net + tax lines.
     // Untagged lines pass through untouched; expansion preserves each
     // line's total, so a balanced entry stays balanced.
     let expandedLines: { glAccountCode: string; description?: string; debit: number; credit: number }[];
     if (lines.some((l) => l.tax)) {
-      const needsRecoverable = lines.some((l) => l.tax && (l.debit || 0) > 0 && (l.tax.recoverable ?? true));
+      // recoveryPercent (when present) wins over the recoverable boolean.
+      const needsRecoverable = lines.some((l) => l.tax && (l.debit || 0) > 0 && (l.tax.recoveryPercent != null ? l.tax.recoveryPercent > 0 : (l.tax.recoverable ?? true)));
       const needsPst = lines.some((l) => l.tax && (l.credit || 0) > 0);
-      await ensureSimpleTaxAccounts(companyId, { recoverable: needsRecoverable, pstPayable: needsPst });
+      const needsQstRecoverable = lines.some((l) => l.tax?.province === 'QC' && (l.debit || 0) > 0 && (l.tax.recoverable ?? true));
+      const needsQstOutput = lines.some((l) => l.tax?.province === 'QC' && (l.credit || 0) > 0);
+      await ensureSimpleTaxAccounts(companyId, { recoverable: needsRecoverable, pstPayable: needsPst, qstOutput: needsQstOutput, qstRecoverable: needsQstRecoverable });
       const taxAccounts = await loadSimpleTaxAccounts(companyId);
       try {
         expandedLines = expandJournalTaxLines(lines, taxAccounts, entryDate);
@@ -150,6 +168,23 @@ export async function DELETE(req: NextRequest) {
       where,
       include: { lines: true },
     });
+
+    // Filed-period hard lock: deleting a tax-affecting entry dated
+    // inside a filed GST/HST period would change the filed figures —
+    // reject the whole bulk delete. Tax-neutral entries in the period
+    // are unaffected (they pass the guard).
+    for (const entry of entries) {
+      try {
+        await assertNoFiledLock({
+          companyId: companyId!,
+          date: entry.entryDate,
+          lines: entry.lines.map((l) => ({ accountCode: l.glAccountCode })),
+        });
+      } catch (e) {
+        if (isFiledPeriodLockedError(e)) return NextResponse.json({ error: (e as Error).message, code: 'filed_period_locked' }, { status: 409 });
+        throw e;
+      }
+    }
 
     // Guard: reject bulk deletion of inter-company linked entries
     const linkedEntries = entries.filter((e) => e.interCompanyId != null);

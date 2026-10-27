@@ -3,6 +3,7 @@ import { requireCompany, auditLog, closedPeriodGuard, accountLockedGuard } from 
 import { db } from '@/lib/db';
 import { allocation } from '@/lib/banking/splits';
 import { postBankRow } from '@/lib/banking/posting';
+import { isFiledPeriodLockedError } from '@/lib/tax/filed-lock';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ data: { split: true, entryId } });
   } catch (err: any) {
     console.error('POST /api/bank-transactions/[id]/split error:', err);
+    if (isFiledPeriodLockedError(err)) return NextResponse.json({ error: err.message, code: 'filed_period_locked' }, { status: 409 });
     return NextResponse.json({ error: err.message || 'Failed to split' }, { status: 500 });
   }
 }

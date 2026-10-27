@@ -12,6 +12,7 @@ import { buildPostingLines, computeSplitTaxes, round2 } from './splits';
 import { postJournalEntry, postTransactionToLedger } from '@/lib/journal';
 import { assertReviewedBankTaxAdapter } from '@/lib/tax/bank-adapter';
 import { ensureSimpleTaxAccounts } from '@/lib/tax/accounts';
+import { assertNoFiledLock } from '@/lib/tax/filed-lock';
 
 export interface BankRow {
   id: string;
@@ -23,7 +24,7 @@ export interface BankRow {
   currency: string;
   fxRate: Prisma.Decimal | null;
   amountHome: Prisma.Decimal | null;
-  splits: { categoryCode: string; amount: number; taxCode: string | null; taxRate: number | null; taxInclusive: boolean; memo?: string; taxProvince?: string | null; taxRecoverable?: boolean }[] | null;
+  splits: { categoryCode: string; amount: number; taxCode: string | null; taxRate: number | null; taxInclusive: boolean; memo?: string; taxProvince?: string | null; taxRecoverable?: boolean; taxRecoveryPercent?: number | null }[] | null;
   categoryId: string | null;
   account: { glAccountCode: string | null; currency: string } | null;
   category: { code: string; name: string } | null;
@@ -53,6 +54,25 @@ export async function postBankRow(opts: { row: BankRow; companyId: string; homeC
     throw new Error("The row's bank account has no linked GL account code. Link it in Chart of Accounts before posting.");
   }
 
+  // Filed-period hard lock: a row dated inside a filed GST/HST period
+  // may not post if it would change the filed figures — i.e. any split
+  // carries a tax spec (province/rate/code, incl. the stamp a
+  // categorization rule leaves via buildRuleTaxSplit) or any posting
+  // line (split category, single category, bank leg) lands on a resolved
+  // tax account. Plain tax-neutral rows in the period still post.
+  await assertNoFiledLock({
+    companyId,
+    date: row.date,
+    lines: [
+      { accountCode: glCode },
+      ...(row.category ? [{ accountCode: row.category.code }] : []),
+      ...(row.splits ?? []).map((s) => ({
+        accountCode: s.categoryCode,
+        hasTaxSpec: Boolean(s.taxProvince || s.taxRate || s.taxCode),
+      })),
+    ],
+  });
+
   // Splits path — one journal entry with one line per split + routed tax
   // lines (Phase 1: purchase GST/HST → ITC recoverable account, sales tax →
   // output account, PST/RST collected → PST payable; never all to 2300).
@@ -60,8 +80,10 @@ export async function postBankRow(opts: { row: BankRow; companyId: string; homeC
     const direction = row.amount > 0 ? 'in' : 'out';
     const computed = computeSplitTaxes(row.splits, direction);
     const taxAccounts = await ensureSimpleTaxAccounts(companyId, {
-      recoverable: computed.some((c) => c.tax.recoverableGstHst > 0 || c.tax.recoverableQst > 0),
+      recoverable: computed.some((c) => c.tax.recoverableGstHst > 0),
       pstPayable: computed.some((c) => c.tax.outputPstRst > 0),
+      qstOutput: computed.some((c) => c.tax.outputQst > 0),
+      qstRecoverable: computed.some((c) => c.tax.recoverableQst > 0),
     });
     const isFx = row.currency !== homeCurrency;
     let fxRate: number | null = null;
