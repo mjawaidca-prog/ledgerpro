@@ -11,6 +11,14 @@ import { Prisma } from '@prisma/client';
 import { makeDedupeKey, classifyDuplicates, type ExistingRow } from './dedupe';
 import { guessPayee } from './payee';
 import { applyRules, type BankRuleLike } from './rules';
+import {
+  applyCategorizationRules,
+  loadActiveCategorizationRules,
+  matchCategorizationRule,
+  taxStampBlockedByFiledLock,
+  type CategorizationApplySummary,
+} from './categorization-apply';
+import { buildRuleTaxSplit } from './rule-tax';
 
 export type ImportField =
   | 'ignore'
@@ -154,6 +162,8 @@ export interface DryRunResult {
   duplicates: { rowIndex: number; reason: string; skip: boolean; existing?: { date: string; description: string; amount: number } }[];
   lockedRows: number[];
   ruleHits: { categorized: number; activeRuleCount: number; ruleNames: string[] };
+  /** Settings → Categorization rules preview, over the rows the Banking-rules pass leaves uncategorized — the same engine and eligibility the commit applies, so preview counts match commit counts. */
+  categorizationHits: { matched: number; activeRuleCount: number; ruleNames: string[] };
   newRows: number;
   totals: { rowsInFile: number; skippedDuplicate: number; skippedLocked: number; newTransactions: number };
 }
@@ -218,11 +228,53 @@ export async function dryRunImport(input: {
 
   let categorized = 0;
   const ruleNames = new Set<string>();
+  const bankCategorizedRows = new Set<number>();
   if (input.applyRulesOnImport) {
     for (const row of newRows) {
       const hit = applyRules(ruleLike, { description: row.description, amount: row.amount, accountId: input.accountId });
-      if (hit?.categoryCode) categorized++;
+      if (hit?.categoryCode) {
+        categorized++;
+        bankCategorizedRows.add(row.rowIndex);
+      }
       if (hit) ruleNames.add(hit.rule.name);
+    }
+  }
+
+  // Categorization rules (Settings → Categorization) preview. Runs the
+  // shared engine's matcher over the same normalized rows the commit will
+  // stamp — committed rows carry merchant=null and rawStatementText=
+  // description — restricted to rows the Banking-rules pass leaves
+  // uncategorized, with the same filed-period lock probe, so the counts
+  // shown here are the counts the commit will produce.
+  const categorizationHits = { matched: 0, activeRuleCount: 0, ruleNames: [] as string[] };
+  if (input.applyRulesOnImport) {
+    const catRules = await loadActiveCategorizationRules(db, input.companyId);
+    categorizationHits.activeRuleCount = catRules.length;
+    if (catRules.length) {
+      const catNames = new Set<string>();
+      for (const row of newRows) {
+        if (bankCategorizedRows.has(row.rowIndex)) continue;
+        const rule = matchCategorizationRule(catRules, {
+          id: '',
+          description: row.description,
+          merchant: null,
+          rawStatementText: row.description,
+          amount: row.amount,
+          date: row.date,
+        });
+        if (!rule) continue;
+        const split = buildRuleTaxSplit(rule, { categoryCode: rule.category.code, amount: row.amount });
+        const blocked = await taxStampBlockedByFiledLock(db, {
+          companyId: input.companyId,
+          categoryCode: rule.category.code,
+          split,
+          date: row.date,
+        });
+        if (blocked) continue;
+        categorizationHits.matched++;
+        catNames.add(rule.name);
+      }
+      categorizationHits.ruleNames = [...catNames];
     }
   }
 
@@ -244,6 +296,7 @@ export async function dryRunImport(input: {
     })),
     lockedRows: locked.map((l) => l.rowIndex),
     ruleHits: { categorized, activeRuleCount: rules.length, ruleNames: [...ruleNames] },
+    categorizationHits,
     newRows: newRows.length,
     totals: {
       rowsInFile: input.normalized.length,
@@ -268,7 +321,7 @@ export async function commitImport(input: {
   applyRulesOnImport: boolean;
   autoPostExactMatches: boolean;
   skipRowIndexes: number[];
-}): Promise<{ importId: string; newCount: number; skippedDuplicate: number; skippedLocked: number; rulesApplied: number }> {
+}): Promise<{ importId: string; newCount: number; skippedDuplicate: number; skippedLocked: number; rulesApplied: number; categorization: CategorizationApplySummary }> {
   return db.$transaction(async (tx) => {
     const account = await tx.financialAccount.findUniqueOrThrow({
       where: { id: input.accountId, companyId: input.companyId },
@@ -409,6 +462,38 @@ export async function commitImport(input: {
       await tx.transaction.createMany({ data: rowsData });
     }
 
+    // Categorization rules (Settings → Categorization) — auto-apply over
+    // THIS import's rows that the Banking-rules pass left uncategorized,
+    // using the same shared engine as the manual Apply endpoint (tax
+    // splits stamped identically). Scoped by statementImportId: it never
+    // sweeps pre-existing rows. Same gate as Banking rules
+    // (applyRulesOnImport). A categorization failure must never fail the
+    // import, and a tax stamp that would land in a filed GST/HST period
+    // is skipped (counted), never thrown.
+    let categorization: CategorizationApplySummary = { matched: 0, activeRuleCount: 0, ruleNames: [], skippedLocked: 0 };
+    if (input.applyRulesOnImport && rowsData.length) {
+      try {
+        const imported = await tx.transaction.findMany({
+          where: { statementImportId: created.id, status: 'toreview', categoryId: null },
+          select: { id: true, description: true, merchant: true, rawStatementText: true, amount: true, date: true },
+        });
+        categorization = await applyCategorizationRules(tx, {
+          companyId: input.companyId,
+          transactions: imported.map((t) => ({
+            id: t.id,
+            description: t.description,
+            merchant: t.merchant,
+            rawStatementText: t.rawStatementText,
+            amount: Number(t.amount),
+            date: t.date,
+          })),
+          skipTaxRowsInFiledPeriods: true,
+        });
+      } catch (e) {
+        console.error('[import] categorization auto-apply failed:', e);
+      }
+    }
+
     await tx.statementImport.update({
       where: { id: created.id },
       data: { rulesApplied },
@@ -425,6 +510,7 @@ export async function commitImport(input: {
       skippedDuplicate: dupSkipSet.size + userSkipSet.size,
       skippedLocked: lockedSet.size,
       rulesApplied,
+      categorization,
     };
   });
 }

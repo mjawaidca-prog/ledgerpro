@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { Prisma } from '@prisma/client';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
-import { buildRuleTaxSplit } from '@/lib/banking/rule-tax';
+import { applyCategorizationRules, loadActiveCategorizationRules } from '@/lib/banking/categorization-apply';
 export const dynamic = 'force-dynamic';
 
-// POST /api/categorization-rules/apply — run all active rules against unreviewed transactions
+// POST /api/categorization-rules/apply — run all active rules against unreviewed transactions.
+// The matching/stamping engine lives in lib/banking/categorization-apply and
+// is shared with the statement-import commit path (auto-apply on import).
 export async function POST(req: NextRequest) {
   try {
     const { companyId, userId, error } = await requireCompany(req, { requireOnboarding: true, roles: ['owner', 'admin', 'bookkeeper'] });
     if (error) return error;
 
-    const rules = await db.categorizationRule.findMany({
-      where: { companyId, active: true },
-      orderBy: { priority: 'desc' },
-      include: { category: { select: { code: true } } },
-    });
+    const rules = await loadActiveCategorizationRules(db, companyId);
 
     if (rules.length === 0) {
       return NextResponse.json({ data: { matched: 0, message: 'No active rules' } });
@@ -32,69 +29,23 @@ export async function POST(req: NextRequest) {
       where: { companyId, status: 'toreview', categoryId: null },
     });
 
-    let matched = 0;
-    const sampleDescriptions: string[] = [];
+    const { matched } = await applyCategorizationRules(db, {
+      companyId,
+      rules,
+      transactions: unreviewed.map((t) => ({
+        id: t.id,
+        description: t.description,
+        merchant: t.merchant,
+        rawStatementText: t.rawStatementText,
+        amount: Number(t.amount),
+      })),
+    });
 
-    for (const tx of unreviewed) {
-      for (const rule of rules) {
-        let isMatch = false;
-
-        switch (rule.patternType) {
-          case 'merchant_match':
-            isMatch = (tx.merchant?.toLowerCase().trim() || '') === rule.pattern.toLowerCase().trim();
-            break;
-          case 'description_contains': {
-            // Search description + merchant + rawStatementText
-            const searchText = [
-              tx.description || '',
-              tx.merchant || '',
-              tx.rawStatementText || '',
-            ].join(' ').toLowerCase().trim();
-            const searchPattern = rule.pattern.toLowerCase().trim();
-            isMatch = searchText.includes(searchPattern);
-            break;
-          }
-          case 'amount_range': {
-            const txAmt = Math.abs(Number(tx.amount));
-            const min = rule.minAmount ? Number(rule.minAmount) : 0;
-            const max = rule.maxAmount ? Number(rule.maxAmount) : Infinity;
-            isMatch = txAmt >= min && txAmt <= max;
-            break;
-          }
-          case 'regex':
-            try {
-              isMatch = new RegExp(rule.pattern, 'i').test(tx.description);
-            } catch { isMatch = false; }
-            break;
-        }
-
-        if (isMatch) {
-          // Phase 1: a tax-enabled rule also stamps its tax treatment as a
-          // single split, so posting this row splits tax exactly like a
-          // manually split row. Non-tax rules leave splits untouched.
-          const split = buildRuleTaxSplit(rule, { categoryCode: rule.category.code, amount: Number(tx.amount) });
-          await db.transaction.update({
-            where: { id: tx.id },
-            data: {
-              categoryId: rule.categoryId,
-              status: 'categorized',
-              ...(split ? { splits: [split] as unknown as Prisma.InputJsonValue } : {}),
-            },
-          });
-          await db.categorizationRule.update({
-            where: { id: rule.id },
-            data: { matchCount: { increment: 1 }, lastMatchedAt: new Date() },
-          });
-          matched++;
-          break;
-        }
-      }
-
-      // Collect up to 5 sample descriptions for debugging
-      if (matched === 0 && sampleDescriptions.length < 5 && tx.description) {
-        sampleDescriptions.push(tx.description.substring(0, 60));
-      }
-    }
+    // Sample descriptions for debugging when nothing matched (the first
+    // few unreviewed descriptions, as the inline engine used to collect).
+    const sampleDescriptions: string[] = matched === 0
+      ? unreviewed.filter((t) => t.description).slice(0, 5).map((t) => t.description.substring(0, 60))
+      : [];
 
     await auditLog(companyId, userId, 'rules.apply', 'categorization_rule', undefined, { matched, total: totalUnreviewed });
 

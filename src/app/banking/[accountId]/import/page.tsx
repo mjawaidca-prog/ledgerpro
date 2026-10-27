@@ -49,6 +49,7 @@ interface DryRunData {
   duplicates: { rowIndex: number; reason: string; skip: boolean; existing?: { date: string; description: string; amount: number } }[];
   lockedRows: number[];
   ruleHits: { categorized: number; activeRuleCount: number; ruleNames: string[] };
+  categorizationHits: { matched: number; activeRuleCount: number; ruleNames: string[] };
   newRows: number;
   totals: { rowsInFile: number; skippedDuplicate: number; skippedLocked: number; newTransactions: number };
 }
@@ -572,7 +573,11 @@ export default function ImportStatementPage({ params }: { params: { accountId: s
                 <div className="flex justify-between pt-2 border-t border-[var(--border)]"><span className="text-[var(--text-strong)] font-semibold">New transactions</span><span className="font-mono tabular-nums font-bold text-[var(--text-strong)]">{dryRun.totals.newTransactions}</span></div>
               </div>
               <div className="text-xs text-[var(--text-muted)] mt-3">
-                Rules will categorize {dryRun.ruleHits.categorized} of the new rows on the way in. The rest land in the review queue.
+                Rules will categorize {dryRun.ruleHits.categorized + dryRun.categorizationHits.matched} of the new rows on the way in
+                {dryRun.categorizationHits.matched > 0
+                  ? ` (${dryRun.ruleHits.categorized} by bank rules, ${dryRun.categorizationHits.matched} by categorization rules)`
+                  : ''}
+                . The rest land in the review queue.
               </div>
               <button
                 onClick={commit}
