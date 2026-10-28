@@ -27,6 +27,7 @@ import {
   ArrowLeftRight,
   CircleHelp,
   KeyRound,
+  Camera,
 } from 'lucide-react';
 
 interface RailProps {
@@ -43,6 +44,7 @@ const mainNavItems = [
   { href: '/invoices',      label: 'Sales & Invoices',   icon: FileText },
   { href: '/expenses',      label: 'Expenses',           icon: Receipt },
   { href: '/banking',       label: 'Banking',            icon: Building2 },
+  { href: '/receipts',      label: 'Receipts',           icon: Camera },
   { href: '/banking/feeds', label: 'Bank feeds',         icon: Landmark },
   { href: '/journal',       label: 'Journal',            icon: FileText },
   { href: '/payroll',       label: 'Payroll',            icon: Wallet },

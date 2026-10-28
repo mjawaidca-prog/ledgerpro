@@ -377,6 +377,36 @@ export const HELP_ARTICLES: HelpArticle[] = [
     action: { label: 'Open the Payroll page', href: '/payroll' },
   },
   {
+    slug: 'receipt-capture',
+    title: 'Receipt capture',
+    category: 'Banking',
+    summary: 'Photograph or upload a receipt, confirm the merchant, total, and tax it reads, and attach the image to its bank transaction as audit evidence.',
+    keywords: ['receipt', 'photo', 'scan', 'ocr', 'capture', 'evidence', 'attach', 'expense receipt'],
+    sections: [
+      {
+        heading: 'How it works',
+        steps: [
+          'Open Receipts in the main menu and choose Add a receipt — on a phone this opens the camera.',
+          'LedgerPro reads the merchant, date, total, and tax, and suggests a category from your categorization and bank rules.',
+          'Check the suggested fields and correct anything it misread — nothing is used until you confirm it.',
+          'Choose the bank transaction the receipt belongs to and choose Attach & categorize. The transaction is categorized (not posted), and the image stays attached as evidence.',
+          'Post the transaction from Banking whenever you are ready, as usual.',
+        ],
+      },
+      {
+        heading: 'What to know',
+        notes: [
+          'JPEG, PNG, WebP, and PDF receipts up to 5 MB. Text-based PDFs (for example emailed receipts) are read most reliably; a photo of a faded thermal receipt may need the fields typed in.',
+          'iPhone HEIC photos are not supported yet — set the camera to "Most Compatible" (JPEG) or share the receipt as a PDF.',
+          'The total on the receipt is evidence; the amount that categorizes and posts is always the bank transaction amount. If the two differ, the page warns you before you attach.',
+          'Tax is split at posting time by the province on the transaction, the same way rule-categorized rows are handled — recoverable GST/HST goes to your input tax credit account and PST stays in the expense.',
+          'An attached receipt can be detached back to the inbox, but it cannot be deleted while attached — receipts are audit evidence. Unattached receipts can be deleted from the inbox.',
+        ],
+      },
+    ],
+    action: { label: 'Open Receipts', href: '/receipts' },
+  },
+  {
     slug: 'foreign-currency',
     title: 'Work with foreign currencies',
     category: 'Accounting controls',
