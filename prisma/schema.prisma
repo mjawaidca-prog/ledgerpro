@@ -131,6 +131,7 @@ model Company {
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
   bankConnections   BankConnection[]
+  receipts          Receipt[]
 }
 
 enum BusinessType {
@@ -279,6 +280,7 @@ model ChartOfAccount {
   pstRstPayableConfigurations     CompanyTaxConfiguration[] @relation("PstRstPayableAccount")
   taxRoundingConfigurations       CompanyTaxConfiguration[] @relation("TaxRoundingAccount")
   taxClearingConfigurations       CompanyTaxConfiguration[] @relation("TaxClearingAccount")
+  suggestedReceipts               Receipt[]                 @relation("ReceiptSuggestedCategory")
 
   @@unique([companyId, code])
   @@unique([companyId, id])
@@ -459,6 +461,7 @@ model Transaction {
   inflowTransferMatch TransferMatch? @relation("TransferInflow")
   transferMatchId     String? // set by transfer matching engine
   bankFeedTransaction BankFeedTransaction?
+  receipts            Receipt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -485,6 +488,62 @@ enum TxSource {
   ofx
   pdf
   manual
+}
+
+// ─── RECEIPT CAPTURE (Phase 2, item 15) ─────────────────────
+// A photographed / uploaded receipt: the stored file, the OCR-parsed
+// suggestion fields (user-editable; nothing posts from them directly),
+// and the bank transaction it documents. Deleting a transaction SET NULLs
+// the link — the receipt is audit evidence and survives the row.
+enum ReceiptStatus {
+  inbox
+  attached
+  discarded
+}
+
+model Receipt {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  originalFileName String
+  mimeType         String
+  sizeBytes        Int
+  sha256           String
+
+  // Storage: v1 keeps the bytes in Postgres ('db'). A later Supabase
+  // Storage backend writes storageBackend='supabase' + storageKey and
+  // nulls imageData — the read path branches on storageBackend.
+  storageBackend String  @default("db")
+  storageKey     String?
+  imageData      Bytes?
+
+  status ReceiptStatus @default(inbox)
+
+  // OCR / suggestion fields — populated by the extractor + parser, then
+  // confirmed or edited by the user in the Receipts inbox.
+  ocrStatus     String    @default("pending") // pending | done | failed
+  ocrMerchant   String?
+  ocrDate       DateTime?
+  ocrTotal      Decimal?  @db.Decimal(14, 2)
+  ocrSubtotal   Decimal?  @db.Decimal(14, 2)
+  ocrTaxAmount  Decimal?  @db.Decimal(14, 2)
+  ocrRawText    String?
+  ocrConfidence Decimal?  @db.Decimal(5, 2)
+
+  suggestedCategoryId String?
+  suggestedCategory   ChartOfAccount? @relation("ReceiptSuggestedCategory", fields: [suggestedCategoryId], references: [id], onDelete: SetNull)
+  suggestedSource     String? // categorization_rule | bank_rule | manual
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([transactionId])
 }
 
 // ─── TRANSFER MATCHING ──────────────────────────────────────
