@@ -25,7 +25,11 @@ export default function LoginPage() {
     const result = await signIn('credentials', {
       email,
       password,
-      code: step === 'code' ? code : undefined,
+      // Only send the code field on the code step. Passing `code: undefined`
+      // here makes NextAuth serialize it as the literal string "undefined",
+      // which the server treats as a (bad) backup code and rejects the
+      // sign-in before the MFA step can trigger.
+      ...(step === 'code' ? { code } : {}),
       redirect: false,
     });
 
