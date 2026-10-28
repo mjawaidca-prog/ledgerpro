@@ -71,7 +71,11 @@ export const authOptions: NextAuthOptions = {
         }
 
         // ── MFA: a second step after a correct password ──
-        const code = typeof credentials.code === 'string' ? credentials.code.trim() : '';
+        // Some clients serialize an absent code as the literal string
+        // "undefined"/"null" — treat those as no code, so the MFA step
+        // triggers instead of failing as an invalid backup code.
+        const rawCode = typeof credentials.code === 'string' ? credentials.code.trim() : '';
+        const code = rawCode === 'undefined' || rawCode === 'null' ? '' : rawCode;
         if (user.mfaEnabled) {
           if (!code) {
             // The login page catches this and shows the code step. It does
