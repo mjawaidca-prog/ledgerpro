@@ -5,7 +5,7 @@
  * receipt only LINKS it to a bank transaction and hands the UI a split
  * payload for the existing split endpoint (see attachReceipt).
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { db } from '@/lib/db';
 import { accountLockedGuard, closedPeriodGuard } from '@/lib/api-helpers';
 import { makeDedupeKey } from '@/lib/banking/dedupe';
@@ -354,6 +354,54 @@ export async function createExpenseFromReceipt(args: {
     accountName: account.name,
     suggestedSplit: attached?.suggestedSplit ?? null,
   };
+}
+
+// ─── Phone upload links ─────────────────────────────────────────────
+// "Add from phone": the signed-in receipts page mints a short-lived
+// link; the phone opens it and uploads straight into this company's
+// inbox — no sign-in on the phone. The link is upload-only and scoped
+// to one company; only the token's SHA-256 hash is ever stored.
+
+export const RECEIPT_LINK_TTL_MS = 30 * 60 * 1000;
+export const RECEIPT_LINK_MAX_UPLOADS = 100;
+
+const hashLinkToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+export async function createReceiptUploadLink(args: { companyId: string; userId: string }) {
+  // One live link per person + company: minting a new one kills the old.
+  await (db as any).receiptUploadLink.deleteMany({
+    where: { companyId: args.companyId, userId: args.userId },
+  });
+  const token = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + RECEIPT_LINK_TTL_MS);
+  await (db as any).receiptUploadLink.create({
+    data: {
+      companyId: args.companyId,
+      userId: args.userId,
+      tokenHash: hashLinkToken(token),
+      expiresAt,
+    },
+  });
+  return { token, expiresAt };
+}
+
+export async function resolveReceiptUploadLink(token: string) {
+  if (!token || token.length < 20) return null;
+  const link = await (db as any).receiptUploadLink.findUnique({
+    where: { tokenHash: hashLinkToken(token) },
+    include: { company: { select: { name: true } } },
+  });
+  if (!link) return null;
+  if (new Date(link.expiresAt).getTime() <= Date.now()) return null;
+  if (link.uploadsUsed >= RECEIPT_LINK_MAX_UPLOADS) return null;
+  return link;
+}
+
+export async function recordReceiptUploadUse(linkId: string) {
+  await (db as any).receiptUploadLink.update({
+    where: { id: linkId },
+    data: { uploadsUsed: { increment: 1 }, lastUsedAt: new Date() },
+  });
 }
 
 export async function detachReceipt(companyId: string, receiptId: string) {
