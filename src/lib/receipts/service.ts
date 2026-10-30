@@ -10,7 +10,7 @@ import { db } from '@/lib/db';
 import { loadActiveCategorizationRules } from '@/lib/banking/categorization-apply';
 import type { BankRuleLike } from '@/lib/banking/rules';
 import { validateReceiptUpload } from './validate';
-import { extractReceiptText } from './extract';
+import { extractReceiptText, type ExtractedText } from './extract';
 import { parseReceiptText } from './parse';
 import { suggestForReceipt, buildReceiptSplit, type ReceiptSuggestion } from './suggest';
 
@@ -47,13 +47,22 @@ export async function createReceiptFromUpload(args: {
   fileName: string;
   mimeType: string;
   buffer: Buffer;
+  /**
+   * Text read in the user's browser (client-side OCR for photos — see
+   * client-ocr.ts). When present it is parsed directly and the server
+   * never runs its own extraction for this upload.
+   */
+  providedText?: string;
 }) {
   const validation = validateReceiptUpload({ mimeType: args.mimeType, sizeBytes: args.buffer.length });
   if (!validation.ok) throw new Error(validation.error);
 
   const sha256 = createHash('sha256').update(args.buffer).digest('hex');
 
-  const extracted = await extractReceiptText(args.buffer, args.mimeType);
+  const provided = args.providedText?.trim().slice(0, 20000);
+  const extracted: ExtractedText = provided
+    ? { text: provided, method: 'tesseract' }
+    : await extractReceiptText(args.buffer, args.mimeType);
   const parsed = extracted.text ? parseReceiptText(extracted.text) : null;
 
   const company = await db.company.findUnique({

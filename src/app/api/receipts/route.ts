@@ -23,9 +23,11 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/receipts — multipart upload of one receipt (field "file",
- * optional "transactionId"). Stores the file, extracts text, parses the
- * fields, and suggests a category from the company's rules. Nothing is
- * posted to the GL; the receipt lands in the inbox as suggestions.
+ * optional "transactionId", optional "extractedText" carrying text the
+ * browser read from a photo via client-side OCR). Stores the file,
+ * extracts text, parses the fields, and suggests a category from the
+ * company's rules. Nothing is posted to the GL; the receipt lands in
+ * the inbox as suggestions.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -39,12 +41,18 @@ export async function POST(req: NextRequest) {
     }
 
     const buffer = Buffer.from(await (file as File).arrayBuffer());
+    const extractedRaw = form.get('extractedText');
+    const providedText =
+      typeof extractedRaw === 'string' && extractedRaw.trim()
+        ? extractedRaw.slice(0, 20000)
+        : undefined;
     const receipt = await createReceiptFromUpload({
       companyId: companyId!,
       userId: userId!,
       fileName: (file as File).name || 'receipt',
       mimeType: (file as File).type || 'application/octet-stream',
       buffer,
+      providedText,
     });
 
     await auditLog(companyId!, userId!, 'receipt.create', 'receipt', receipt.id, {
