@@ -16,6 +16,7 @@ export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
   { code: '1010', name: 'Business Checking', type: 'asset', subType: 'current_asset', detailType: 'Bank', parentCode: '1000', description: 'Primary operating account' },
   { code: '1020', name: 'Business Savings', type: 'asset', subType: 'current_asset', detailType: 'Savings', parentCode: '1000', description: 'Reserve or savings account' },
   { code: '1030', name: 'Undeposited Funds', type: 'asset', subType: 'current_asset', detailType: 'Undeposited funds', parentCode: '1000' },
+  { code: '1040', name: 'Petty Cash', type: 'asset', subType: 'current_asset', detailType: 'Cash', parentCode: '1000', description: 'Cash on hand' },
   { code: '1100', name: 'Accounts Receivable', type: 'asset', subType: 'current_asset', detailType: 'Accounts receivable' },
   { code: '1200', name: 'Prepaid Expenses', type: 'asset', subType: 'current_asset', detailType: 'Prepaid expenses' },
   { code: '1500', name: 'Furniture & Equipment', type: 'asset', subType: 'fixed_asset', detailType: 'Fixed assets' },
@@ -86,7 +87,7 @@ export const DEFAULT_CHART_OF_ACCOUNTS: readonly DefaultChartAccount[] = [
   { code: '6990', name: 'Miscellaneous Expense', type: 'expense', detailType: 'Other expense' },
 ];
 
-export const FINANCIAL_ACCOUNT_KINDS = ['checking', 'savings', 'creditcard', 'payoutclearing'] as const;
+export const FINANCIAL_ACCOUNT_KINDS = ['checking', 'savings', 'creditcard', 'payoutclearing', 'cash'] as const;
 export type FinancialAccountKind = (typeof FINANCIAL_ACCOUNT_KINDS)[number];
 
 type ChartAccountClient = Pick<typeof db, 'chartOfAccount'>;
@@ -157,6 +158,7 @@ export async function getDefaultFinancialAccountGlCode(
     savings: ['1020', '1010', '1000'],
     creditcard: ['2110', '2000'],
     payoutclearing: ['1030', '1010', '1000'],
+    cash: ['1040', '1000'],
   };
   const preferredCodes = preferredCodesByKind[kind];
   const preferredAccounts = await client.chartOfAccount.findMany({

@@ -7,6 +7,9 @@
  */
 import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
+import { accountLockedGuard, closedPeriodGuard } from '@/lib/api-helpers';
+import { makeDedupeKey } from '@/lib/banking/dedupe';
+import { getDefaultFinancialAccountGlCode } from '@/lib/default-coa';
 import { loadActiveCategorizationRules } from '@/lib/banking/categorization-apply';
 import type { BankRuleLike } from '@/lib/banking/rules';
 import { validateReceiptUpload } from './validate';
@@ -239,6 +242,118 @@ export async function attachReceipt(args: { companyId: string; receiptId: string
     : null;
 
   return { receipt: serializeReceipt(updated), suggestedSplit };
+}
+
+/**
+ * Resolve the account a receipt-created expense is paid from. `paidFrom`
+ * is either a financial account id of this company, or 'cash' — the
+ * company's Cash (petty cash) account, created on first use and linked
+ * to the Petty Cash GL account (1040). Cash purchases have no bank row
+ * to attach to, so without this path they could not be recorded from a
+ * receipt at all.
+ */
+export async function resolveExpenseAccount(companyId: string, paidFrom: string) {
+  const select = { id: true, kind: true, name: true } as const;
+  if (paidFrom && paidFrom !== 'cash') {
+    const account = await db.financialAccount.findFirst({
+      where: { id: paidFrom, companyId, isActive: true },
+      select,
+    });
+    if (!account) throw new Error('That account was not found for this company.');
+    return account;
+  }
+
+  const existing = await db.financialAccount.findFirst({
+    where: { companyId, kind: 'cash', isActive: true },
+    select,
+  });
+  if (existing) return existing;
+
+  const glAccountCode = await getDefaultFinancialAccountGlCode(companyId, 'cash');
+  return db.financialAccount.create({
+    data: { companyId, name: 'Cash', kind: 'cash', glAccountCode: glAccountCode ?? null },
+    select,
+  });
+}
+
+/**
+ * Record a receipt as a NEW expense when there is no bank transaction
+ * to attach it to (cash purchases, or a row the statement import has
+ * not produced). Creates the bank-side transaction on the paid-from
+ * account (a negative row, exactly like an imported purchase), attaches
+ * the receipt to it, and applies the suggested category split — the
+ * same end state as attach + categorize, still unposted: the user
+ * posts it from Banking, which is the moment the GL moves.
+ */
+export async function createExpenseFromReceipt(args: {
+  companyId: string;
+  receiptId: string;
+  paidFrom: string;
+}) {
+  const receipt = await (db as any).receipt.findFirst({
+    where: { id: args.receiptId, companyId: args.companyId },
+    include: { suggestedCategory: { select: { code: true } } },
+  });
+  if (!receipt) return null;
+  if (receipt.transactionId) {
+    throw new Error('This receipt is already attached to a transaction. Detach it first.');
+  }
+  if (receipt.ocrTotal === null || receipt.ocrTotal === undefined) {
+    throw new Error('Add the receipt total before creating the expense.');
+  }
+  if (!receipt.ocrDate) {
+    throw new Error('Add the receipt date before creating the expense.');
+  }
+
+  const date = new Date(receipt.ocrDate);
+  if (await closedPeriodGuard(args.companyId, date)) {
+    throw new Error('The receipt date falls in a closed period.');
+  }
+
+  const account = await resolveExpenseAccount(args.companyId, args.paidFrom);
+  if (await accountLockedGuard(args.companyId, account.id, date)) {
+    throw new Error('That account is locked through the receipt date.');
+  }
+
+  const total = Math.abs(Number(receipt.ocrTotal));
+  const description = receipt.ocrMerchant?.trim() || 'Receipt expense';
+  const tx = await db.transaction.create({
+    data: {
+      companyId: args.companyId,
+      financialAccountId: account.id,
+      date,
+      description,
+      merchant: receipt.ocrMerchant ?? null,
+      amount: -total,
+      dedupeHash: makeDedupeKey({
+        date: date.toISOString().slice(0, 10),
+        amount: -total,
+        description,
+      }),
+    },
+  });
+
+  const attached = await attachReceipt({
+    companyId: args.companyId,
+    receiptId: args.receiptId,
+    transactionId: tx.id,
+  });
+
+  if (attached?.suggestedSplit) {
+    await db.transaction.update({
+      where: { id: tx.id },
+      data: { splits: [attached.suggestedSplit] as any, status: 'categorized' },
+    });
+  }
+
+  return {
+    receipt: attached?.receipt ?? null,
+    transactionId: tx.id,
+    accountId: account.id,
+    accountKind: account.kind,
+    accountName: account.name,
+    suggestedSplit: attached?.suggestedSplit ?? null,
+  };
 }
 
 export async function detachReceipt(companyId: string, receiptId: string) {

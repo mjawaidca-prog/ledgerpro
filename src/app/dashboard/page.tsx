@@ -70,6 +70,7 @@ const accountKindIcons: Record<string, React.ElementType> = {
   savings: Wallet,
   creditcard: CreditCard,
   payoutclearing: Scale,
+  cash: Banknote,
 };
 
 const accountKindColors: Record<string, string> = {
@@ -77,6 +78,7 @@ const accountKindColors: Record<string, string> = {
   savings: '#7c3aed',
   creditcard: '#e0484e',
   payoutclearing: '#d6961f',
+  cash: '#16a063',
 };
 
 const COLORS = ['#1f6feb', '#7c3aed', '#16a063', '#d6961f', '#e0484e', '#0891b2', '#db2777', '#ea580c'];
