@@ -39,6 +39,7 @@ model User {
   mfaBackupCodes     String[] @default([])
 
   memberships              Membership[]
+  receiptUploadLinks       ReceiptUploadLink[]
   auditLogs                AuditLog[]
   notifications            Notification[]
   interCompanyTransactions InterCompanyTransaction[]
@@ -132,6 +133,7 @@ model Company {
   webhookEndpoints  WebhookEndpoint[]
   bankConnections   BankConnection[]
   receipts          Receipt[]
+  receiptUploadLinks ReceiptUploadLink[]
 }
 
 enum BusinessType {
@@ -545,6 +547,28 @@ model Receipt {
 
   @@index([companyId, status])
   @@index([transactionId])
+}
+
+// A short-lived, upload-only link that lets a phone add receipts to one
+// company's inbox without signing in ("Add from phone" on the Receipts
+// page). Only the SHA-256 hash of the token is stored; the raw token is
+// shown once, in the QR/link on the signed-in receipts page.
+model ReceiptUploadLink {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  uploadsUsed Int      @default(0)
+  lastUsedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 // ─── TRANSFER MATCHING ──────────────────────────────────────

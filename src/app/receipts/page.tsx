@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
-import { Camera, FileText, Loader2, Paperclip, Trash2, Unlink, Check } from 'lucide-react';
+import { Camera, FileText, Loader2, Paperclip, Trash2, Unlink, Check, Smartphone, Copy, RefreshCw, X } from 'lucide-react';
+import QRCode from 'qrcode';
 import { RECEIPT_ACCEPT } from '@/lib/receipts/validate';
 import { readReceiptTextInBrowser } from '@/lib/receipts/client-ocr';
 
@@ -67,6 +68,12 @@ export default function ReceiptsPage() {
   const [accounts, setAccounts] = useState<CoaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneUrl, setPhoneUrl] = useState('');
+  const [phoneExpires, setPhoneExpires] = useState('');
+  const [qrSrc, setQrSrc] = useState('');
+  const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<{ message: string; ok: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -97,6 +104,31 @@ export default function ReceiptsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function mintPhoneLink() {
+    setPhoneBusy(true);
+    try {
+      const res = await fetch('/api/receipts/phone-link', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to create the phone link.');
+      const url = `${window.location.origin}/receipt-capture/${json.data.token}`;
+      setPhoneUrl(url);
+      setPhoneExpires(
+        new Date(json.data.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      );
+      setQrSrc(await QRCode.toDataURL(url, { width: 232, margin: 1 }));
+      setCopied(false);
+    } catch (e: any) {
+      setToast({ message: e.message, ok: false });
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
+
+  function openPhone() {
+    setPhoneOpen(true);
+    if (!phoneUrl) void mintPhoneLink();
+  }
 
   async function handleUpload(file: File) {
     setUploading(true);
@@ -163,10 +195,63 @@ export default function ReceiptsPage() {
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
                 {uploading ? 'Reading receipt…' : 'Add a receipt'}
               </Button>
+              <Button variant="secondary" onClick={openPhone}>
+                <Smartphone size={16} /> Add from phone
+              </Button>
               <span className="text-xs text-[var(--text-muted)]">
                 JPEG, PNG, WebP, or PDF, up to 5 MB. iPhone: use “Most Compatible” (JPEG) photos.
               </span>
             </div>
+            {phoneOpen && (
+              <div className="mt-4 flex flex-wrap items-start gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
+                {qrSrc ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={qrSrc} alt="QR code for the phone upload link" className="h-40 w-40 rounded-lg bg-white p-1" />
+                ) : (
+                  <div className="flex h-40 w-40 items-center justify-center">
+                    <Loader2 size={20} className="animate-spin" />
+                  </div>
+                )}
+                <div className="min-w-64 flex-1 space-y-2">
+                  <p className="text-sm font-semibold text-[var(--text-strong)]">Scan with your phone camera</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    The page that opens only uploads receipts to this company — no sign-in on the phone — and the link
+                    stops working at {phoneExpires || '…'} (30 minutes). Making a new link cancels this one.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      readOnly
+                      value={phoneUrl}
+                      onFocus={(e) => e.target.select()}
+                      className="min-w-52 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs text-[var(--text)]"
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(phoneUrl);
+                          setCopied(true);
+                        } catch {
+                          setCopied(false);
+                        }
+                      }}
+                    >
+                      <Copy size={14} /> {copied ? 'Copied' : 'Copy link'}
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={mintPhoneLink} disabled={phoneBusy}>
+                      <RefreshCw size={14} /> New link
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setPhoneOpen(false)}>
+                      <X size={14} /> Close
+                    </Button>
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    New receipts from your phone appear here in the inbox — refresh the list to see them.
+                  </p>
+                </div>
+              </div>
+            )}
             {toast && (
               <p className={`mt-3 text-sm ${toast.ok ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
                 {toast.message}
