@@ -23,6 +23,12 @@ function isPublicPath(pathname: string) {
     // Cron performs its own CRON_SECRET check; it has no dashboard cookie.
     pathname === '/api/plaid/sync-cron' ||
     pathname === '/api/webhooks/deliver-cron' ||
+    // "Add from phone": the capture page and its upload endpoint
+    // authenticate with the short-lived link token (upload-only, one
+    // company) — there is deliberately no session on the phone. The
+    // link-MINTING endpoint (/api/receipts/phone-link) stays protected.
+    pathname.startsWith('/receipt-capture') ||
+    pathname.startsWith('/api/receipts/phone-upload') ||
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||
     pathname.startsWith('/opengraph-image') ||
