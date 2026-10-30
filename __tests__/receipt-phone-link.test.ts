@@ -62,6 +62,13 @@ describe('phone link — migration and schema', () => {
     expect(schema).toMatch(/tokenHash\s+String\s+@unique/);
     expect(schema).toMatch(/receiptUploadLinks\s+ReceiptUploadLink\[\]/);
   });
+
+  test('middleware lets the token pages/endpoints through but NOT the minting endpoint', () => {
+    const middleware = readFileSync(resolve('src/middleware.ts'), 'utf8');
+    expect(middleware).toMatch(/pathname\.startsWith\('\/receipt-capture'\)/);
+    expect(middleware).toMatch(/pathname\.startsWith\('\/api\/receipts\/phone-upload'\)/);
+    expect(middleware).not.toMatch(/startsWith\('\/api\/receipts\/phone-link'\)/);
+  });
 });
 
 describe('phone link — service', () => {
