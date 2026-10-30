@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Camera, FileText, Loader2, Paperclip, Trash2, Unlink, Check } from 'lucide-react';
 import { RECEIPT_ACCEPT } from '@/lib/receipts/validate';
+import { readReceiptTextInBrowser } from '@/lib/receipts/client-ocr';
 
 interface ReceiptRow {
   id: string;
@@ -85,6 +86,14 @@ export default function ReceiptsPage() {
     try {
       const form = new FormData();
       form.set('file', file);
+      if (file.type.startsWith('image/')) {
+        // Read the photo here in the browser and send the text along —
+        // server-side OCR never completes in the serverless environment
+        // (see client-ocr.ts). Failure just means no text is sent; the
+        // upload still proceeds and the receipt lands in the inbox.
+        const text = await readReceiptTextInBrowser(file);
+        if (text) form.set('extractedText', text);
+      }
       const res = await fetch('/api/receipts', { method: 'POST', body: form });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Upload failed.');
