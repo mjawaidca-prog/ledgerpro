@@ -25,7 +25,7 @@ interface FinancialAccount {
   id: string;
   name: string;
   mask: string | null;
-  kind: 'checking' | 'savings' | 'creditcard' | 'payoutclearing';
+  kind: 'checking' | 'savings' | 'creditcard' | 'payoutclearing' | 'cash';
   currency?: string;
   institution?: string;
   currentBalance: number;
@@ -1912,6 +1912,7 @@ export default function BankingPage() {
                     <option value="checking">Chequing</option>
                     <option value="savings">Savings</option>
                     <option value="creditcard">Credit card</option>
+                    <option value="cash">Cash</option>
                   </select>
                 </div>
                 <div className="field">

@@ -35,6 +35,20 @@ interface TxRow {
   account: { name: string };
 }
 
+interface FinAccountRow {
+  id: string;
+  name: string;
+  kind: string;
+}
+
+const FIN_KIND_LABELS: Record<string, string> = {
+  checking: 'Chequing',
+  savings: 'Savings',
+  creditcard: 'Credit card',
+  payoutclearing: 'Payout clearing',
+  cash: 'Cash',
+};
+
 interface CoaRow {
   id: string;
   code: string;
@@ -49,6 +63,7 @@ export default function ReceiptsPage() {
   const [tab, setTab] = useState<'inbox' | 'attached' | 'all'>('inbox');
   const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
   const [transactions, setTransactions] = useState<TxRow[]>([]);
+  const [finAccounts, setFinAccounts] = useState<FinAccountRow[]>([]);
   const [accounts, setAccounts] = useState<CoaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -58,10 +73,11 @@ export default function ReceiptsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [rRes, tRes, cRes] = await Promise.all([
+      const [rRes, tRes, cRes, aRes] = await Promise.all([
         fetch(`/api/receipts?status=${tab}`),
         fetch('/api/bank-transactions?queue=1&limit=200'),
         fetch('/api/coa'),
+        fetch('/api/accounts'),
       ]);
       const rJson = await rRes.json();
       setReceipts(rJson.data ?? []);
@@ -69,6 +85,8 @@ export default function ReceiptsPage() {
       setTransactions((tJson.data?.rows ?? []).filter((t: TxRow) => t.status !== 'reconciled'));
       const cJson = await cRes.json();
       setAccounts(cJson.data ?? []);
+      const aJson = await aRes.json();
+      setFinAccounts(aJson.data ?? []);
     } catch {
       setToast({ message: 'Failed to load receipts.', ok: false });
     } finally {
@@ -185,6 +203,7 @@ export default function ReceiptsPage() {
               key={r.id}
               receipt={r}
               transactions={transactions}
+              finAccounts={finAccounts}
               accounts={accounts}
               onChanged={load}
               notify={(message, ok) => setToast({ message, ok })}
@@ -199,12 +218,14 @@ export default function ReceiptsPage() {
 function ReceiptCard({
   receipt,
   transactions,
+  finAccounts,
   accounts,
   onChanged,
   notify,
 }: {
   receipt: ReceiptRow;
   transactions: TxRow[];
+  finAccounts: FinAccountRow[];
   accounts: CoaRow[];
   onChanged: () => Promise<void>;
   notify: (message: string, ok: boolean) => void;
@@ -215,6 +236,7 @@ function ReceiptCard({
   const [taxAmount, setTaxAmount] = useState(receipt.taxAmount?.toString() ?? '');
   const [categoryId, setCategoryId] = useState(receipt.suggestedCategoryId ?? '');
   const [txId, setTxId] = useState('');
+  const [paidFrom, setPaidFrom] = useState('cash');
   const [busy, setBusy] = useState(false);
 
   const expenseAccounts = accounts.filter((a) => a.type === 'expense' || a.type === 'asset' || a.type === 'liability');
@@ -286,6 +308,38 @@ function ReceiptCard({
       } else {
         notify('Receipt attached. Pick a category for the transaction from Banking.', true);
       }
+      await onChanged();
+    } catch (e: any) {
+      notify(e.message, false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createExpense() {
+    setBusy(true);
+    try {
+      // Persist any edits first so the expense uses the confirmed fields.
+      await patch({
+        merchant: merchant || null,
+        date: date || null,
+        total: total === '' ? null : Number(total),
+        taxAmount: taxAmount === '' ? null : Number(taxAmount),
+        categoryId: categoryId || null,
+      });
+      const res = await fetch(`/api/receipts/${receipt.id}/create-expense`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paidFrom }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Creating the expense failed.');
+      notify(
+        json.data?.suggestedSplit
+          ? 'Expense created and categorized in Banking, with this receipt attached. Post it from Banking when you are ready.'
+          : 'Expense created in Banking with this receipt attached. Categorize and post it from Banking.',
+        true,
+      );
       await onChanged();
     } catch (e: any) {
       notify(e.message, false);
@@ -436,6 +490,32 @@ function ReceiptCard({
                 </span>
               )}
               <span className="text-xs text-[var(--text-muted)]">Receipt total: {money(receipt.total)}</span>
+            </div>
+          )}
+          {receipt.status !== 'attached' && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-dashed border-[var(--border)] pt-3">
+              <span className="text-sm text-[var(--text-muted)]">
+                No bank transaction for this one (for example, paid in cash)?
+              </span>
+              <label className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                Paid from
+              </label>
+              <select className={`${inputCls} max-w-xs`} value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)}>
+                <option value="cash">Cash (petty cash)</option>
+                {finAccounts
+                  .filter((a) => a.kind !== 'cash')
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({FIN_KIND_LABELS[a.kind] ?? a.kind})
+                    </option>
+                  ))}
+              </select>
+              <Button variant="secondary" size="sm" onClick={createExpense} disabled={busy || !date || !total}>
+                <Check size={14} /> Create the expense
+              </Button>
+              {(!date || !total) && (
+                <span className="text-xs text-[var(--text-muted)]">Add a date and a total above first.</span>
+              )}
             </div>
           )}
         </div>
