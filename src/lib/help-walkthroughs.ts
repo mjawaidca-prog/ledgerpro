@@ -56,7 +56,7 @@ export const WALKTHROUGH_ARTICLES: HelpArticle[] = [
         heading: 'Working with more than one company',
         text: 'Prairie Peak Holdings Ltd. owns the building Prairie Peak Renovations works from. Both companies live under the same login, and the company switcher moves between them. Intercompany balances only stay mirrored if every entry is recorded in the right company, so confirm the switcher before you type.',
         notes: [
-          'A fictional sample company with a full quarter of data is available on the Owner plan for practice — explore there before touching your real books.',
+          'Prairie Peak is a fictional training company created for these walkthroughs, with a full quarter of illustrative data.',
         ],
       },
     ],

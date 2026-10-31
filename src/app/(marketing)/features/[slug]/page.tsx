@@ -2,8 +2,17 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import { notFound } from 'next/navigation';
+import { GuideCard } from '@/components/marketing/GuideCard';
 import { StructuredData } from '@/components/seo/StructuredData';
+import { getPublicGuide, type PublicGuide } from '@/lib/guides';
 import { LEDGERPRO_URL, NEXVAR_URL, SEO_FEATURES, SEO_FEATURE_SLUGS } from '@/lib/seo';
+
+const RELATED_GUIDES_BY_FEATURE: Record<string, string[]> = {
+  invoicing: ['create-invoices-and-track-payments', 'enter-bills-and-track-supplier-payments'],
+  'bank-reconciliation': ['import-bank-statement-without-duplicates', 'categorize-and-post-bank-transactions'],
+  'financial-reporting': ['trial-balance-profit-loss-balance-sheet', 'gst-hst-return-lines-101-115'],
+  'canadian-sales-tax': ['gst-hst-return-lines-101-115', 'receipt-capture-small-business'],
+};
 
 type Props = { params: { slug: string } };
 
@@ -40,6 +49,9 @@ export default function FeatureDetailPage({ params }: Props) {
   if (!feature) notFound();
 
   const url = `${LEDGERPRO_URL}/features/${feature.slug}`;
+  const relatedGuides = (RELATED_GUIDES_BY_FEATURE[feature.slug] ?? [])
+    .map((slug) => getPublicGuide(slug))
+    .filter((guide): guide is PublicGuide => Boolean(guide));
   const schema = [
     {
       '@context': 'https://schema.org',
@@ -125,6 +137,25 @@ export default function FeatureDetailPage({ params }: Props) {
           </a>
         </aside>
       </section>
+
+      {relatedGuides.length > 0 && (
+        <section className="mx-auto max-w-6xl px-5 pb-20">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--primary)]">Step-by-step guides</p>
+              <h2 className="mt-2 text-3xl font-extrabold text-[var(--text-strong)]">See this workflow in LedgerPro</h2>
+            </div>
+            <Link href="/guides" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--primary)] no-underline">
+              Browse all guides <ArrowRight size={15} />
+            </Link>
+          </div>
+          <div className="mt-8 grid gap-5 md:grid-cols-2">
+            {relatedGuides.map((guide) => (
+              <GuideCard key={guide.slug} guide={guide} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mx-auto max-w-4xl px-5 pb-20">
         <h2 className="text-center text-3xl font-extrabold text-[var(--text-strong)]">Common questions</h2>
