@@ -1,8 +1,17 @@
+import { WALKTHROUGH_ARTICLES } from './help-walkthroughs';
+
+export type HelpImage = {
+  src: string;
+  alt: string;
+  caption?: string;
+};
+
 export type HelpSection = {
   heading: string;
   text?: string;
   steps?: string[];
   notes?: string[];
+  images?: HelpImage[];
 };
 
 export type HelpArticle = {
@@ -27,7 +36,7 @@ export const HELP_CATEGORIES = [
   'Developer API',
 ] as const;
 
-export const HELP_ARTICLES: HelpArticle[] = [
+const BASE_HELP_ARTICLES: HelpArticle[] = [
   {
     slug: 'about-ledgerpro',
     title: 'About LedgerPro',
@@ -863,3 +872,5 @@ export const HELP_ARTICLES: HelpArticle[] = [
     ],
   },
 ];
+
+export const HELP_ARTICLES: HelpArticle[] = [...BASE_HELP_ARTICLES, ...WALKTHROUGH_ARTICLES];
