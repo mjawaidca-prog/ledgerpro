@@ -157,6 +157,21 @@ export function HelpCenter() {
                           {section.notes.map((note) => <li key={note}>{note}</li>)}
                         </ul>
                       )}
+                      {section.images && section.images.length > 0 && (
+                        <div className="mt-3 space-y-3">
+                          {section.images.map((image) => (
+                            <figure key={image.src} className="overflow-hidden rounded-xl border border-[var(--border)]">
+                              {/* Plain img: help screenshots are static public assets with intrinsic size. */}
+                              <img src={image.src} alt={image.alt} loading="lazy" className="w-full" />
+                              {image.caption && (
+                                <figcaption className="bg-[var(--surface-3)] px-3 py-2 text-xs leading-5 text-[var(--text-muted)]">
+                                  {image.caption}
+                                </figcaption>
+                              )}
+                            </figure>
+                          ))}
+                        </div>
+                      )}
                     </section>
                   ))}
 
