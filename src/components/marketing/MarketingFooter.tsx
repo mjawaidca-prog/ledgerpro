@@ -18,6 +18,7 @@ export function MarketingFooter() {
           <div className="font-semibold text-[var(--text-strong)] mb-3">Product</div>
           <ul className="space-y-2 list-none p-0 m-0">
             <li><Link href="/features" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Features</Link></li>
+            <li><Link href="/guides" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Guides</Link></li>
             <li><Link href="/pricing" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Pricing</Link></li>
             <li><Link href="/register" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Start Free Trial</Link></li>
           </ul>

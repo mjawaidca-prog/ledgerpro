@@ -1,7 +1,7 @@
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
 
-const PUBLIC_MARKETING_PATHS = ['/', '/home', '/features', '/pricing', '/faq', '/about', '/privacy', '/terms'];
+const PUBLIC_MARKETING_PATHS = ['/', '/home', '/features', '/guides', '/pricing', '/faq', '/about', '/privacy', '/terms'];
 
 function isPublicPath(pathname: string) {
   return (
@@ -33,6 +33,11 @@ function isPublicPath(pathname: string) {
     pathname === '/sitemap.xml' ||
     pathname.startsWith('/opengraph-image') ||
     pathname.startsWith('/features/') ||
+    pathname.startsWith('/guides/') ||
+    // Public guide screenshots are fictional Prairie Peak training data and
+    // must be readable by search crawlers and signed-out guide readers. Only
+    // this static help-image prefix is public; the in-product /help stays gated.
+    pathname.startsWith('/help-images/') ||
     PUBLIC_MARKETING_PATHS.includes(pathname)
   );
 }

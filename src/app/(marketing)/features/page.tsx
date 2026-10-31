@@ -3,6 +3,8 @@ import {
   FileText, Receipt, Landmark, Scale, Building2, ShieldCheck,
   ArrowRight, CreditCard, Repeat, BarChart3, Users, Lock,
 } from 'lucide-react';
+import { GuideCard } from '@/components/marketing/GuideCard';
+import { PUBLIC_GUIDES } from '@/lib/guides';
 
 export const metadata = {
   title: 'Accounting Software Features',
@@ -115,7 +117,17 @@ const FEATURE_LINKS: Record<string, string> = {
   Reporting: '/features/financial-reporting',
 };
 
+const FEATURED_GUIDE_SLUGS = [
+  'gst-hst-return-lines-101-115',
+  'import-bank-statement-without-duplicates',
+  'receipt-capture-small-business',
+  'intercompany-loans-and-management-fees',
+];
+
 export default function FeaturesPage() {
+  const featuredGuides = FEATURED_GUIDE_SLUGS.map((slug) => PUBLIC_GUIDES.find((guide) => guide.slug === slug)).filter(
+    (guide): guide is (typeof PUBLIC_GUIDES)[number] => Boolean(guide),
+  );
   return (
     <>
       <section className="max-w-4xl mx-auto px-5 pt-16 pb-10 text-center">
@@ -151,6 +163,23 @@ export default function FeaturesPage() {
                 ))}
               </ul>
             </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-5 pb-20">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--primary)]">Learn by doing</p>
+            <h2 className="mt-2 text-3xl font-extrabold text-[var(--text-strong)]">See the features on a complete set of books</h2>
+          </div>
+          <Link href="/guides" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--primary)] no-underline">
+            Browse all guides <ArrowRight size={15} />
+          </Link>
+        </div>
+        <div className="mt-8 grid gap-5 md:grid-cols-2">
+          {featuredGuides.map((guide) => (
+            <GuideCard key={guide.slug} guide={guide} />
           ))}
         </div>
       </section>

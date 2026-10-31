@@ -1,9 +1,11 @@
 import type { MetadataRoute } from 'next';
+import { PUBLIC_GUIDES, getGuideUrl } from '@/lib/guides';
 import { LEDGERPRO_URL, SEO_FEATURE_SLUGS } from '@/lib/seo';
 
 const staticRoutes = [
   { path: '', priority: 1, changeFrequency: 'weekly' as const },
   { path: '/features', priority: 0.9, changeFrequency: 'monthly' as const },
+  { path: '/guides', priority: 0.9, changeFrequency: 'monthly' as const },
   { path: '/pricing', priority: 0.9, changeFrequency: 'monthly' as const },
   { path: '/faq', priority: 0.7, changeFrequency: 'monthly' as const },
   { path: '/about', priority: 0.6, changeFrequency: 'yearly' as const },
@@ -24,6 +26,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified,
       changeFrequency: 'monthly' as const,
       priority: 0.8,
+    })),
+    ...PUBLIC_GUIDES.map((guide) => ({
+      url: getGuideUrl(guide),
+      lastModified,
+      changeFrequency: 'monthly' as const,
+      priority: guide.priority,
     })),
   ];
 }
