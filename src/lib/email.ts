@@ -26,7 +26,7 @@ async function sendWithProvider(options: EmailOptions): Promise<{ success: boole
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'LedgerPro <invoices@ledgerpro.app>',
+        from: 'LedgerPro <invoices@nexvarlab.com>',
         to: options.to,
         subject: options.subject,
         html: options.html,
