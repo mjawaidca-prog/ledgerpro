@@ -46,6 +46,8 @@ export const COMPANY_PURGE_DELEGATES = [
   'journalLine', // via journalEntry.companyId
   'transferMatch', // must precede journalEntry (entries restrict-reference it)
   'journalEntry', // self-ref reversalOfId nulled first
+  'receipt', // references transaction + chartOfAccount (SetNull): before both
+  'receiptUploadLink', // references company + user (global) only
   'transaction',
   'invoiceLineItem', // via invoice.companyId
   'billLineItem', // via bill.companyId
@@ -151,6 +153,13 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
     { delegate: 'transferMatch', run: (tx) => tx.transferMatch.deleteMany(byCompany) },
     { delegate: 'journalEntryUpdate', run: (tx) => tx.journalEntry.updateMany({ where: { companyId }, data: { reversalOfId: null } }) },
     { delegate: 'journalEntry', run: (tx) => tx.journalEntry.deleteMany(byCompany) },
+
+    // Receipt-capture models: Receipt restrict-references nothing, but
+    // its own FKs point at Transaction and ChartOfAccount (both SetNull)
+    // — delete receipts before both parents, links any time before the
+    // company row itself.
+    { delegate: 'receipt', run: (tx) => tx.receipt.deleteMany(byCompany) },
+    { delegate: 'receiptUploadLink', run: (tx) => tx.receiptUploadLink.deleteMany(byCompany) },
 
     { delegate: 'transaction', run: (tx) => tx.transaction.deleteMany(byCompany) },
 

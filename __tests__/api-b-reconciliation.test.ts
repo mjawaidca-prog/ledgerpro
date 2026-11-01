@@ -23,9 +23,15 @@ const seedLines = [
   { glAccountCode: '1010', debit: 0, credit: 200 },   // office payment
 ];
 
+// Due dates are pinned at fixed offsets from the suite's asOf
+// (2026-09-11): inv-1 is exactly 20 days past due ('1-30'), inv-2
+// exactly 100 days past due ('90+'). They were originally seeded
+// relative to Date.now(), which silently drifted as the calendar
+// moved past the pinned asOf — by Nov 2026 inv-1 was not yet due at
+// asOf and landed in 'current', breaking the hand-computed fixture.
 const seedInvoices = [
-  { id: 'inv-1', companyId: 'co-1', customerId: 'c-1', customer: { name: 'Cust A' }, dueDate: new Date(Date.now() - 20 * 86400000), total: 1000, paidAmount: 0, status: 'sent' },
-  { id: 'inv-2', companyId: 'co-1', customerId: 'c-2', customer: { name: 'Cust B' }, dueDate: new Date(Date.now() - 100 * 86400000), total: 500, paidAmount: 200, status: 'overdue' },
+  { id: 'inv-1', companyId: 'co-1', customerId: 'c-1', customer: { name: 'Cust A' }, dueDate: new Date('2026-08-22'), total: 1000, paidAmount: 0, status: 'sent' },
+  { id: 'inv-2', companyId: 'co-1', customerId: 'c-2', customer: { name: 'Cust B' }, dueDate: new Date('2026-06-03'), total: 500, paidAmount: 200, status: 'overdue' },
 ];
 
 const mockJournalFindMany = jest.fn();
