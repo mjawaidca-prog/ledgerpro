@@ -797,6 +797,57 @@ export async function postTransactionToLedger(
   );
 }
 
+// ─── Inter-company guard ───
+
+/**
+ * Thrown when a caller tries to void or edit one side of an inter-company
+ * pair directly. Both sides must be reversed together via voidInterCompany
+ * (Intercompany → Linked Entries); voiding one side alone breaks the
+ * mirror and leaves the group out of balance (see the Nov 3, 2026 incident:
+ * a one-sided void produced a +$6,400 reconciliation break). Routes map
+ * this error to HTTP 409 via its `code` property.
+ */
+export class InterCompanyLinkedEntryError extends Error {
+  code = 'intercompany_linked_entry';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InterCompanyLinkedEntryError';
+  }
+}
+
+export function isInterCompanyLinkedEntryError(e: unknown): e is InterCompanyLinkedEntryError {
+  return (
+    e instanceof InterCompanyLinkedEntryError ||
+    (typeof e === 'object' && e !== null && (e as { code?: unknown }).code === 'intercompany_linked_entry')
+  );
+}
+
+/**
+ * Build the routing error for an IC-linked entry, naming the transaction
+ * reference (e.g. IC-0003) when it can be looked up. If the lookup fails,
+ * the same wording is used without the reference.
+ */
+export async function interCompanyLinkedEntryError(
+  client: { interCompanyTransaction: { findUnique: (args: never) => Promise<{ reference: string } | null> } },
+  interCompanyId: string
+): Promise<InterCompanyLinkedEntryError> {
+  let reference: string | null = null;
+  try {
+    const ic = await client.interCompanyTransaction.findUnique({
+      where: { id: interCompanyId },
+      select: { reference: true },
+    } as never);
+    reference = ic?.reference ?? null;
+  } catch {
+    // The reference is a nicety, not a requirement — fall through without it.
+  }
+  const subject = reference ? `inter-company transaction ${reference}` : 'an inter-company transaction';
+  return new InterCompanyLinkedEntryError(
+    `This entry is one side of ${subject}. It can't be voided or edited on its own — void it from Intercompany → Linked Entries so both sides are reversed together.`
+  );
+}
+
 // ─── Void / reversal ───
 
 /**
@@ -810,6 +861,11 @@ export async function postTransactionToLedger(
  *
  * Throws if the entry doesn't exist or has already been voided; callers are
  * responsible for closedPeriodGuard on the reversal date and for company-scoping.
+ *
+ * Throws InterCompanyLinkedEntryError (code 'intercompany_linked_entry')
+ * before any reversal work when the entry is one side of an inter-company
+ * pair — those must be voided via voidInterCompany so both sides reverse
+ * together.
  */
 export async function voidJournalEntry(
   entryId: string,
@@ -827,6 +883,11 @@ export async function voidJournalEntry(
 
     if (!entry) {
       throw new Error('Journal entry not found');
+    }
+    // Inter-company guard: never reverse one side of a linked pair here.
+    // Both sides are reversed together by voidInterCompany instead.
+    if (entry.interCompanyId != null) {
+      throw await interCompanyLinkedEntryError(tx, entry.interCompanyId);
     }
     if (entry.voidedAt) {
       throw new Error('This journal entry has already been voided');

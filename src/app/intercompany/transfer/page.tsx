@@ -53,6 +53,12 @@ export default function TransferPage() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
+  const [posting, setPosting] = useState(false);
+  // One idempotency key per form submission: generated when the form
+  // mounts and regenerated after each successful post, so a retry of
+  // the SAME submission (double-click, network retry) is deduped by
+  // the API while a genuinely new transfer gets a fresh key.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     async function load() {
@@ -177,7 +183,9 @@ export default function TransferPage() {
   const handlePost = async () => {
     if (amt <= 0) { flash('Enter an amount above zero'); return; }
     if (!fromId || !toId) { flash('Select both companies'); return; }
+    if (posting) return;
 
+    setPosting(true);
     try {
       const res = await fetch('/api/intercompany/transactions', {
         method: 'POST',
@@ -194,6 +202,7 @@ export default function TransferPage() {
           sourceOffsetAccountCode: offsetCode || offsetAcc?.code || '1010',
           targetOffsetAccountCode: targetCode || targetAcc?.code || '1010',
           memo,
+          idempotencyKey,
         }),
       });
       if (!res.ok) {
@@ -202,11 +211,15 @@ export default function TransferPage() {
       }
       const json = await res.json();
       flash(`Posted ${json.data.reference} in both companies`);
-      // Reset form
+      // Reset form — and mint a fresh key so the next transfer is a
+      // new submission, not a replay of this one.
       setAmount('');
       setMemo('');
+      setIdempotencyKey(crypto.randomUUID());
     } catch (e: any) {
       flash(e.message || 'Post failed');
+    } finally {
+      setPosting(false);
     }
   };
 
@@ -366,15 +379,17 @@ export default function TransferPage() {
 
           {/* Actions */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2 }}>
-            <button onClick={handlePost}
+            <button onClick={handlePost} disabled={posting}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 background: 'var(--primary)', color: 'white',
                 border: '0', borderRadius: 'var(--r-md)',
                 padding: '11px 16px', fontFamily: 'var(--font-sans)',
-                fontSize: 'var(--text-sm)', fontWeight: 600, cursor: 'pointer',
+                fontSize: 'var(--text-sm)', fontWeight: 600,
+                cursor: posting ? 'default' : 'pointer',
+                opacity: posting ? 0.7 : 1,
               }}>
-              <Check size={15} /> Post both entries
+              <Check size={15} /> {posting ? 'Posting…' : 'Post both entries'}
             </button>
             <button onClick={() => { setAmount('0.00'); setMemo(''); }}
               style={{
@@ -456,7 +471,7 @@ export default function TransferPage() {
           }}>
             <Info size={15} style={{ color: 'var(--warning)', flex: 'none', marginTop: 2 }} />
             <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text)', margin: 0, lineHeight: 1.5 }}>
-              Both entries post the moment you save. Void one and LedgerPro voids the other — they share a link id and can never drift.
+              Both entries post the moment you save. To void a transfer, go to Intercompany → Linked Entries — both sides are reversed together there, so the pair can never drift.
             </p>
           </div>
         </div>
