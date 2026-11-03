@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ArrowRight, Zap } from 'lucide-react';
+import VoidInterCompany from './VoidInterCompany';
 
 interface Entry {
   id: string;
@@ -10,6 +11,7 @@ interface Entry {
   kind: string;
   memo: string;
   amount: string;
+  currency: string;
   status: 'POSTED' | 'VOIDED' | 'UNMATCHED';
   sourceCompanyName: string;
   targetCompanyName: string;
@@ -47,6 +49,7 @@ export default function EntriesPage() {
         kind: t.kind,
         memo: t.memo || '',
         amount: t.amount,
+        currency: t.currency || 'CAD',
         status: t.status,
         sourceCompanyName: t.link?.companyA?.id === t.sourceCompanyId ? t.link?.companyA?.name : t.link?.companyB?.name,
         targetCompanyName: t.link?.companyA?.id === t.targetCompanyId ? t.link?.companyA?.name : t.link?.companyB?.name,
@@ -98,7 +101,9 @@ export default function EntriesPage() {
       ) : (
         entries.map((t) => {
           const isLinked = t.status === 'POSTED';
-          const dotColor = isLinked ? 'var(--success)' : 'var(--danger)';
+          const isVoided = t.status === 'VOIDED';
+          const dotColor = isLinked ? 'var(--success)' : isVoided ? 'var(--text-muted)' : 'var(--danger)';
+          const statusLabel = isLinked ? `Linked · ${t.reference}` : isVoided ? `Voided · ${t.reference}` : 'Unmatched';
           return (
             <div key={t.id} style={{
               background: 'var(--surface)', border: '1px solid var(--border)',
@@ -120,7 +125,7 @@ export default function EntriesPage() {
                     {money(t.amount)}
                   </span>
                   <span style={{ fontSize: 'var(--text-xs)', color: dotColor, fontWeight: 500 }}>
-                    {isLinked ? `Linked · ${t.reference}` : 'Unmatched'}
+                    {statusLabel}
                   </span>
                 </div>
               </div>
@@ -145,6 +150,13 @@ export default function EntriesPage() {
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text)' }}>{t.targetLine}</span>
                 </div>
               </div>
+              <VoidInterCompany
+                transaction={t}
+                onVoided={(reference) => {
+                  flash(`Voided ${reference} in both companies`);
+                  loadEntries();
+                }}
+              />
             </div>
           );
         })

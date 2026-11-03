@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateApiRequest } from '@/lib/api/auth';
 import { idempotencyContextFrom, withIdempotency } from '@/lib/api/idempotency';
-import { voidJournalEntry } from '@/lib/journal';
+import { voidJournalEntry, isInterCompanyLinkedEntryError } from '@/lib/journal';
 import { closedPeriodGuard } from '@/lib/api-helpers';
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +40,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
     if (/already been voided/i.test(message)) {
       return NextResponse.json({ error: { code: 'already_voided', message } }, { status: 409 });
+    }
+    // Inter-company guard (from lib/journal): one side of a linked pair
+    // can't be voided here — both sides reverse together via the
+    // inter-company void. IC entries are sourceType 'manual', so they pass
+    // the pre-check above and reach the lib guard.
+    if (isInterCompanyLinkedEntryError(err)) {
+      return NextResponse.json({ error: { code: 'intercompany_linked_entry', message } }, { status: 409 });
     }
     console.error('POST /api/v1/journal-entries/[id]/void error:', err);
     return NextResponse.json({ error: { code: 'journal_void_failed', message: message || 'Failed to void journal entry.' } }, { status: 400 });

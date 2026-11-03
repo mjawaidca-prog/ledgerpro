@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { requireCompany, auditLog, closedPeriodGuard } from '@/lib/api-helpers';
-import { voidJournalEntry } from '@/lib/journal';
+import { voidJournalEntry, interCompanyLinkedEntryError, isInterCompanyLinkedEntryError } from '@/lib/journal';
 import { assertNoFiledLock, isFiledPeriodLockedError } from '@/lib/tax/filed-lock';
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +76,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     if (!existing) {
       return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 });
+    }
+
+    // Inter-company guard: one side of a linked pair can't be edited on its
+    // own — both sides are amended together via Intercompany → Linked Entries.
+    // (IC entries carry sourceType 'manual', so the check below can't catch them.)
+    if (existing.interCompanyId != null) {
+      const icError = await interCompanyLinkedEntryError(db, existing.interCompanyId);
+      return NextResponse.json({ error: icError.message, code: icError.code }, { status: 409 });
     }
 
     if (existing.sourceType !== 'manual') {
@@ -214,6 +222,13 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 });
     }
 
+    // Inter-company guard: one side of a linked pair can't be voided on its
+    // own — both sides are reversed together via Intercompany → Linked Entries.
+    if (existing.interCompanyId != null) {
+      const icError = await interCompanyLinkedEntryError(db, existing.interCompanyId);
+      return NextResponse.json({ error: icError.message, code: icError.code }, { status: 409 });
+    }
+
     if (existing.voidedAt) {
       return NextResponse.json({ error: 'This journal entry has already been voided' }, { status: 409 });
     }
@@ -252,6 +267,11 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     return NextResponse.json({ data: { voided: true, id: params.id, reversalId: reversal.id } });
   } catch (error: any) {
+    // Defense in depth: if the lib-level IC guard fires (e.g. the entry was
+    // linked between the check above and the void), surface it as a 409.
+    if (isInterCompanyLinkedEntryError(error)) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    }
     console.error('DELETE /api/journal/[id] error:', error);
     return NextResponse.json({ error: error.message || 'Failed to void journal entry' }, { status: 500 });
   }

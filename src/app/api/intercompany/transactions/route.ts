@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
       targetOffsetAccountCode,
       memo,
       fxRate,
+      idempotencyKey,
     } = body as {
       sourceCompanyId: string;
       targetCompanyId: string;
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
       targetOffsetAccountCode: string;
       memo?: string;
       fxRate?: string;
+      idempotencyKey?: string;
     };
 
     if (!sourceCompanyId || !targetCompanyId || !kind || !date || !amount) {
@@ -45,20 +47,55 @@ export async function POST(req: NextRequest) {
     }
 
     const entryDate = new Date(date);
+
+    // Idempotency: a retried submission (double-click, network retry)
+    // carries the same key as the original — return the transaction
+    // that was already posted instead of posting a duplicate pair.
+    if (idempotencyKey) {
+      const existing = await db.interCompanyTransaction.findUnique({
+        where: { idempotencyKey },
+      });
+      if (existing) {
+        return NextResponse.json({ data: existing }, { status: 200 });
+      }
+    }
+
     const guardError = await closedPeriodGuard(companyId, entryDate);
     if (guardError) return guardError;
 
-    const ic = await postInterCompany(userId!, {
-      sourceCompanyId,
-      targetCompanyId,
-      kind,
-      date: entryDate,
-      amount: new Prisma.Decimal(amount),
-      sourceOffsetAccountCode,
-      targetOffsetAccountCode,
-      memo,
-      fxRate: fxRate ? new Prisma.Decimal(fxRate) : undefined,
-    });
+    let ic;
+    try {
+      ic = await postInterCompany(userId!, {
+        sourceCompanyId,
+        targetCompanyId,
+        kind,
+        date: entryDate,
+        amount: new Prisma.Decimal(amount),
+        sourceOffsetAccountCode,
+        targetOffsetAccountCode,
+        memo,
+        fxRate: fxRate ? new Prisma.Decimal(fxRate) : undefined,
+        idempotencyKey: idempotencyKey || undefined,
+      });
+    } catch (postError: any) {
+      // Race: two submissions with the same key arrived together and
+      // the loser's create hit the unique constraint on
+      // idempotencyKey. Its transaction rolled back (no second pair);
+      // return the winner's transaction instead of a 500.
+      if (
+        idempotencyKey &&
+        postError instanceof Prisma.PrismaClientKnownRequestError &&
+        postError.code === 'P2002'
+      ) {
+        const existing = await db.interCompanyTransaction.findUnique({
+          where: { idempotencyKey },
+        });
+        if (existing) {
+          return NextResponse.json({ data: existing }, { status: 200 });
+        }
+      }
+      throw postError;
+    }
 
     await auditLog(companyId, userId, 'intercompany.post', 'InterCompanyTransaction', ic.id, {
       reference: ic.reference,

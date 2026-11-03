@@ -28,6 +28,8 @@ interface JournalDetail {
   description: string;
   sourceType: string;
   sourceId: string | null;
+  interCompanyId: string | null;
+  interCompanyRole: string | null;
   lines: LineItem[];
   totalDebits: number;
   totalCredits: number;
@@ -132,7 +134,7 @@ export default function JournalDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entryDate: editDate, description: editDesc, lines: editLines.map((l) => ({ glAccountCode: l.glAccountCode, description: l.description || undefined, debit: l.debit, credit: l.credit })) }),
       });
-      if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
+      if (!res.ok) { const j = await res.json(); throw new Error(j.error || 'Failed to update entry'); }
       setSuccess('Entry updated. GL balances adjusted.');
       setEditing(false);
       fetchEntry();
@@ -145,7 +147,7 @@ export default function JournalDetailPage() {
     setDeleting(true);
     try {
       const res = await fetch(`/api/journal/${id}`, { method: 'DELETE' });
-      if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
+      if (!res.ok) { const j = await res.json(); throw new Error(j.error || 'Failed to void journal entry'); }
       router.push('/journal');
     } catch (err: any) { setError(err.message); setDeleting(false); }
   }
@@ -157,9 +159,13 @@ export default function JournalDetailPage() {
   };
 
   if (loading) return <AppShell><div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-[var(--text-muted)]" size={24} /></div></AppShell>;
-  if (error || !entry) return <AppShell><div className="text-center py-16 text-[var(--text-muted)]">{error || 'Not found'}</div></AppShell>;
+  // Full-page error only when there is no entry to show; once an entry is
+  // loaded, action errors (e.g. a rejected void) surface via the Alert below
+  // instead of wiping the page.
+  if (!entry) return <AppShell><div className="text-center py-16 text-[var(--text-muted)]">{error || 'Not found'}</div></AppShell>;
 
   const isManual = entry.sourceType === 'manual';
+  const isInterCompany = entry.interCompanyId != null;
 
   return (
     <AppShell>
@@ -180,7 +186,7 @@ export default function JournalDetailPage() {
               </p>
             </div>
           </div>
-          {isManual && !editing && (
+          {isManual && !isInterCompany && !editing && (
             <div className="flex items-center gap-2">
               <Button variant="ghost" onClick={startEdit}><Edit3 size={14} /> Edit</Button>
               <Button variant="ghost" onClick={handleDelete} disabled={deleting} className="text-[var(--danger)] hover:bg-[var(--danger-soft)]">
@@ -327,7 +333,9 @@ export default function JournalDetailPage() {
         </Card>
 
         <p className="text-xs text-[var(--text-faint)] mt-4">
-          {isManual ? 'Manual entries can be edited or voided directly. System-generated entries are locked here for audit integrity.' : `This entry was auto-generated from a ${entry.sourceType}. Void the ${entry.sourceType} itself to reverse it.`}
+          {isInterCompany
+            ? "This entry is one side of an inter-company pair. It can't be edited or voided on its own — void it from Intercompany → Linked Entries so both sides are reversed together."
+            : isManual ? 'Manual entries can be edited or voided directly. System-generated entries are locked here for audit integrity.' : `This entry was auto-generated from a ${entry.sourceType}. Void the ${entry.sourceType} itself to reverse it.`}
         </p>
       </div>
     </AppShell>

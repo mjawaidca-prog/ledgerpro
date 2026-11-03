@@ -26,6 +26,7 @@ export interface InterCompanyPostInput {
   targetOffsetAccountCode: string;  // debited in target (bank / expense)
   memo?: string;
   fxRate?: Prisma.Decimal;          // target units per source unit
+  idempotencyKey?: string;          // stored on the record so a retried POST can be deduped
 }
 
 // ─── Helpers ───
@@ -186,6 +187,7 @@ export async function postInterCompany(
         amount,
         fxRate: input.fxRate,
         memo,
+        idempotencyKey: input.idempotencyKey,
         sourceEntryId: sourceEntry.id,
         mirrorEntryId: mirrorEntry.id,
         status: 'POSTED',

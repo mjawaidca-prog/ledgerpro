@@ -1494,6 +1494,7 @@ model InterCompanyTransaction {
   currency        String           @default("CAD")
   fxRate          Decimal?         @db.Decimal(18, 8) // target units per source unit
   memo            String?
+  idempotencyKey  String?          @unique // client-supplied dedupe key; a retried POST returns the original
 
   sourceEntryId String        @unique
   mirrorEntryId String?       @unique

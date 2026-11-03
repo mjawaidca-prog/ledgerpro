@@ -192,7 +192,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Some journal entries are part of inter-company pairs. Void them from the Related Parties section instead — both sides must be reversed together.',
+            "Some journal entries are part of inter-company pairs. They can't be deleted on their own — void them from Intercompany → Linked Entries so both sides are reversed together.",
           linkedEntryIds: linkedEntries.map((e) => e.id),
         },
         { status: 409 }
