@@ -57,13 +57,34 @@ export function CompanySwitcher({
     }
     setLoading(true);
     try {
-      await fetch('/api/companies/switch', {
+      const res = await fetch('/api/companies/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyId }),
       });
-      // Force a full page reload to refresh the JWT with new active company
-      window.location.href = '/';
+      if (!res.ok) {
+        // Switch refused (e.g. membership changed) — stay put rather than
+        // navigating away and masking the failure.
+        setLoading(false);
+        return;
+      }
+      // Refresh the JWT's availableCompanies from the database before
+      // reloading. That list is frozen at sign-in time, so for a company the
+      // user was added to afterwards, AppShell's cookie validation would
+      // otherwise treat the new active-company cookie as a foreign account's
+      // and silently revert the switch on the next page load. (Same pattern
+      // as handleCreateCompany below.)
+      try {
+        await updateSession();
+      } catch {
+        // Non-fatal: the switch cookie is already set; worst case the switch
+        // reverts for a stale-JWT session, as it did before this fix.
+      }
+      // Reload INTO the app. '/' is the public marketing homepage — sending
+      // a signed-in user there on every switch dumps them out of the app and
+      // reads as a sign-out. '/dashboard' re-renders server-side with the
+      // new active-company cookie in place.
+      window.location.href = '/dashboard';
     } catch {
       setLoading(false);
     }
