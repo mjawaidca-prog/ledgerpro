@@ -132,8 +132,22 @@ export default function OnboardingPage() {
     }
   }
 
-  function handleSkip() {
+  async function handleSkip() {
+    // Skipping the optional steps (bank connection, invoice template) still
+    // completes onboarding — the company must not land on the dashboard in
+    // the "setup incomplete" state, which blocks creating/editing
+    // transactions (enforced via onboardingComplete in api-helpers/AppShell).
+    // Persist the same completion flag handleComplete sets, reusing the
+    // form state already saved at step 0. If the save itself fails, still
+    // let the user through — "Skip" is an escape hatch, and setup can be
+    // finished later from Settings.
+    try {
+      await saveCompanyDetails(true);
+    } catch {
+      // Intentionally ignored: skipping must never trap the user here.
+    }
     router.push('/dashboard');
+    router.refresh();
   }
 
   return (
