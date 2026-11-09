@@ -27,7 +27,7 @@ export function OverviewClient() {
   return (
     <div>
       {data.bankFeedPilot?.pilotGated && (
-        <div className="mb-4 px-4 py-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text)]"><strong>Bank feeds — pilot mode.</strong> {data.bankFeedPilot.label} Plan policy stays Pro / Enterprise / Owner only.</div>
+        <div className="mb-4 px-4 py-3 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-sm text-[var(--text)]"><strong>Bank feeds.</strong> {data.bankFeedPilot.label} Plan policy stays Pro / Enterprise / Owner only.</div>
       )}
       <p className="text-xs text-[var(--text-muted)] mb-4">As of {fmtDateTime(data.asOf)} · every card names its unit — subscription counts are per company, never per person.</p>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
