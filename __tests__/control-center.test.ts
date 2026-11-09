@@ -129,8 +129,12 @@ describe('CC-3 follow-up workflow', () => {
 });
 
 describe('CC bank-feed pilot banner (read-only mirror)', () => {
-  test('production + allowlist -> pilot gated with count', () => {
+  test('production + allowlist (pilot mode not re-armed) -> open, not gated', () => {
     const m = bankFeedPilotMode({ PLAID_ENV: 'production', BANK_FEED_PILOT_COMPANY_IDS: 'a,b' } as any);
+    expect(m.pilotGated).toBe(false); expect(m.label).toContain('open to all customers');
+  });
+  test('production + pilot mode re-armed -> pilot gated with count', () => {
+    const m = bankFeedPilotMode({ PLAID_ENV: 'production', BANK_FEED_PILOT_MODE: 'true', BANK_FEED_PILOT_COMPANY_IDS: 'a,b' } as any);
     expect(m.pilotGated).toBe(true); expect(m.label).toContain('2 companies');
   });
   test('global stop -> pilot gated', () => {

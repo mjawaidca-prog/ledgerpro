@@ -3,8 +3,19 @@ import { plaidAmountToLedger } from '@/lib/bank-feed/plaid-client';
 describe('BF-5 production pilot boundary', () => {
   const saved = { ...process.env };
   afterEach(() => { process.env = { ...saved }; });
-  test('production is closed by default and only selected companies pass', () => {
-    process.env.PLAID_ENV = 'production'; delete process.env.BANK_FEED_PILOT_COMPANY_IDS;
+  test('production is open by default — the allow-list alone no longer gates', () => {
+    process.env.PLAID_ENV = 'production'; delete process.env.BANK_FEED_PILOT_MODE;
+    delete process.env.BANK_FEED_PILOT_COMPANY_IDS; delete process.env.BANK_FEEDS_DISABLED;
+    expect(bankFeedPilotAllowed('a')).toBe(true);
+    expect(bankFeedPilotAllowed('c')).toBe(true);
+    // An allow-list on its own is inert since the 2026-11-09 launch —
+    // it only takes effect when pilot mode is explicitly re-armed.
+    process.env.BANK_FEED_PILOT_COMPANY_IDS = 'a, b';
+    expect(bankFeedPilotAllowed('c')).toBe(true);
+  });
+  test('pilot mode re-arms the allow-list, and the global stop overrides all', () => {
+    process.env.PLAID_ENV = 'production'; process.env.BANK_FEED_PILOT_MODE = 'true';
+    delete process.env.BANK_FEEDS_DISABLED; delete process.env.BANK_FEED_PILOT_COMPANY_IDS;
     expect(bankFeedPilotAllowed('a')).toBe(false);
     process.env.BANK_FEED_PILOT_COMPANY_IDS = 'a, b';
     expect(bankFeedPilotAllowed('a')).toBe(true); expect(bankFeedPilotAllowed('c')).toBe(false);
