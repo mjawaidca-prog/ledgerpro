@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { requirePlatformAdmin } from '@/lib/platform/auth';
+import { isOwnerPlan } from '@/lib/plans';
 export const dynamic = 'force-dynamic';
 
 // GET /api/subscriptions — get current subscription for the company
@@ -39,6 +41,19 @@ export async function PUT(req: NextRequest) {
     const plan = await db.plan.findUnique({ where: { id: planId } });
     if (!plan) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
+    }
+
+    // The Owner plan is platform-only: a company owner/admin must never be
+    // able to switch their own company onto it. Only a platform admin may
+    // assign it (e.g. to the operator's own companies).
+    if (isOwnerPlan(plan)) {
+      const { error: adminError } = await requirePlatformAdmin();
+      if (adminError) {
+        return NextResponse.json(
+          { error: 'The Owner plan can only be assigned by a platform administrator.' },
+          { status: 403 }
+        );
+      }
     }
 
     // Get current subscription

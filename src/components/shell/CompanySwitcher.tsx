@@ -48,6 +48,13 @@ export function CompanySwitcher({
   }, [open, fetched]);
 
   async function handleSwitch(companyId: string) {
+    // Clicking the already-active company is a no-op: just close the
+    // dropdown. It must NOT run the switch flow — that ends in a full-page
+    // navigation to '/', which is the public marketing home page.
+    if (companyId === activeCompanyId) {
+      setOpen(false);
+      return;
+    }
     setLoading(true);
     try {
       await fetch('/api/companies/switch', {

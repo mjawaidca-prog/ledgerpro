@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
+import { requirePlatformAdmin } from '@/lib/platform/auth';
+import { isOwnerPlan } from '@/lib/plans';
 export const dynamic = 'force-dynamic';
 
 function getStripe(): Stripe | null {
@@ -34,6 +36,20 @@ export async function POST(req: NextRequest) {
     const plan = await db.plan.findUnique({ where: { id: planId } });
     if (!plan) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
+    }
+
+    // The Owner plan is platform-only. This guard must run before the
+    // stripePriceId check: the switch previously failed only incidentally
+    // because the Owner row has no Stripe price — if a price were ever set
+    // on it, checkout (and the webhook applying it) would go through.
+    if (isOwnerPlan(plan)) {
+      const { error: adminError } = await requirePlatformAdmin();
+      if (adminError) {
+        return NextResponse.json(
+          { error: 'The Owner plan can only be assigned by a platform administrator.' },
+          { status: 403 }
+        );
+      }
     }
 
     if (!plan.stripePriceId) {
