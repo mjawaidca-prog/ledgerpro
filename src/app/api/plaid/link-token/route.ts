@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await requireCompany(req, { roles: ['owner'] });
     if (session.error) return session.error;
-    if (!bankFeedPilotAllowed(session.companyId!)) return NextResponse.json({ error: 'Bank feeds are restricted to the approved production pilot.' }, { status: 403 });
+    if (!bankFeedPilotAllowed(session.companyId!)) return NextResponse.json({ error: 'Bank feeds are not available right now. Please try again later.' }, { status: 403 });
 
     const body = await req.json().catch(() => null);
     const connectionId = typeof body?.connectionId === 'string' && body.connectionId ? body.connectionId : null;

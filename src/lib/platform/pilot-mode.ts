@@ -7,6 +7,7 @@ export function bankFeedPilotMode(env: NodeJS.ProcessEnv = process.env): { pilot
       ? { pilotGated: true, label: 'Bank feeds are not live in production (Plaid is not in production mode).' }
       : { pilotGated: false, label: 'Non-production environment — bank feeds are not pilot-gated here.' };
   }
+  if (env.BANK_FEED_PILOT_MODE !== 'true') return { pilotGated: false, label: 'Bank feeds are open to all customers whose plan includes them.' };
   const allowed = (env.BANK_FEED_PILOT_COMPANY_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   return { pilotGated: true, label: `Bank feeds are in pilot mode: ${allowed.length} compan${allowed.length === 1 ? 'y' : 'ies'} allow-listed.` };
 }
