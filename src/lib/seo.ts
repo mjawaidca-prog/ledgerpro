@@ -63,14 +63,14 @@ export const SEO_FEATURES: Record<string, SeoFeature> = {
     title: 'Bank reconciliation built for clean, reviewable books',
     metaTitle: 'Bank Reconciliation Software for Canadian Businesses | LedgerPro',
     description:
-      'Import bank statements, match transfers, categorize transactions, and reconcile Canadian business accounts in LedgerPro. Direct bank feeds are not live yet — statement import is the supported path today.',
+      'Connect your bank for automatic daily feeds, or import bank statements — match transfers, categorize transactions, and reconcile Canadian business accounts in LedgerPro.',
     eyebrow: 'Bank reconciliation software',
     intro:
       'LedgerPro brings bank and credit-card activity into a controlled accounting workflow. Review suggestions, match transfers between your own accounts, and reconcile to the statement without losing the audit trail.',
     benefits: [
       {
-        title: 'Statement import today; bank feeds coming',
-        body: 'Import CSV, OFX, QFX, and PDF statements for a practical path from bank activity to reviewed books. Direct bank feeds are not live yet — statement import is the supported way to bring activity in.',
+        title: 'Bank feeds and statement import',
+        body: 'Connect your bank and transactions sync in on their own each morning, or import CSV, OFX, QFX, and PDF statements — either way, activity lands in a review-first workflow before it reaches your books.',
       },
       {
         title: 'Transfer and duplicate controls',
@@ -98,7 +98,7 @@ export const SEO_FEATURES: Record<string, SeoFeature> = {
       },
       {
         question: 'Does LedgerPro connect directly to my bank?',
-        answer: 'Not yet. Direct bank feeds are not live yet; today you import CSV, OFX, QFX, or PDF statements instead. Either way LedgerPro uses a review-first workflow — suggested categories and matches can be checked before transactions are posted to the books.',
+        answer: 'Yes. LedgerPro connects directly to your bank — transactions sync in each morning and wait in Review & match for your approval, and nothing posts to the ledger unattended. You can also import CSV, OFX, QFX, or PDF statements instead. Either way LedgerPro uses a review-first workflow — suggested categories and matches can be checked before transactions are posted to the books.',
       },
     ],
   },

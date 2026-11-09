@@ -349,7 +349,7 @@ export default function BankFeedsPage() {
                 <Landmark size={36} className="mx-auto text-[var(--primary)]" />
                 <h2 className="text-xl font-bold">Let transactions arrive on their own</h2>
                 <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                  Bank feeds are not live yet. Today, statement import (CSV, OFX, or a text-based PDF) is the supported way to bring transactions in — use the &ldquo;Import a statement instead&rdquo; button below. When feeds launch, transactions will sync each morning and wait in Review &amp; match — nothing will hit the ledger unattended.
+                  Connect your bank once and transactions arrive on their own — they sync each morning and land in Review &amp; match, waiting for your approval. Nothing posts to the ledger unattended. Prefer files? Statement import (CSV, OFX, or a text-based PDF) works too — use the &ldquo;Import a statement instead&rdquo; button below.
                 </p>
                 <div className="flex justify-center gap-3">
                   <Button variant="primary" onClick={handleConnect}>Connect a bank</Button>
@@ -358,7 +358,7 @@ export default function BankFeedsPage() {
                 <div className="grid grid-cols-3 gap-4 pt-4 border-t max-w-xl mx-auto text-left">
                   {[
                     ['01', 'Authorize once', 'Consent lasts as long as your bank allows, then asks to be renewed'],
-                    ['02', 'Transactions arrive daily', 'When feeds launch: morning sync, rules applied, lands in Review & match'],
+                    ['02', 'Transactions arrive daily', 'Morning sync, rules applied, lands in Review & match'],
                     ['03', 'You still approve', 'Nothing posts to the ledger unattended'],
                   ].map(([n, t, b]) => (
                     <div key={n}>
@@ -369,7 +369,7 @@ export default function BankFeedsPage() {
                   ))}
                 </div>
                 <div className="text-xs text-muted-foreground pt-2 border-t">
-                  What you should know: bank feeds are not live yet and are not billed today · statement import works now · when feeds launch, access will be read-only and credentials will go to your bank, never to LedgerPro.
+                  What you should know: bank feed access is read-only and your credentials go to your bank, never to LedgerPro · statement import works too.
                 </div>
               </div>
             </CardBody>
