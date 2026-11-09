@@ -345,7 +345,7 @@ export default function OnboardingPage() {
                 >
                   <Link2 size={24} className="text-[var(--primary)]" />
                   <span className="text-sm font-semibold text-[var(--text-strong)]">Connect via Plaid</span>
-                  <span className="text-xs text-[var(--text-muted)]">Coming soon</span>
+                  <span className="text-xs text-[var(--text-muted)]">Automatic daily sync</span>
                 </button>
                 <button
                   onClick={() => router.push('/banking')}
