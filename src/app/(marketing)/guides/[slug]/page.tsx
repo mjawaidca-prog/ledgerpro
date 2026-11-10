@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, BookOpenCheck, CheckCircle2, Images } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpenCheck, CheckCircle2, Images, PlayCircle } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { GuideCard } from '@/components/marketing/GuideCard';
 import { StructuredData } from '@/components/seo/StructuredData';
@@ -78,6 +78,21 @@ export default function GuideDetailPage({ params }: Props) {
       inLanguage: 'en-CA',
       about: { '@type': 'SoftwareApplication', name: 'LedgerPro', applicationCategory: 'BusinessApplication' },
     },
+    ...(guide.article.video
+      ? [
+          {
+            '@context': 'https://schema.org',
+            '@type': 'VideoObject',
+            name: guide.article.video.title,
+            description: guide.article.video.description ?? guide.description,
+            url: guide.article.video.url,
+            contentUrl: guide.article.video.url,
+            ...(guide.article.video.duration ? { duration: guide.article.video.duration } : {}),
+            inLanguage: 'en-CA',
+            publisher: organization,
+          },
+        ]
+      : []),
     {
       '@context': 'https://schema.org',
       '@type': 'BreadcrumbList',
@@ -145,6 +160,24 @@ export default function GuideDetailPage({ params }: Props) {
           </aside>
 
           <div className="min-w-0">
+            {guide.article.video && (
+              <section className="mb-10 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-sm)]">
+                <p className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--primary)]">Watch the training video</p>
+                <h2 className="mt-2 text-2xl font-extrabold leading-tight text-[var(--text-strong)]">{guide.article.video.title}</h2>
+                {guide.article.video.description && (
+                  <p className="mt-3 leading-relaxed text-[var(--text-muted)]">{guide.article.video.description}</p>
+                )}
+                <a
+                  href={guide.article.video.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-5 inline-flex items-center gap-2 rounded-md bg-[var(--primary)] px-6 py-3 text-sm font-semibold text-white no-underline hover:bg-[var(--primary-hover)]"
+                >
+                  <PlayCircle size={17} /> Watch on YouTube
+                </a>
+              </section>
+            )}
+
             {guide.article.sections.map((section, sectionIndex) => (
               <section
                 key={section.heading}

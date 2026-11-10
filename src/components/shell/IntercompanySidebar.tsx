@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
-import { ArrowLeftRight, Link2, Scale, GitBranch } from 'lucide-react';
+import { ArrowLeftRight, Link2, Scale, GitBranch, PlayCircle } from 'lucide-react';
 
 const navItems = [
   { href: '/intercompany/transfer',       label: 'New Transfer',  icon: ArrowLeftRight },
@@ -106,8 +106,25 @@ export function IntercompanySidebar() {
         );
       })}
 
+      <a
+        href="https://youtu.be/Y7x5rtv5wH4"
+        target="_blank"
+        rel="noreferrer"
+        className={cn(
+          'flex items-center gap-[10px] px-[10px] py-[9px] border-0 rounded-[var(--r-md)] bg-transparent text-[var(--text)] text-[var(--text-sm)] text-left no-underline',
+          'hover:bg-[var(--surface-2)] hover:text-[var(--text-strong)]'
+        )}
+        style={{
+          marginTop: 'auto',
+          fontFamily: 'var(--font-sans)',
+          transition: 'background var(--dur) var(--ease), color var(--dur) var(--ease)',
+        }}
+      >
+        <PlayCircle size={16} />
+        Watch: Intercompany video
+      </a>
+
       <div style={{
-        marginTop: 'auto',
         borderTop: '1px solid var(--border)',
         paddingTop: 14,
         display: 'flex',

@@ -37,6 +37,11 @@ describe('LedgerPro public SEO guides', () => {
     }
   });
 
+  it('exposes the Episode 7 training video on the intercompany guide', () => {
+    const guide = PUBLIC_GUIDES.find((item) => item.slug === 'intercompany-loans-and-management-fees');
+    expect(guide?.article.video?.url).toBe('https://youtu.be/Y7x5rtv5wH4');
+  });
+
   it('keeps the GST/HST guide as the highest-priority flagship', () => {
     const flagship = PUBLIC_GUIDES.find((guide) => guide.slug === 'gst-hst-return-lines-101-115');
     expect(flagship).toBeDefined();
