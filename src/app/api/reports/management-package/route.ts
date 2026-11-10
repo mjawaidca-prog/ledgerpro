@@ -10,8 +10,9 @@ export async function GET(req: NextRequest) {
     const { companyId, error } = await requireCompany(req);
     if (error) return error;
 
-    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } });
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true, firstFiscalYearEnd: true } });
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+    const fyFirstEnd = company?.firstFiscalYearEnd ?? null;
 
     const { searchParams } = new URL(req.url);
     const startParam = searchParams.get('startDate');
@@ -29,8 +30,8 @@ export async function GET(req: NextRequest) {
       year = yearStart.getFullYear();
       asOfDate = fyEnd < now ? fyEnd : endOfDay(now);
     } else {
-      year = Number(searchParams.get('year') ?? fiscalYearStartFor(fyAnchor, now).getFullYear());
-      const range = fiscalYearRangeForLabel(fyAnchor, year);
+      year = Number(searchParams.get('year') ?? fiscalYearStartFor(fyAnchor, now, fyFirstEnd).getFullYear());
+      const range = fiscalYearRangeForLabel(fyAnchor, year, fyFirstEnd);
       yearStart = range.start;
       fyEnd = range.end;
       asOfDate = fyEnd < now ? fyEnd : endOfDay(now);

@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { getServerSession } from '@/lib/auth';
 import { createCompanyForUser } from '@/lib/create-company';
-import { derivedFiscalYearEnd } from '@/lib/fiscal-year';
+import { derivedFiscalYearEnd, firstFiscalYearOf, validateFiscalYearEnd } from '@/lib/fiscal-year';
 export const dynamic = 'force-dynamic';
 
 // GET — list companies for the current user (with full details for settings)
@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
         legalName: m.company.legalName,
         fiscalYearStart: m.company.fiscalYearStart,
         fiscalYearEnd: m.company.fiscalYearEnd,
+        firstFiscalYearEnd: m.company.firstFiscalYearEnd,
         businessType: m.company.businessType,
         businessNumber: m.company.businessNumber,
         gstNumber: m.company.gstNumber,
@@ -153,25 +154,62 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    // Convert date strings
-    if (data.fiscalYearStart && typeof data.fiscalYearStart === 'string') {
-      data.fiscalYearStart = new Date(data.fiscalYearStart);
-    }
-    if (data.fiscalYearEnd && typeof data.fiscalYearEnd === 'string') {
-      data.fiscalYearEnd = new Date(data.fiscalYearEnd);
-    }
-
-    // Phase 0 (P0-5): fiscalYearEnd is DERIVED from fiscalYearStart
-    // (start + 1 year − 1 day), never an independent value. Settings used
-    // to let the two be edited separately, so they drifted apart (start
-    // Oct 2, end Dec 31) and every surface computed a different year.
-    // Re-derive on every save that touches either field; this also
-    // self-heals companies whose stored end is already wrong.
-    if (data.fiscalYearStart || data.fiscalYearEnd) {
-      const startForDerivation: Date = data.fiscalYearStart
-        ?? (await db.company.findUnique({ where: { id: companyId }, select: { fiscalYearStart: true } }))?.fiscalYearStart;
-      if (startForDerivation) {
-        data.fiscalYearEnd = new Date(`${derivedFiscalYearEnd(startForDerivation)}T00:00:00.000Z`);
+    // ── Fiscal year: derived end + manual first-year end ──
+    // Phase 0 (P0-5): fiscalYearEnd was DERIVED from fiscalYearStart
+    // (start + 1 year − 1 day) on every save, never an independent value,
+    // so the two could never drift apart (the Dec 29/30 bug).
+    // Nov 2026: a company may instead set an explicit FIRST fiscal year
+    // end (Company.firstFiscalYearEnd) — a first year shorter or longer
+    // than 12 months (e.g. incorporated Jul 28, 2026, year-end Jul 31).
+    // Rules enforced here:
+    //  - An explicit end (firstFiscalYearEnd, or fiscalYearEnd sent
+    //    without it — the onboarding form's editable end) is validated
+    //    (on/after the start, at most 371 days) and stored;
+    //    fiscalYearEnd mirrors it so display surfaces show the true end.
+    //  - Choosing exactly the derived end clears the manual value.
+    //  - firstFiscalYearEnd: null clears it explicitly.
+    //  - With no explicit end in the save, the end is re-derived as
+    //    before; an existing manual end survives a start change only if
+    //    it is still valid for the new start.
+    const fiscalTouched = body.fiscalYearStart !== undefined
+      || body.fiscalYearEnd !== undefined
+      || body.firstFiscalYearEnd !== undefined;
+    if (fiscalTouched) {
+      const current = await db.company.findUnique({
+        where: { id: companyId },
+        select: { fiscalYearStart: true, firstFiscalYearEnd: true },
+      });
+      const startDate: Date | undefined = data.fiscalYearStart
+        ? new Date(data.fiscalYearStart)
+        : current?.fiscalYearStart;
+      if (startDate) {
+        const startYmd = startDate.toISOString().slice(0, 10);
+        const derivedEndYmd = derivedFiscalYearEnd(startDate);
+        const explicitEndRaw = body.firstFiscalYearEnd !== undefined ? body.firstFiscalYearEnd : body.fiscalYearEnd;
+        if (explicitEndRaw === null && body.firstFiscalYearEnd !== undefined) {
+          data.firstFiscalYearEnd = null;
+          data.fiscalYearEnd = new Date(`${derivedEndYmd}T00:00:00.000Z`);
+        } else if (explicitEndRaw !== undefined && explicitEndRaw !== null && explicitEndRaw !== '') {
+          const endYmd = String(explicitEndRaw).slice(0, 10);
+          const problem = validateFiscalYearEnd(startYmd, endYmd);
+          if (problem) {
+            return NextResponse.json({ error: problem }, { status: 400 });
+          }
+          data.firstFiscalYearEnd = endYmd === derivedEndYmd
+            ? null
+            : new Date(`${endYmd}T00:00:00.000Z`);
+          data.fiscalYearEnd = new Date(`${endYmd}T00:00:00.000Z`);
+        } else {
+          const existingFirst = firstFiscalYearOf(startDate, current?.firstFiscalYearEnd ?? null);
+          if (existingFirst && !validateFiscalYearEnd(startYmd, existingFirst.end)) {
+            data.firstFiscalYearEnd = new Date(`${existingFirst.end}T00:00:00.000Z`);
+            data.fiscalYearEnd = new Date(`${existingFirst.end}T00:00:00.000Z`);
+          } else {
+            if (current?.firstFiscalYearEnd) data.firstFiscalYearEnd = null;
+            data.fiscalYearEnd = new Date(`${derivedEndYmd}T00:00:00.000Z`);
+          }
+        }
+        data.fiscalYearStart = startDate;
       }
     }
 

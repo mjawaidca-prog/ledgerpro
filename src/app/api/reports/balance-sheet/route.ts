@@ -57,13 +57,13 @@ function buildSubSection(accounts: AccountLine[]): SubSection {
 
 async function buildBalanceSheet(companyId: string, asOfDate: Date) {
   const [company, accounts, incomeExpenseAccounts, activity] = await Promise.all([
-    db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } }),
+    db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true, firstFiscalYearEnd: true } }),
     db.chartOfAccount.findMany({ where: { type: { in: ['asset', 'liability', 'equity'] }, active: true, companyId }, orderBy: { code: 'asc' } }),
     db.chartOfAccount.findMany({ where: { type: { in: ['income', 'expense'] }, active: true, companyId }, select: { code: true, type: true } }),
     getGLActivity(companyId, { to: endOfDay(asOfDate) }),
   ]);
 
-  const fyStart = company ? fiscalYearStartFor(company.fiscalYearStart, asOfDate) : new Date(asOfDate.getFullYear(), 0, 1);
+  const fyStart = company ? fiscalYearStartFor(company.fiscalYearStart, asOfDate, company.firstFiscalYearEnd) : new Date(asOfDate.getFullYear(), 0, 1);
   const yearActivity = await getGLActivity(companyId, { from: fyStart, to: endOfDay(asOfDate) });
   // Phase 0 (P0-2): equity must carry ALL unclosed earnings up to the as-of
   // date, not only the current fiscal year's. Prior-year earnings that were

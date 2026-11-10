@@ -5,6 +5,7 @@ import {
   anchorMonthDay,
   fiscalYearRangeContaining,
   chooseDefaultFiscalYear,
+  firstFiscalYearOf,
 } from '@/lib/fiscal-year';
 export const dynamic = 'force-dynamic';
 
@@ -25,11 +26,14 @@ export async function GET(req: NextRequest) {
 
     const company = await db.company.findUnique({
       where: { id: companyId },
-      select: { fiscalYearStart: true },
+      select: { fiscalYearStart: true, firstFiscalYearEnd: true },
     });
     if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 });
 
     const anchor = anchorMonthDay(company.fiscalYearStart);
+    // Manual first fiscal year (Nov 2026): null unless the owner set an
+    // explicit first-year end that differs from the derived end.
+    const firstYear = firstFiscalYearOf(company.fiscalYearStart, company.firstFiscalYearEnd);
     const todayYmd = new Date().toISOString().slice(0, 10);
 
     const [latestJournal, ieAccounts] = await Promise.all([
@@ -60,12 +64,13 @@ export async function GET(req: NextRequest) {
     const latestJournalYmd = toYmd(latestJournal?.entryDate);
     const latestIncomeExpenseYmd = toYmd(latestIncomeExpense?.entryDate);
 
-    const current = fiscalYearRangeContaining(anchor, todayYmd);
+    const current = fiscalYearRangeContaining(anchor, todayYmd, firstYear);
     const def = chooseDefaultFiscalYear({
       anchor,
       todayYmd,
       latestIncomeExpenseYmd,
       latestJournalYmd,
+      firstYear,
     });
 
     return NextResponse.json({

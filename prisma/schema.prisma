@@ -67,7 +67,8 @@ model Company {
   name               String
   legalName          String?
   fiscalYearStart    DateTime // e.g. 2025-01-01
-  fiscalYearEnd      DateTime? // e.g. 2025-12-31 (auto: +1y -1d, editable)
+  fiscalYearEnd      DateTime? // e.g. 2025-12-31 (display mirror: manual first-year end when set, else auto +1y -1d)
+  firstFiscalYearEnd DateTime? // manual last day of the FIRST fiscal year (short/long first year); null = derive from start
   businessType       BusinessType? // sole_proprietor, partnership, corporation, etc.
   businessNumber     String? // Canada: BN (9 digits)
   gstNumber          String? // GST/HST registration number

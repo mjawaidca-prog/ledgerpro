@@ -13,8 +13,9 @@ export async function GET(req: NextRequest) {
     const startParam = searchParams.get('startDate');
     const endParam = searchParams.get('endDate');
 
-    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true } });
+    const company = await db.company.findUnique({ where: { id: companyId }, select: { name: true, legalName: true, fiscalYearStart: true, firstFiscalYearEnd: true } });
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+    const fyFirstEnd = company?.firstFiscalYearEnd ?? null;
 
     let startDate: Date;
     let endDate: Date;
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
       year = `${startParam} – ${endParam}`;
     } else {
       year = searchParams.get('year') ?? new Date().getFullYear().toString();
-      const range = fiscalYearRangeForLabel(fyAnchor, Number(year));
+      const range = fiscalYearRangeForLabel(fyAnchor, Number(year), fyFirstEnd);
       startDate = range.start;
       endDate = range.end;
     }

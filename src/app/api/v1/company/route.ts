@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
       legalName: true,
       fiscalYearStart: true,
       fiscalYearEnd: true,
+      firstFiscalYearEnd: true,
       businessType: true,
       province: true,
       currency: true,

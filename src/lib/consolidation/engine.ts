@@ -201,7 +201,7 @@ export async function buildConsolidatedReport(opts: BuildOptions): Promise<Conso
     where: { id: { in: companyIds } },
     select: {
       id: true, name: true, legalName: true,
-      fiscalYearStart: true, fiscalYearEnd: true, currency: true,
+      fiscalYearStart: true, fiscalYearEnd: true, firstFiscalYearEnd: true, currency: true,
     },
   });
   const companyById = new Map(companyRows.map((c) => [c.id, c]));
@@ -211,7 +211,7 @@ export async function buildConsolidatedReport(opts: BuildOptions): Promise<Conso
 
   if (!companies.length) throw new Error('No companies found for the selected ids.');
   const parent = companies[0];
-  const parentFy = fiscalYearStartFor(parent.fiscalYearStart, asOfDate);
+  const parentFy = fiscalYearStartFor(parent.fiscalYearStart, asOfDate, parent.firstFiscalYearEnd);
   const parentFyEndMd = fyMonthDay(parent.fiscalYearStart, parent.fiscalYearEnd);
   const groupName = `${parent.legalName || parent.name} Group`;
 
@@ -588,12 +588,12 @@ export async function buildConsolidatedDrilldown(opts: {
 
   const companyRows = await db.company.findMany({
     where: { id: { in: companyIds } },
-    select: { id: true, name: true, fiscalYearStart: true, fiscalYearEnd: true, currency: true },
+    select: { id: true, name: true, fiscalYearStart: true, fiscalYearEnd: true, firstFiscalYearEnd: true, currency: true },
   });
   const companyById = new Map(companyRows.map((c) => [c.id, c]));
   const companies = companyIds.map((id) => companyById.get(id)).filter(Boolean) as NonNullable<(typeof companyRows)[number]>[];
   const parent = companies[0];
-  const parentFy = fiscalYearStartFor(parent.fiscalYearStart, asOfDate);
+  const parentFy = fiscalYearStartFor(parent.fiscalYearStart, asOfDate, parent.firstFiscalYearEnd);
 
   const linkRows = await db.relatedPartyLink.findMany({
     where: { isActive: true, companyAId: { in: companyIds }, companyBId: { in: companyIds } },

@@ -28,12 +28,12 @@ export async function GET(req: NextRequest) {
 
   const company = await db.company.findUniqueOrThrow({
     where: { id: context!.companyId },
-    select: { currency: true, fiscalYearStart: true },
+    select: { currency: true, fiscalYearStart: true, firstFiscalYearEnd: true },
   });
 
   // from defaults to the company's fiscal-year start (the same anchor the
   // dashboard P&L uses).
-  const from = parsedFrom ?? fiscalYearStartFor(company.fiscalYearStart, to);
+  const from = parsedFrom ?? fiscalYearStartFor(company.fiscalYearStart, to, company.firstFiscalYearEnd);
   const report = await buildProfitLoss(context!.companyId, from, to);
 
   return NextResponse.json({

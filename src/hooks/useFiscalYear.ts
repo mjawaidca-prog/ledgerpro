@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { anchorMonthDay, fiscalYearRangeContaining } from '@/lib/fiscal-year';
+import { anchorMonthDay, fiscalYearRangeContaining, firstFiscalYearOf } from '@/lib/fiscal-year';
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
@@ -64,8 +64,9 @@ export function useFiscalYear(): FiscalYearInfo {
       if (!cancelled) {
         if (active?.fiscalYearStart) {
           const anchor = anchorMonthDay(String(active.fiscalYearStart));
+          const firstYear = firstFiscalYearOf(String(active.fiscalYearStart), active.firstFiscalYearEnd ?? null);
           const today = new Date().toISOString().slice(0, 10);
-          const current = fiscalYearRangeContaining(anchor, today);
+          const current = fiscalYearRangeContaining(anchor, today, firstYear);
           setInfo({
             fiscalYearStart: current.start,
             fiscalYearEnd: current.end,

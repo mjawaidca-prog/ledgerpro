@@ -220,7 +220,40 @@ function utcMonthDay(date: Date): { month: number; day: number } {
 }
 
 /** The fiscal-year start that contains `asOfDate`, anchored on the company's configured fiscal year start month/day. */
-export function fiscalYearStartFor(companyFiscalYearStart: Date, asOfDate: Date): Date {
+export function fiscalYearStartFor(
+  companyFiscalYearStart: Date,
+  asOfDate: Date,
+  companyFirstFiscalYearEnd?: Date | null
+): Date {
+  // Manual first fiscal year (Nov 2026): when the company stored an
+  // explicit first-year end, dates inside that first year start at the
+  // company's real start, and later dates anchor on the day after the
+  // manual year-end. Without it, the original anchor rule applies.
+  if (companyFirstFiscalYearEnd) {
+    const { month, day } = utcMonthDay(companyFiscalYearStart);
+    const firstStart = new Date(companyFiscalYearStart.getUTCFullYear(), month, day);
+    const firstEnd = endOfDay(new Date(
+      companyFirstFiscalYearEnd.getUTCFullYear(),
+      companyFirstFiscalYearEnd.getUTCMonth(),
+      companyFirstFiscalYearEnd.getUTCDate()
+    ));
+    if (asOfDate >= firstStart && asOfDate <= firstEnd) return firstStart;
+    if (asOfDate > firstEnd) {
+      const rec = new Date(Date.UTC(
+        companyFirstFiscalYearEnd.getUTCFullYear(),
+        companyFirstFiscalYearEnd.getUTCMonth(),
+        companyFirstFiscalYearEnd.getUTCDate()
+      ));
+      rec.setUTCDate(rec.getUTCDate() + 1);
+      const rMonth = rec.getUTCMonth();
+      const rDay = rec.getUTCDate();
+      const year = asOfDate.getFullYear();
+      const thisYearStart = new Date(year, rMonth, rDay);
+      const fyStartYear = asOfDate < thisYearStart ? year - 1 : year;
+      return new Date(fyStartYear, rMonth, rDay);
+    }
+    // asOfDate before the first year: fall through to the anchor rule.
+  }
   const { month, day } = utcMonthDay(companyFiscalYearStart);
   const year = asOfDate.getFullYear();
   const thisYearStart = new Date(year, month, day);
@@ -239,9 +272,33 @@ export function fiscalYearStartFor(companyFiscalYearStart: Date, asOfDate: Date)
  */
 export function fiscalYearRangeForLabel(
   companyFiscalYearStart: Date,
-  yearLabel: number
+  yearLabel: number,
+  companyFirstFiscalYearEnd?: Date | null
 ): { start: Date; end: Date } {
   const { month, day } = utcMonthDay(companyFiscalYearStart);
+  // Manual first fiscal year (Nov 2026): the year that begins in the
+  // stored start's calendar year is exactly [start, firstFiscalYearEnd];
+  // later years start the day after the manual year-end and end on its
+  // month/day anniversary. Without a manual end, the anchor rule below
+  // applies unchanged.
+  if (companyFirstFiscalYearEnd) {
+    const startYear = companyFiscalYearStart.getUTCFullYear();
+    const endMonth = companyFirstFiscalYearEnd.getUTCMonth();
+    const endDay = companyFirstFiscalYearEnd.getUTCDate();
+    if (yearLabel === startYear) {
+      const start = new Date(yearLabel, month, day);
+      const end = new Date(companyFirstFiscalYearEnd.getUTCFullYear(), endMonth, endDay);
+      return { start, end: endOfDay(end) };
+    }
+    if (yearLabel > startYear) {
+      const rec = new Date(Date.UTC(companyFirstFiscalYearEnd.getUTCFullYear(), endMonth, endDay));
+      rec.setUTCDate(rec.getUTCDate() + 1);
+      const start = new Date(yearLabel, rec.getUTCMonth(), rec.getUTCDate());
+      let end = new Date(yearLabel, endMonth, endDay);
+      if (end <= start) end = new Date(yearLabel + 1, endMonth, endDay);
+      return { start, end: endOfDay(end) };
+    }
+  }
   const start = new Date(yearLabel, month, day);
   const end = new Date(yearLabel + 1, month, day);
   end.setDate(end.getDate() - 1);

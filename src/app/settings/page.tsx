@@ -7,7 +7,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { BUSINESS_TYPES, PROVINCE_OPTIONS } from '@/lib/taxes';
-import { derivedFiscalYearEnd } from '@/lib/fiscal-year';
+import { derivedFiscalYearEnd, validateFiscalYearEnd } from '@/lib/fiscal-year';
 import { activeCompanyFromCompaniesResponse } from '@/lib/active-company';
 import { ArrowLeft, Building2, CreditCard, Users, Save, Loader2, Calendar, Download, Upload, DatabaseBackup, Trash2, AlertTriangle } from 'lucide-react';
 
@@ -19,7 +19,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '', legalName: '', businessType: 'corporation', businessNumber: '', gstNumber: '',
-    province: 'AB', fiscalYearStart: '', fiscalYearEnd: '', currency: 'CAD', locale: 'en-CA', timezone: 'America/Edmonton',
+    province: 'AB', fiscalYearStart: '', fiscalYearEnd: '', firstFiscalYearEnd: '', currency: 'CAD', locale: 'en-CA', timezone: 'America/Edmonton',
   });
   const [message, setMessage] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -59,6 +59,7 @@ export default function SettingsPage() {
             province: comp.province || 'AB',
             fiscalYearStart: comp.fiscalYearStart ? new Date(comp.fiscalYearStart).toISOString().slice(0, 10) : '',
             fiscalYearEnd: comp.fiscalYearEnd ? new Date(comp.fiscalYearEnd).toISOString().slice(0, 10) : '',
+            firstFiscalYearEnd: comp.firstFiscalYearEnd ? new Date(comp.firstFiscalYearEnd).toISOString().slice(0, 10) : '',
             currency: comp.currency || 'CAD', locale: comp.locale || 'en-CA', timezone: comp.timezone || 'America/Edmonton',
           });
         }
@@ -77,9 +78,14 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (!res.ok) {
+        // Surface the server's reason (e.g. the fiscal year-end
+        // 371-day validation) instead of a bare failure.
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || 'Failed');
+      }
       setMessage('Settings saved.');
-    } catch { setMessage('Failed to save.'); }
+    } catch (err: any) { setMessage(err?.message && err.message !== 'Failed' ? err.message : 'Failed to save.'); }
     finally { setSaving(false); }
   }
 
@@ -152,6 +158,12 @@ export default function SettingsPage() {
     }
   }
 
+  // Manual first fiscal year end (Nov 2026): the end field shows the
+  // manual end when one is set, else the derived end. Inline validation
+  // mirrors the API rule (on/after start, at most 371 days).
+  const fyEndShown = form.firstFiscalYearEnd || form.fiscalYearEnd;
+  const fyEndProblem = form.fiscalYearStart && fyEndShown ? validateFiscalYearEnd(form.fiscalYearStart, fyEndShown) : null;
+
   if (loading) return <AppShell companyName="Settings" companyPlan=""><div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-[var(--text-muted)]" size={24} /></div></AppShell>;
 
   return (
@@ -183,11 +195,17 @@ export default function SettingsPage() {
                   <div className="field"><label>GST/HST Number</label><input type="text" className="input" value={form.gstNumber} onChange={e => setForm({...form, gstNumber: e.target.value})} /></div>
                 </div>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="field"><label>Fiscal Year Start</label><input type="date" className="input" value={form.fiscalYearStart} onChange={e => { const start = e.target.value; setForm({...form, fiscalYearStart: start, fiscalYearEnd: start ? derivedFiscalYearEnd(start) : form.fiscalYearEnd}); }} /></div>
-                  {/* Phase 0 (P0-5): year-end is derived from the start (start + 1 year − 1 day) and re-derived again server-side on save — it is shown read-only so the two can never be edited apart again. */}
-                  <div className="field"><label>Fiscal Year End (derived)</label><input type="date" className="input" value={form.fiscalYearEnd} readOnly disabled title="Derived from Fiscal Year Start: start + 1 year − 1 day" /></div>
+                  <div className="field"><label>Fiscal Year Start</label><input type="date" className="input" value={form.fiscalYearStart} onChange={e => { const start = e.target.value; const derived = start ? derivedFiscalYearEnd(start) : ''; setForm({...form, fiscalYearStart: start, fiscalYearEnd: derived || form.fiscalYearEnd, firstFiscalYearEnd: derived}); }} /></div>
+                  {/* Manual first-year end (Nov 2026): defaults to the derived end (start + 1 year − 1 day, the Phase 0 rule) but the owner can set a shorter or longer FIRST fiscal year. Later years then run from the day after this date to its anniversary. Setting it back to the derived date restores automatic behaviour. */}
+                  <div className="field"><label>First Fiscal Year End</label><input type="date" className="input" value={fyEndShown} onChange={e => setForm({...form, firstFiscalYearEnd: e.target.value, fiscalYearEnd: e.target.value})} /></div>
                   <div className="field"><label>Currency</label><select className="input" value={form.currency} onChange={e => setForm({...form, currency: e.target.value})}><option>CAD</option><option>USD</option><option>EUR</option><option>GBP</option></select></div>
                 </div>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {form.firstFiscalYearEnd
+                    ? 'Manual year-end: your first fiscal year ends on this date; later years run from the day after it to its anniversary. Set it back to the automatic date to remove the manual year-end.'
+                    : 'Automatic year-end: the first fiscal year ends one year minus a day after the start. Change the date to set a shorter or longer first fiscal year (up to 371 days).'}
+                </p>
+                {fyEndProblem && <p className="text-xs text-[var(--danger)]">{fyEndProblem}</p>}
                 <Button type="submit" disabled={saving}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Changes</Button>
               </form>
             </CardBody>

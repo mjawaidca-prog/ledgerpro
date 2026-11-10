@@ -87,11 +87,11 @@ export interface BalanceSheetReport {
 export async function buildBalanceSheet(companyId: string, asOf: Date): Promise<BalanceSheetReport> {
   const company = await db.company.findUniqueOrThrow({
     where: { id: companyId },
-    select: { fiscalYearStart: true },
+    select: { fiscalYearStart: true, firstFiscalYearEnd: true },
   });
 
   const activity = await getGLActivity(companyId, { to: endOfDay(asOf) });
-  const fyStart = fiscalYearStartFor(company.fiscalYearStart, asOf);
+  const fyStart = fiscalYearStartFor(company.fiscalYearStart, asOf, company.firstFiscalYearEnd);
   const yearActivity = await getGLActivity(companyId, { from: fyStart, to: endOfDay(asOf) });
 
   const accounts = await db.chartOfAccount.findMany({ where: { active: true, companyId }, orderBy: { code: 'asc' } });

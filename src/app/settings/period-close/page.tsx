@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { format, addYears, subYears } from 'date-fns';
 import { Lock, CheckCircle2, AlertTriangle, Loader2, Calendar } from 'lucide-react';
-import { anchorMonthDay, fiscalYearRangeContaining, fiscalYearMonthDayLabel } from '@/lib/fiscal-year';
+import { anchorMonthDay, fiscalYearRangeContaining, fiscalYearMonthDayLabel, firstFiscalYearOf } from '@/lib/fiscal-year';
 import { activeCompanyFromCompaniesResponse } from '@/lib/active-company';
 
 export default function PeriodClosePage() {
@@ -45,11 +45,13 @@ export default function PeriodClosePage() {
       setCompany(comp);
       setPeriods(perRes.data || []);
 
-      // Default period = current fiscal year (shared definition)
+      // Default period = current fiscal year (shared definition,
+      // honouring a manually-set first fiscal year end when present)
       if (comp?.fiscalYearStart) {
         const anchor = anchorMonthDay(String(comp.fiscalYearStart));
+        const firstYear = firstFiscalYearOf(String(comp.fiscalYearStart), comp.firstFiscalYearEnd ?? null);
         const todayYmd = new Date().toISOString().slice(0, 10);
-        const current = fiscalYearRangeContaining(anchor, todayYmd);
+        const current = fiscalYearRangeContaining(anchor, todayYmd, firstYear);
         setPeriodStart(current.start);
         setPeriodEnd(current.end);
       } else {
@@ -87,12 +89,14 @@ export default function PeriodClosePage() {
   );
 
   const isFuture = new Date(periodStart) > new Date();
-  // Phase 0 (P0-5): the year-end shown here is DERIVED from the start
-  // anchor (day before the start anniversary) — the stored fiscalYearEnd
-  // is no longer an independent value that can disagree with it.
+  // Phase 0 (P0-5): the year-end shown here comes from the shared
+  // definition — derived from the start anchor, unless the owner set a
+  // manual first fiscal year end (Nov 2026), in which case the cycle is
+  // anchored on that end.
   const fyLabel = company?.fiscalYearStart
     ? (() => {
-        const md = fiscalYearMonthDayLabel(anchorMonthDay(String(company.fiscalYearStart)));
+        const firstYear = firstFiscalYearOf(String(company.fiscalYearStart), company.firstFiscalYearEnd ?? null);
+        const md = fiscalYearMonthDayLabel(anchorMonthDay(String(company.fiscalYearStart)), firstYear);
         return `Fiscal Year: ${md.startLabel} — ${md.endLabel}`;
       })()
     : 'Calendar Year';

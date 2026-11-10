@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
 
     const company = await db.company.findUnique({
       where: { id: companyId },
-      select: { name: true, legalName: true, fiscalYearStart: true, currency: true },
+      select: { name: true, legalName: true, fiscalYearStart: true, firstFiscalYearEnd: true, currency: true },
     });
     const currency = company?.currency || 'USD';
 
@@ -134,7 +134,7 @@ export async function GET(req: NextRequest) {
       } else {
         // prior_period: previous period of equal duration
         const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
-        const fyStart = fiscalYearStartFor(fyAnchor, asOfDate);
+        const fyStart = fiscalYearStartFor(fyAnchor, asOfDate, company?.firstFiscalYearEnd ?? null);
         const durationMs = asOfDate.getTime() - fyStart.getTime();
         priorDate = new Date(fyStart.getTime() - 86400000); // day before FY start
       }

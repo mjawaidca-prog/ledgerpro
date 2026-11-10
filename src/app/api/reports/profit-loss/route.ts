@@ -153,9 +153,10 @@ export async function GET(req: NextRequest) {
 
     const company = await db.company.findUnique({
       where: { id: companyId },
-      select: { name: true, legalName: true, fiscalYearStart: true, currency: true },
+      select: { name: true, legalName: true, fiscalYearStart: true, firstFiscalYearEnd: true, currency: true },
     });
     const fyAnchor = company?.fiscalYearStart ?? new Date(new Date().getFullYear(), 0, 1);
+    const fyFirstEnd = company?.firstFiscalYearEnd ?? null;
     const currency = company?.currency || 'USD';
 
     let startDate: Date;
@@ -168,7 +169,7 @@ export async function GET(req: NextRequest) {
       year = `${startParam} – ${endParam}`;
     } else {
       year = searchParams.get('year') ?? new Date().getFullYear().toString();
-      const range = fiscalYearRangeForLabel(fyAnchor, Number(year));
+      const range = fiscalYearRangeForLabel(fyAnchor, Number(year), fyFirstEnd);
       startDate = range.start;
       endDate = range.end;
     }

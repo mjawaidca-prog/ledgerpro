@@ -60,6 +60,7 @@ export async function exportCompanyBundle(companyId: string) {
       legalName: company.legalName,
       fiscalYearStart: company.fiscalYearStart,
       fiscalYearEnd: company.fiscalYearEnd,
+      firstFiscalYearEnd: company.firstFiscalYearEnd,
       businessType: company.businessType,
       businessNumber: company.businessNumber,
       gstNumber: company.gstNumber,
@@ -112,6 +113,7 @@ export async function restoreCompanyBundle(
         name: restoredName || `${bundle.company.name} (Restored)`,
         fiscalYearStart: new Date(bundle.company.fiscalYearStart),
         fiscalYearEnd: bundle.company.fiscalYearEnd ? new Date(bundle.company.fiscalYearEnd) : null,
+        firstFiscalYearEnd: bundle.company.firstFiscalYearEnd ? new Date(bundle.company.firstFiscalYearEnd) : null,
         onboardingComplete: true,
       },
     });
