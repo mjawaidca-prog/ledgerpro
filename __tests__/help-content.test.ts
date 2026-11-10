@@ -14,6 +14,12 @@ describe('LedgerPro help content', () => {
     }
   });
 
+  it('links the Episode 7 training video from the intercompany walkthrough', () => {
+    const intercompany = HELP_ARTICLES.find((article) => article.slug === 'walkthrough-intercompany');
+    expect(intercompany?.video?.url).toBe('https://youtu.be/Y7x5rtv5wH4');
+    expect(intercompany?.video?.title).toContain('Intercompany Transfer');
+  });
+
   it('contains the important product boundaries', () => {
     const boundaries = HELP_ARTICLES.find((article) => article.slug === 'product-boundaries-and-faq');
     const content = JSON.stringify(boundaries).toLowerCase();

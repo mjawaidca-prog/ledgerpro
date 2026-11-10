@@ -438,6 +438,13 @@ export const WALKTHROUGH_ARTICLES: HelpArticle[] = [
       },
     ],
     action: { label: 'Open Related Parties', href: '/intercompany' },
+    video: {
+      title: 'How to Record an Intercompany Transfer in LedgerPro (Both Companies, One Entry)',
+      url: 'https://youtu.be/Y7x5rtv5wH4',
+      duration: 'PT5M22S',
+      description:
+        'Post a $5,000 fund transfer between Prairie Peak Holdings and Prairie Peak Renovations, watch LedgerPro write the mirror entry automatically, void the pair the correct way, and prove the two companies reconcile to $0.00.',
+    },
   },
   {
     slug: 'walkthrough-reports',
