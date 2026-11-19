@@ -12,6 +12,11 @@ import { money, moneySigned } from '@/lib/money';
 import { useRouter } from 'next/navigation';
 import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink, Plus, X, Pencil } from 'lucide-react';
 import { exportChartOfAccounts } from '@/lib/export';
+import { GifiCodePicker } from '@/components/coa/GifiCodePicker';
+import { GifiReadinessPanel } from '@/components/coa/GifiReadinessPanel';
+import { hasValidGifiCode } from '@/lib/gifi';
+import { suggestGifiCodes } from '@/lib/gifi-suggestions';
+import type { GifiReadinessAccountInput } from '@/lib/gifi-readiness';
 import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import type { Column } from '@/components/ui/DataTable';
 
@@ -75,6 +80,10 @@ export default function ChartOfAccountsPage() {
   const [summary, setSummary] = useState<Summary>({ assets: 0, liabilities: 0, equity: 0, income: 0, expenses: 0 });
   const [totalAccounts, setTotalAccounts] = useState(0);
   const [companyName, setCompanyName] = useState('');
+  const [businessType, setBusinessType] = useState<string | null>(null);
+  // Unfiltered ACTIVE accounts for the GIFI readiness panel — the
+  // export's population, unaffected by the list's search/type filters.
+  const [readinessAccounts, setReadinessAccounts] = useState<GifiReadinessAccountInput[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -87,8 +96,12 @@ export default function ChartOfAccountsPage() {
   const [newDetailType, setNewDetailType] = useState('');
   const [newParentCode, setNewParentCode] = useState('');
   const [newDescription, setNewDescription] = useState('');
+  const [newGifiCode, setNewGifiCode] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Non-blocking warnings returned by the API (e.g. a GIFI code whose
+  // statement area fights the account type) — shown after a save.
+  const [notice, setNotice] = useState<string[]>([]);
 
   const [editingAccount, setEditingAccount] = useState<COAEntry | null>(null);
   const [editName, setEditName] = useState('');
@@ -130,8 +143,10 @@ export default function ChartOfAccountsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to save');
+      setNotice(Array.isArray(json.warnings) ? json.warnings : []);
       setEditingAccount(null);
       fetchCOA();
+      fetchReadinessAccounts();
     } catch (e) {
       setEditError(e instanceof Error ? e.message : 'Failed to save');
     } finally { setEditSaving(false); }
@@ -150,13 +165,16 @@ export default function ChartOfAccountsPage() {
           detailType: newDetailType.trim() || null,
           parentCode: newParentCode.trim() || null,
           description: newDescription.trim() || null,
+          gifiCode: newGifiCode || null,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed');
+      setNotice(Array.isArray(json.warnings) ? json.warnings : []);
       setShowNewModal(false);
       resetForm();
       fetchCOA();
+      fetchReadinessAccounts();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Failed to create');
     } finally { setSaving(false); }
@@ -165,6 +183,7 @@ export default function ChartOfAccountsPage() {
   function resetForm() {
     setNewCode(''); setNewName(''); setNewType('expense');
     setNewDetailType(''); setNewParentCode(''); setNewDescription('');
+    setNewGifiCode('');
     setSaveError(null);
   }
 
@@ -187,12 +206,27 @@ export default function ChartOfAccountsPage() {
 
   useEffect(() => { fetchCOA(); }, [fetchCOA]);
 
+  const fetchReadinessAccounts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/coa');
+      if (!res.ok) return;
+      const json = await res.json();
+      setReadinessAccounts(Array.isArray(json.data) ? json.data : []);
+    } catch { /* readiness panel is advisory */ }
+  }, []);
+
+  useEffect(() => { fetchReadinessAccounts(); }, [fetchReadinessAccounts]);
+
   // Phase 0 (P0-1): the heading previously hardcoded a sample company name
   // ("Northwind Trading") regardless of whose chart this is.
   useEffect(() => {
     fetch('/api/companies')
       .then(r => r.json())
-      .then(json => setCompanyName(companyDisplayName(activeCompanyFromCompaniesResponse(json), '')))
+      .then(json => {
+        const active = activeCompanyFromCompaniesResponse(json) as { id: string; name?: string | null; legalName?: string | null; businessType?: string | null } | null;
+        setCompanyName(companyDisplayName(active, ''));
+        setBusinessType(active?.businessType ?? null);
+      })
       .catch(() => {});
   }, []);
 
@@ -251,6 +285,10 @@ export default function ChartOfAccountsPage() {
       ),
     },
     {
+      key: 'gifiCode', header: 'GIFI', sortable: true,
+      render: (row) => <GifiCell code={row.gifiCode} />,
+    },
+    {
       key: 'balance', header: 'Balance', type: 'num', sortable: true, align: 'right',
       render: (row) => {
         // Phase 0 (P0-2): show the SIGN. money() formats with Math.abs by
@@ -300,6 +338,13 @@ export default function ChartOfAccountsPage() {
         <Button variant="secondary" onClick={() => exportChartOfAccounts(accounts)}><Download size={16} /> Export</Button>
         <Button onClick={() => setShowNewModal(true)}><PlusIcon /> New Account</Button>
       </div>
+
+      {/* GIFI readiness worklist (Slice 3) */}
+      <GifiReadinessPanel
+        accounts={readinessAccounts}
+        businessType={businessType}
+        onSaved={() => { fetchCOA(); fetchReadinessAccounts(); }}
+      />
 
       {/* Summary cards */}
       <div className="grid grid-cols-5 gap-4 mb-5">
@@ -351,6 +396,11 @@ export default function ChartOfAccountsPage() {
       </div>
 
       {error && <Alert variant="danger" className="mb-4">{error}</Alert>}
+      {notice.length > 0 && (
+        <Alert variant="warning" className="mb-4">
+          {notice.map((n, i) => <div key={i}>{n}</div>)}
+        </Alert>
+      )}
 
       {/* Grouped account list */}
       <div className="space-y-4">
@@ -389,6 +439,7 @@ export default function ChartOfAccountsPage() {
                       >
                         <span className="font-mono text-[var(--text-muted)] w-[60px]">{parent.code}</span>
                         <span className="font-medium text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{parent.name}</span>
+                        <GifiCell code={parent.gifiCode} />
                         <span className="text-xs text-[var(--text-muted)]">{parent.detailType}</span>
                         <button onClick={(e) => openEdit(parent, e)} className="p-1 rounded hover:bg-[var(--surface-3)] opacity-0 group-hover:opacity-100 transition-opacity">
                           <Pencil size={12} className="text-[var(--text-faint)]" />
@@ -411,6 +462,7 @@ export default function ChartOfAccountsPage() {
                           >
                             <span className="font-mono text-[var(--text-faint)] w-[60px] pl-6">{child.code}</span>
                             <span className="text-[var(--text)] flex-1 group-hover:text-[var(--primary)] transition-colors">{child.name}</span>
+                            <GifiCell code={child.gifiCode} />
                             <span className="text-xs text-[var(--text-muted)]">{child.detailType}</span>
                             <button onClick={(e) => openEdit(child, e)} className="p-1 rounded hover:bg-[var(--surface-3)] opacity-0 group-hover:opacity-100 transition-opacity">
                               <Pencil size={12} className="text-[var(--text-faint)]" />
@@ -478,6 +530,15 @@ export default function ChartOfAccountsPage() {
                 </div>
               </div>
               <div className="field">
+                <label>GIFI Code <span className="text-[var(--text-faint)]">(for CRA T2 export — the account code above is a different number)</span></label>
+                <GifiCodePicker
+                  value={newGifiCode}
+                  onChange={setNewGifiCode}
+                  accountType={newType}
+                  suggestedCodes={suggestGifiCodes({ name: newName, type: newType, detailType: newDetailType || null }).map((s) => s.code)}
+                />
+              </div>
+              <div className="field">
                 <label>Description</label>
                 <input className="input" value={newDescription} onChange={e => setNewDescription(e.target.value)} placeholder="Optional description" />
               </div>
@@ -527,8 +588,13 @@ export default function ChartOfAccountsPage() {
                 )}
               </div>
               <div className="field">
-                <label>GIFI Code</label>
-                <input className="input" value={editGifiCode} onChange={e => setEditGifiCode(e.target.value)} placeholder="e.g. 1000 (for CRA T2 / CaseWare export)" />
+                <label>GIFI Code <span className="text-[var(--text-faint)]">(for CRA T2 export)</span></label>
+                <GifiCodePicker
+                  value={editGifiCode}
+                  onChange={setEditGifiCode}
+                  accountType={editingAccount.type}
+                  suggestedCodes={suggestGifiCodes({ name: editName, type: editingAccount.type, detailType: editDetailType || null, gifiCode: editGifiCode || null }).map((s) => s.code)}
+                />
               </div>
               <div className="field">
                 <label>Description</label>
@@ -552,6 +618,25 @@ export default function ChartOfAccountsPage() {
       )}
     </AppShell>
   );
+}
+
+/**
+ * GIFI cell for the chart list: the code when the account carries a
+ * valid assignable one; an amber flag when it is missing or holds a
+ * legacy invalid value (both export as unmapped).
+ */
+function GifiCell({ code }: { code: string | null }) {
+  if (code && hasValidGifiCode(code)) {
+    return <span className="font-mono text-xs text-[var(--text-muted)]" title={`GIFI ${code}`}>GIFI {code}</span>;
+  }
+  if (code) {
+    return (
+      <span className="font-mono text-xs text-[var(--warning)]" title={`Stored GIFI value "${code}" is not an assignable CRA code — it exports as unmapped`}>
+        GIFI {code} ⚠
+      </span>
+    );
+  }
+  return <span className="text-xs text-[var(--warning)]" title="No GIFI code — this account exports unmapped">No GIFI</span>;
 }
 
 function PlusIcon() {

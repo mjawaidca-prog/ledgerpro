@@ -10,6 +10,8 @@ import { ArrowLeft, Loader2, Printer, Download, ChevronDown, CheckCircle2, Alert
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { parseLocalDate, formatReportPeriod } from '@/lib/reporting';
 import { exportTrialBalance, exportCaseWareTrialBalance, exportTbGifiTrialBalance } from '@/lib/export';
+import { gifiExportChecklist, type GifiReadinessItem } from '@/lib/gifi-readiness';
+import { activeCompanyFromCompaniesResponse } from '@/lib/active-company';
 
 // ── Types ──
 
@@ -80,6 +82,11 @@ export default function TrialBalancePage() {
   const [error, setError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<{ kind: 'ok' | 'warn' | 'error'; text: string } | null>(null);
   const [exportingGifi, setExportingGifi] = useState(false);
+  // Slice 4: pre-export checklist — set when the tb-gifi/1 export is
+  // requested while countable accounts are still uncoded (warn, never
+  // block). Null = no checklist showing.
+  const [gifiChecklist, setGifiChecklist] = useState<GifiReadinessItem[] | null>(null);
+  const [checkingGifi, setCheckingGifi] = useState(false);
   const periodDd = useDropdown(); const compareDd = useDropdown(); const exportDd = useDropdown();
 
   useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) { setAsOf(fy.fiscalYearEnd); setPreset('fy_end'); } }, [fy.loaded, fy.fiscalYearEnd]);
@@ -101,8 +108,7 @@ export default function TrialBalancePage() {
 
   function applyCompare(mode: CompareMode) { setCompareMode(mode); compareDd.setOpen(false); }
 
-  async function handleTbGifiExport() {
-    exportDd.setOpen(false);
+  async function runTbGifiExport() {
     setExportingGifi(true); setExportNotice(null);
     try {
       const { unmappedCount, accountCount } = await exportTbGifiTrialBalance(asOf);
@@ -114,6 +120,39 @@ export default function TrialBalancePage() {
     } catch (err: any) {
       setExportNotice({ kind: 'error', text: err?.message || 'Failed to generate the tb-gifi/1 export.' });
     } finally { setExportingGifi(false); }
+  }
+
+  /**
+   * Slice 4 gate: before the download starts, check the chart's GIFI
+   * readiness (same counting rule as the Chart of Accounts panel). If
+   * countable accounts are uncoded, show the checklist first — warn,
+   * never block: "Export anyway" runs the very same export. An
+   * all-coded chart (and sole proprietors, quiet flow) export
+   * directly with no extra step. If the readiness check itself fails,
+   * fall through to the export — the post-export notice still reports
+   * the unmapped count honestly.
+   */
+  async function handleTbGifiExport() {
+    exportDd.setOpen(false);
+    setGifiChecklist(null);
+    setCheckingGifi(true);
+    try {
+      const [coaRes, companiesRes] = await Promise.all([
+        fetch('/api/coa').then((r) => r.json()).catch(() => null),
+        fetch('/api/companies').then((r) => r.json()).catch(() => null),
+      ]);
+      const accounts = Array.isArray(coaRes?.data) ? coaRes.data : null;
+      const active = activeCompanyFromCompaniesResponse(companiesRes) as { businessType?: string | null } | null;
+      if (accounts) {
+        const checklist = gifiExportChecklist(accounts, active?.businessType);
+        if (checklist.show) {
+          setGifiChecklist(checklist.uncoded);
+          return;
+        }
+      }
+    } catch { /* fall through to the export */ }
+    finally { setCheckingGifi(false); }
+    await runTbGifiExport();
   }
 
   const fetchData = useCallback(async () => {
@@ -194,6 +233,60 @@ export default function TrialBalancePage() {
         <button onClick={() => window.print()} className="flex items-center gap-1.5 border border-[var(--border)] rounded-lg px-3 py-2 text-sm bg-[var(--surface)] hover:border-[var(--border-strong)]"><Printer size={14} className="text-[var(--text-muted)]"/> Print</button>
         <label className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] ml-1"><input type="checkbox" checked={hideZeroBalances} onChange={e => setHideZeroBalances(e.target.checked)}/> Hide zero</label>
       </div>
+
+      {/* Pre-export GIFI checklist (Slice 4) — warn, never block */}
+      {gifiChecklist && (
+        <div className="mb-6 rounded-lg border border-[var(--warning,#d97706)] px-4 py-3 print:hidden">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-[var(--warning,#d97706)]" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-[var(--text-strong)]">
+                {gifiChecklist.length} account{gifiChecklist.length === 1 ? '' : 's'} ha{gifiChecklist.length === 1 ? 's' : 've'} no GIFI code
+              </p>
+              <p className="text-sm text-[var(--text-muted)] mt-0.5">
+                They will be included in the export unmapped and can be mapped during import in Nexvar Tax.
+                Assigning codes now means they arrive already mapped.
+              </p>
+              <ul className="mt-2 space-y-0.5">
+                {gifiChecklist.map((a) => (
+                  <li key={a.code} className="text-sm text-[var(--text)]">
+                    <span className="font-mono text-[var(--text-muted)]">{a.code}</span> — {a.name}
+                    {a.status === 'invalid' && (
+                      <span className="text-[var(--warning,#d97706)]"> (stored code “{a.storedGifiCode}” is not a valid CRA code)</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={() => router.push('/chart-of-accounts')}
+                  className="text-sm font-medium bg-[var(--primary)] text-white px-3.5 py-1.5 rounded-full"
+                >
+                  Review accounts first
+                </button>
+                <button
+                  onClick={() => { setGifiChecklist(null); void runTbGifiExport(); }}
+                  disabled={exportingGifi}
+                  className="text-sm font-medium border border-[var(--border-strong)] px-3.5 py-1.5 rounded-full text-[var(--text)] hover:bg-[var(--surface-3)] disabled:opacity-50"
+                >
+                  {exportingGifi ? 'Exporting…' : 'Export anyway'}
+                </button>
+                <button
+                  onClick={() => setGifiChecklist(null)}
+                  className="text-sm text-[var(--text-muted)] px-2 py-1.5 hover:text-[var(--text-strong)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {checkingGifi && (
+        <div className="flex items-center gap-2 mb-6 text-sm text-[var(--text-muted)] print:hidden">
+          <Loader2 size={14} className="animate-spin" /> Checking GIFI codes before export…
+        </div>
+      )}
 
       {/* Export notice (tb-gifi/1) */}
       {exportNotice && (

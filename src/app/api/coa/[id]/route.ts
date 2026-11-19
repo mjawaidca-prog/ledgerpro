@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
+import { validateGifiCode, gifiTypeWarning } from '@/lib/gifi';
 export const dynamic = 'force-dynamic';
 
 const VALID_SUBTYPES = [
@@ -28,13 +29,25 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ error: 'Invalid subType' }, { status: 400 });
     }
 
+    // GIFI code: when supplied it must be an assignable CRA catalogue
+    // code (or blank/null to clear). This closes the old free-text hole
+    // where a typo was stored and silently exported as unmapped.
+    let gifiUpdate: string | null | undefined;
+    if (gifiCode !== undefined) {
+      const gifi = validateGifiCode(gifiCode);
+      if (!gifi.ok) {
+        return NextResponse.json({ error: gifi.error }, { status: 400 });
+      }
+      gifiUpdate = gifi.code;
+    }
+
     const updated = await db.chartOfAccount.update({
       where: { id: params.id },
       data: {
         name: name !== undefined ? name : undefined,
         detailType: detailType !== undefined ? detailType : undefined,
         subType: subType !== undefined ? subType : undefined,
-        gifiCode: gifiCode !== undefined ? gifiCode : undefined,
+        gifiCode: gifiUpdate,
         description: description !== undefined ? description : undefined,
         active: active !== undefined ? active : undefined,
       },
@@ -42,7 +55,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     await auditLog(companyId, userId, 'coa.update', 'chart_of_account', params.id, { before: existing, after: updated });
 
-    return NextResponse.json({ data: updated });
+    const warning = gifiUpdate ? gifiTypeWarning(gifiUpdate, existing.type) : null;
+
+    return NextResponse.json({ data: updated, ...(warning ? { warnings: [warning] } : {}) });
   } catch (error) {
     console.error('PUT /api/coa/[id] error:', error);
     return NextResponse.json({ error: 'Failed to update account' }, { status: 500 });

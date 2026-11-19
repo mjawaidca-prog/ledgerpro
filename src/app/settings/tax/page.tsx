@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { Badge } from '@/components/ui/Badge';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
+import { GifiReadinessSummaryCard } from '@/components/coa/GifiReadinessSummaryCard';
 
 type Account = { id: string; code: string; name: string; type: string; active: boolean };
 type Registration = {
@@ -226,6 +227,7 @@ export default function TaxSetupPage() {
                     <ul className="list-disc ml-5 text-sm space-y-1">{setup.reviewedPostingReadiness.issues.map((i) => <li key={i.code + i.message}>{i.message}</li>)}</ul></>}
               </CardBody>
             </Card>
+            <GifiReadinessSummaryCard />
           </div>
 
           <Card>

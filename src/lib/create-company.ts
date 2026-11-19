@@ -14,6 +14,7 @@ export async function createCompanyForUser(
   client: CompanyClient,
   userId: string,
   companyName: string,
+  businessType?: 'sole_proprietor' | 'partnership' | 'corporation' | 'nonprofit' | 'other' | null,
 ) {
   const freePlan = await client.plan.findFirst({ where: { name: 'Free Trial' } });
   if (!freePlan) throw new Error('No free trial plan found. Run seed first.');
@@ -22,6 +23,10 @@ export async function createCompanyForUser(
   const company = await client.company.create({
     data: {
       name: companyName,
+      // businessType is usually set later, at onboarding; when a caller
+      // already knows it, storing it here lets the chart seed pick the
+      // matching template (corporation variant) from day one.
+      ...(businessType ? { businessType } : {}),
       fiscalYearStart,
       // Phase 0 (P0-5): end is derived from start from day one, so a new
       // company's two fields can never start out inconsistent.
@@ -53,7 +58,7 @@ export async function createCompanyForUser(
     },
   });
 
-  await ensureDefaultChartOfAccounts(company.id, client as any);
+  await ensureDefaultChartOfAccounts(company.id, client as any, businessType);
 
   return company;
 }

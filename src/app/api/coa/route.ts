@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
 import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
+import { validateGifiCode, gifiTypeWarning } from '@/lib/gifi';
 import { getGLActivity, endOfDay, coaSummaryFromActivity } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const body = await req.json();
-    const { code, name, type, detailType, parentCode, description } = body;
+    const { code, name, type, detailType, parentCode, description, gifiCode } = body;
 
     if (!code || !name || !type) {
       return NextResponse.json({ error: 'Code, name, and type are required' }, { status: 400 });
@@ -83,6 +84,16 @@ export async function POST(req: NextRequest) {
 
     if (!['asset', 'liability', 'equity', 'income', 'expense'].includes(type)) {
       return NextResponse.json({ error: 'Invalid account type' }, { status: 400 });
+    }
+
+    // GIFI code (optional): must be an assignable CRA catalogue code.
+    // Before this, a code could only be typed into the Edit form with no
+    // validation at all, and a typo was stored and silently exported as
+    // unmapped. Reject invalid codes here so the chart only ever holds
+    // codes the tb-gifi/1 export can actually use.
+    const gifi = validateGifiCode(gifiCode);
+    if (!gifi.ok) {
+      return NextResponse.json({ error: gifi.error }, { status: 400 });
     }
 
     // Check for duplicate code
@@ -108,12 +119,20 @@ export async function POST(req: NextRequest) {
         detailType: detailType || null,
         parentCode: parentCode || null,
         description: description || null,
+        gifiCode: gifi.code,
         balance: 0,
         active: true,
       },
     });
 
-    return NextResponse.json({ data: acct }, { status: 201 });
+    // A valid code from the "wrong" statement area saves with a warning,
+    // not a block — contra and clearing accounts are real exceptions.
+    const warning = gifi.code ? gifiTypeWarning(gifi.code, type) : null;
+
+    return NextResponse.json(
+      { data: acct, ...(warning ? { warnings: [warning] } : {}) },
+      { status: 201 },
+    );
   } catch (error) {
     console.error('POST /api/coa error:', error);
     return NextResponse.json({ error: 'Failed to create account' }, { status: 500 });
