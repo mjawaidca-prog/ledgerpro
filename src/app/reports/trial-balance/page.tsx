@@ -9,7 +9,7 @@ import { format, endOfMonth, subMonths } from 'date-fns';
 import { ArrowLeft, Loader2, Printer, Download, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { parseLocalDate, formatReportPeriod } from '@/lib/reporting';
-import { exportTrialBalance, exportCaseWareTrialBalance } from '@/lib/export';
+import { exportTrialBalance, exportCaseWareTrialBalance, exportTbGifiTrialBalance } from '@/lib/export';
 
 // ── Types ──
 
@@ -78,6 +78,8 @@ export default function TrialBalancePage() {
   const [data, setData] = useState<TBData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<{ kind: 'ok' | 'warn' | 'error'; text: string } | null>(null);
+  const [exportingGifi, setExportingGifi] = useState(false);
   const periodDd = useDropdown(); const compareDd = useDropdown(); const exportDd = useDropdown();
 
   useEffect(() => { if (fy.loaded && fy.fiscalYearEnd) { setAsOf(fy.fiscalYearEnd); setPreset('fy_end'); } }, [fy.loaded, fy.fiscalYearEnd]);
@@ -98,6 +100,21 @@ export default function TrialBalancePage() {
   }
 
   function applyCompare(mode: CompareMode) { setCompareMode(mode); compareDd.setOpen(false); }
+
+  async function handleTbGifiExport() {
+    exportDd.setOpen(false);
+    setExportingGifi(true); setExportNotice(null);
+    try {
+      const { unmappedCount, accountCount } = await exportTbGifiTrialBalance(asOf);
+      if (unmappedCount > 0) {
+        setExportNotice({ kind: 'warn', text: `Exported for Nexvar Tax — ${unmappedCount} of ${accountCount} accounts have no GIFI code. They are included in the file unmapped and can be mapped during import in Nexvar Tax; assign GIFI codes in the chart of accounts to include them directly next time.` });
+      } else {
+        setExportNotice({ kind: 'ok', text: `Exported the tb-gifi/1 trial balance for Nexvar Tax — all ${accountCount} accounts have GIFI codes.` });
+      }
+    } catch (err: any) {
+      setExportNotice({ kind: 'error', text: err?.message || 'Failed to generate the tb-gifi/1 export.' });
+    } finally { setExportingGifi(false); }
+  }
 
   const fetchData = useCallback(async () => {
     setLoading(true); setError(null);
@@ -168,8 +185,8 @@ export default function TrialBalancePage() {
           <button onClick={() => exportDd.setOpen(!exportDd.open)} className="flex items-center gap-1.5 border border-[var(--border)] rounded-lg px-3 py-2 text-sm bg-[var(--surface)] hover:border-[var(--border-strong)]"><Download size={14} className="text-[var(--text-muted)]"/><span className="text-[var(--text-muted)]">Export</span><ChevronDown size={14} className="text-[var(--text-muted)]"/></button>
           {exportDd.open && (
             <div className="absolute top-full mt-1 right-0 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-md)] min-w-[180px] z-20 overflow-hidden">
-              {[['pdf','Export as PDF'],['excel','Export as Excel'],['csv','Export as CSV']].map(([k,l]) => (
-                <button key={k} onClick={() => { exportDd.setOpen(false); if(k==='pdf') window.print(); else if(data) { if(k==='csv') exportTrialBalance(data); else exportCaseWareTrialBalance(data); } }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-[var(--surface-3)] text-[var(--text)]">{l}</button>
+              {[['pdf','Export as PDF'],['excel','Export as Excel'],['csv','Export as CSV'],['tb-gifi','Export as JSON (tb-gifi/1)']].map(([k,l]) => (
+                <button key={k} onClick={() => { if(k==='tb-gifi') { void handleTbGifiExport(); return; } exportDd.setOpen(false); if(k==='pdf') window.print(); else if(data) { if(k==='csv') exportTrialBalance(data); else exportCaseWareTrialBalance(data); } }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-[var(--surface-3)] text-[var(--text)]">{l}</button>
               ))}
             </div>
           )}
@@ -177,6 +194,19 @@ export default function TrialBalancePage() {
         <button onClick={() => window.print()} className="flex items-center gap-1.5 border border-[var(--border)] rounded-lg px-3 py-2 text-sm bg-[var(--surface)] hover:border-[var(--border-strong)]"><Printer size={14} className="text-[var(--text-muted)]"/> Print</button>
         <label className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] ml-1"><input type="checkbox" checked={hideZeroBalances} onChange={e => setHideZeroBalances(e.target.checked)}/> Hide zero</label>
       </div>
+
+      {/* Export notice (tb-gifi/1) */}
+      {exportNotice && (
+        <div className={cn('flex items-start gap-2 mb-6 rounded-lg border px-4 py-3 text-sm print:hidden',
+          exportNotice.kind === 'ok' ? 'border-[var(--success)] text-[var(--success)]' :
+          exportNotice.kind === 'warn' ? 'border-[var(--warning,#d97706)] text-[var(--warning,#d97706)]' :
+          'border-[var(--danger)] text-[var(--danger)]')}>
+          {exportNotice.kind === 'ok'
+            ? <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+            : <AlertTriangle size={16} className="mt-0.5 shrink-0" />}
+          <span>{exportNotice.text}</span>
+        </div>
+      )}
 
       {/* Content */}
       {loading ? <div className="flex items-center justify-center py-20"><Loader2 size={28} className="animate-spin text-[var(--text-muted)]"/></div>

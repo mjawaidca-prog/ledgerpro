@@ -62,8 +62,43 @@ export function exportCaseWareTrialBalance(data: any): void {
   downloadCSV(`caseware-trial-balance-${data.asOf}.csv`, headers, rows);
 }
 
-export function exportGL(data: any): void {
-  const headers = ['Date', 'Description', 'Source', 'Debit', 'Credit', 'Balance'];
+/**
+ * tb-gifi/1 JSON trial balance for Nexvar Tax. The payload is built
+ * server-side (GET /api/reports/trial-balance/tb-gifi) because it needs
+ * the company BN, fiscal-year start, period-lock state and the
+ * canonical payload hash; this helper fetches it, saves it as the
+ * import file, and reports how many accounts went out unmapped
+ * (gifiCode: null — they are mapped during import in Nexvar Tax, not
+ * dropped). Throws with the server's message when the export cannot
+ * be built (e.g. no business number on file).
+ */
+export async function exportTbGifiTrialBalance(asOf: string): Promise<{ unmappedCount: number; accountCount: number }> {
+  const res = await fetch(`/api/reports/trial-balance/tb-gifi?asOf=${asOf}`);
+  if (!res.ok) {
+    let message = 'Failed to generate the tb-gifi/1 export.';
+    try { const j = await res.json(); if (j?.error) message = j.error; } catch { /* keep default */ }
+    throw new Error(message);
+  }
+  const payload = await res.json();
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `trial-balance-tb-gifi-${asOf}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  const accounts: any[] = Array.isArray(payload?.accounts) ? payload.accounts : [];
+  return {
+    unmappedCount: accounts.filter((a) => a.gifiCode === null).length,
+    accountCount: accounts.length,
+  };
+}
+
+export function exportGL(data: any): void {  const headers = ['Date', 'Description', 'Source', 'Debit', 'Credit', 'Balance'];
   const rows = data.rows.map((r: any) => [
     new Date(r.date).toLocaleDateString(),
     r.description,
