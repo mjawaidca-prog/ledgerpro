@@ -25,11 +25,37 @@ export function downloadCSV(filename: string, headers: string[], rows: string[][
   URL.revokeObjectURL(url);
 }
 
+const TB_TYPE_ORDER = ['asset', 'liability', 'equity', 'income', 'expense'];
+
+/**
+ * Flatten a trial-balance payload into one row list. The reports API
+ * returns rows grouped by type under `sections` (with the as-of date at
+ * `period.asOf`); the legacy flat `rows`/`asOf` shape is still accepted
+ * so older callers keep working.
+ */
+function flattenTrialBalanceRows(data: any): any[] {
+  if (Array.isArray(data?.rows)) return data.rows;
+  const sections = data?.sections || {};
+  const orderedTypes = [
+    ...TB_TYPE_ORDER.filter((t) => sections[t]),
+    ...Object.keys(sections).filter((t) => !TB_TYPE_ORDER.includes(t)),
+  ];
+  const flat: any[] = [];
+  for (const type of orderedTypes) {
+    for (const r of sections[type]?.rows || []) flat.push(r);
+  }
+  return flat;
+}
+
+function trialBalanceAsOf(data: any): string {
+  return data?.period?.asOf ?? data?.asOf ?? '';
+}
+
 export function exportTrialBalance(data: any): void {
   const headers = ['Code', 'Account', 'Type', 'Debit', 'Credit'];
-  const rows = data.rows.map((r: any) => [r.code, r.name, r.type, fmt(r.debit), fmt(r.credit)]);
+  const rows = flattenTrialBalanceRows(data).map((r: any) => [r.code, r.name, r.type, fmt(r.debit), fmt(r.credit)]);
   rows.push(['', 'TOTALS', '', fmt(data.totalDebits), fmt(data.totalCredits)]);
-  downloadCSV(`trial-balance-${data.asOf}.csv`, headers, rows);
+  downloadCSV(`trial-balance-${trialBalanceAsOf(data)}.csv`, headers, rows);
 }
 
 /**
@@ -40,26 +66,88 @@ export function exportTrialBalance(data: any): void {
  * export, since the accountant may map GIFI codes inside CaseWare itself.
  */
 export function exportCaseWareTrialBalance(data: any): void {
-  const hasPrior = !!data.prior;
+  // The reports API folds prior-period figures into each row
+  // (priorDebit/priorCredit) whenever a comparison mode is active; the
+  // legacy shape carried them in a separate `prior` payload instead.
+  const hasPrior = !!data.prior || (!!data.comparisonMode && data.comparisonMode !== 'none');
   const headers = ['Account Number', 'Description', 'GIFI Code', 'Type', 'Debit', 'Credit'];
   if (hasPrior) headers.push('Prior Year Debit', 'Prior Year Credit');
 
   const priorByCode = new Map((data.prior?.rows || []).map((r: any) => [r.code, r]));
 
-  const rows = data.rows.map((r: any) => {
+  const rows = flattenTrialBalanceRows(data).map((r: any) => {
     const row = [r.code, r.name, r.gifiCode || '', r.type, fmt(r.debit), fmt(r.credit)];
     if (hasPrior) {
       const p: any = priorByCode.get(r.code);
-      row.push(fmt(p?.debit ?? 0), fmt(p?.credit ?? 0));
+      row.push(fmt(p?.debit ?? r.priorDebit ?? 0), fmt(p?.credit ?? r.priorCredit ?? 0));
     }
     return row;
   });
 
   const totalsRow = ['', 'TOTALS', '', '', fmt(data.totalDebits), fmt(data.totalCredits)];
-  if (hasPrior) totalsRow.push(fmt(data.prior.totalDebits), fmt(data.prior.totalCredits));
+  if (hasPrior) {
+    let priorTotalDebits = data.prior?.totalDebits;
+    let priorTotalCredits = data.prior?.totalCredits;
+    if (priorTotalDebits === undefined || priorTotalCredits === undefined) {
+      priorTotalDebits = 0;
+      priorTotalCredits = 0;
+      for (const section of Object.values<any>(data.sections || {})) {
+        priorTotalDebits += Number(section?.priorTotalDebit ?? 0);
+        priorTotalCredits += Number(section?.priorTotalCredit ?? 0);
+      }
+    }
+    totalsRow.push(fmt(priorTotalDebits), fmt(priorTotalCredits));
+  }
   rows.push(totalsRow);
 
-  downloadCSV(`caseware-trial-balance-${data.asOf}.csv`, headers, rows);
+  downloadCSV(`caseware-trial-balance-${trialBalanceAsOf(data)}.csv`, headers, rows);
+}
+
+/**
+ * Balance Sheet CSV export: the same sections, subtotals and totals as
+ * the on-screen statement (Assets / Liabilities / Equity), one account
+ * per row with current and prior-period balances.
+ */
+export function exportBalanceSheet(data: any): void {
+  const headers = ['Section', 'Code', 'Account', 'Balance', 'Prior Balance'];
+  const rows: string[][] = [];
+
+  const pushAccounts = (section: string, accounts: any[]) => {
+    for (const a of accounts || []) rows.push([section, a.code, a.name, fmt(a.balance), fmt(a.priorBalance ?? 0)]);
+  };
+  const pushTotal = (label: string, total: any, priorTotal: any) => {
+    rows.push([label, '', '', fmt(total), fmt(priorTotal ?? 0)]);
+  };
+
+  const s = data.sections || {};
+  rows.push(['ASSETS', '', '', '', '']);
+  pushAccounts('Current Assets', s.assets?.current?.accounts);
+  pushTotal('Total Current Assets', s.assets?.current?.total, s.assets?.current?.priorTotal);
+  pushAccounts('Non-Current Assets', s.assets?.nonCurrent?.accounts);
+  pushTotal('Total Non-Current Assets', s.assets?.nonCurrent?.total, s.assets?.nonCurrent?.priorTotal);
+  pushTotal('Total Assets', s.assets?.total, s.assets?.priorTotal);
+  rows.push(['', '', '', '', '']);
+
+  rows.push(['LIABILITIES', '', '', '', '']);
+  pushAccounts('Current Liabilities', s.liabilities?.current?.accounts);
+  pushTotal('Total Current Liabilities', s.liabilities?.current?.total, s.liabilities?.current?.priorTotal);
+  pushAccounts('Non-Current Liabilities', s.liabilities?.nonCurrent?.accounts);
+  pushTotal('Total Non-Current Liabilities', s.liabilities?.nonCurrent?.total, s.liabilities?.nonCurrent?.priorTotal);
+  pushTotal('Total Liabilities', s.liabilities?.total, s.liabilities?.priorTotal);
+  rows.push(['', '', '', '', '']);
+
+  rows.push(['EQUITY', '', '', '', '']);
+  for (const [groupKey, group] of Object.entries<any>(s.equity || {})) {
+    // Same label the report page renders for each equity bucket key.
+    const groupName = groupKey.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    pushAccounts(groupName, group?.accounts);
+    pushTotal(`Total ${groupName}`, group?.total, group?.priorTotal);
+  }
+  pushTotal('Total Equity', s.totalEquity, s.priorTotalEquity);
+  rows.push(['', '', '', '', '']);
+  pushTotal('Total Liabilities & Equity', s.totalLiabilitiesAndEquity, s.priorTotalLiabilitiesAndEquity);
+
+  downloadCSV(`balance-sheet-${data.period?.asOf ?? ''}.csv`, headers, rows);
 }
 
 /**

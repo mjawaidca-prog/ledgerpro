@@ -9,6 +9,7 @@ import { format } from 'date-fns';
 import { ArrowLeft, Loader2, Printer, Download, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { parseLocalDate } from '@/lib/reporting';
+import { exportBalanceSheet } from '@/lib/export';
 
 // ── Types ──
 
@@ -158,7 +159,7 @@ export default function BalanceSheetPage() {
           {exportDd.open && (
             <div className="absolute top-full mt-1 right-0 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-md)] min-w-[180px] z-20 overflow-hidden">
               {[['pdf','Export as PDF'],['csv','Export as CSV']].map(([k,l]) => (
-                <button key={k} onClick={() => { exportDd.setOpen(false); if(k==='pdf') window.print(); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-[var(--surface-3)] text-[var(--text)]">{l}</button>
+                <button key={k} onClick={() => { exportDd.setOpen(false); if(k==='pdf') window.print(); else if(k==='csv' && data) exportBalanceSheet(data); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-[var(--surface-3)] text-[var(--text)]">{l}</button>
               ))}
             </div>
           )}

@@ -291,3 +291,17 @@
 @media (max-width: 768px) {
   .hamburger { display: grid; }
 }
+
+/* ─── Print: un-clip the app shell so reports print in full ───
+   On screen the shell is a 100vh flex layout whose .content column
+   scrolls (overflow-y: auto). Without this block the browser prints
+   only the visible viewport of that scroll container, so "Export as
+   PDF" (window.print) produced a clipped first page — or nothing at
+   all in browsers with no print UI. Print flows the full document
+   instead. Unlayered on purpose: it must beat the @layer components
+   shell rules above. */
+@media print {
+  .app { display: block; height: auto; width: auto; }
+  .main { display: block; }
+  .content { overflow: visible; height: auto; padding: 0; background: #fff; }
+}
