@@ -4,6 +4,7 @@ import { requireCompany } from '@/lib/api-helpers';
 import { db } from '@/lib/db';
 import { computeGstReturn, defaultGstPeriod, markGstReturnFiled, saveGstAdjustments } from '@/lib/tax/gst-return-service';
 import { gstReturnCsv } from '@/lib/tax/gst-return';
+import { buildGstWorksheetPayload } from '@/lib/tax/gst-worksheet';
 import { taxPeriodDate } from '@/lib/tax/workpaper';
 import { TaxPostingError } from '@/lib/tax/posting-service';
 
@@ -75,6 +76,31 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="gst-hst-return-${view.periodStart}-to-${view.periodEnd}.csv"`,
+        },
+      });
+    }
+
+    if (params.get('format') === 'worksheet') {
+      // gst-worksheet/1 — the audit-trail package (design §5.3): the
+      // full worksheet with per-line composition, control-account
+      // continuity, reconciliation results, the NETFILE keyed numbers,
+      // and the filing record. The response body is exactly the
+      // payload, hash-stamped, ready to keep with the filing evidence.
+      const company = await db.company.findUnique({ where: { id: companyId! }, select: { name: true, gstNumber: true } });
+      const { payload, lineCount } = buildGstWorksheetPayload({
+        companyId: companyId!,
+        companyName: company?.name ?? 'Company',
+        gstNumber: company?.gstNumber ?? null,
+        registration: view.registration
+          ? { registrationNumber: view.registration.registrationNumber, filingFrequency: view.registration.filingFrequency, province: view.registration.province }
+          : null,
+        worksheet: view.worksheet,
+        generatedAt: new Date().toISOString(),
+      });
+      return NextResponse.json(payload, {
+        headers: {
+          'Content-Disposition': `attachment; filename="gst-worksheet-${view.periodStart}-to-${view.periodEnd}.json"`,
+          'X-Gst-Worksheet-Lines': String(lineCount),
         },
       });
     }

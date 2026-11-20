@@ -10,10 +10,13 @@ import {
   type GstAdjustments, type GstAdjustmentsInput, type GstJournalLine, type GstReturnResult,
 } from './gst-return';
 import { loadSimpleTaxAccounts } from './accounts';
+import { buildGstWorksheet, type GstWorksheet } from './gst-worksheet';
 import { anchorMonthDay, fiscalYearRangeContaining, toYmd } from '@/lib/fiscal-year';
 import { TaxPostingError } from './posting-service';
 
 const day = (d: Date): string => d.toISOString().slice(0, 10);
+const minor = (n: number): number => Math.round(n * 100);
+const major = (n: number): number => n / 100;
 
 /**
  * Storage decision (Phase 1 cleanup, no schema change): simple-path
@@ -69,6 +72,14 @@ export interface GstReturnView {
   /** The filed period that locks this view (exact match wins, else the first overlapping filed period). */
   lockedFiled: { periodStart: string; periodEnd: string; filedAt: string; filingConfirmation: string | null } | null;
   notes: string[];
+  /**
+   * The worksheet layer (Phase 1 item 6): full line composition,
+   * control-account continuity, reconciliation checks, and the NETFILE
+   * hand-off — built by the pure gst-worksheet module from this view's
+   * result plus independently fetched GL context. Presentation only;
+   * the engine's figures are never recomputed there.
+   */
+  worksheet: GstWorksheet;
 }
 
 async function activeGstRegistration(companyId: string) {
@@ -176,8 +187,9 @@ export async function computeGstReturn(
     orderBy: [{ entryDate: 'asc' }, { id: 'asc' }],
   });
   const typeByCode = new Map<string, string>();
-  const allAccounts = await db.chartOfAccount.findMany({ where: { companyId, code: { in: codes } }, select: { code: true, type: true } });
-  allAccounts.forEach((a) => typeByCode.set(a.code, a.type));
+  const accountNames: Record<string, string> = {};
+  const allAccounts = await db.chartOfAccount.findMany({ where: { companyId, code: { in: codes } }, select: { code: true, type: true, name: true } });
+  allAccounts.forEach((a) => { typeByCode.set(a.code, a.type); accountNames[a.code] = a.name; });
 
   const lines: GstJournalLine[] = entries.flatMap((e) =>
     e.lines.map((l) => ({
@@ -227,6 +239,95 @@ export async function computeGstReturn(
     ? { periodStart, periodEnd, filedAt: exact.filedAt ? exact.filedAt.toISOString() : '', filingConfirmation: exact.filingConfirmation }
     : overlappingFiled[0] ?? null;
 
+  // ── Worksheet context (Phase 1 item 6) ─────────────────────────────
+  // Control-account balances are summed from the GL independently of
+  // the return's own line set (separate fetches: before the period, and
+  // through period end), so the continuity check compares the engine's
+  // movement against raw GL sums rather than against itself.
+  const controlCodes = [...new Set([accounts.output, accounts.recoverable].filter(Boolean))];
+  const fetchControlLines = async (lt: Date) => {
+    if (controlCodes.length === 0) return [];
+    const rows = await db.journalEntry.findMany({
+      where: { companyId, entryDate: { lt }, lines: { some: { glAccountCode: { in: controlCodes } } } },
+      include: { lines: { where: { glAccountCode: { in: controlCodes } } } },
+      orderBy: [{ entryDate: 'asc' }, { id: 'asc' }],
+    });
+    return rows.flatMap((e) => e.lines);
+  };
+  const controlBalance = (
+    rows: { glAccountCode: string; debit: unknown; credit: unknown }[], code: string, mode: 'credit' | 'debit',
+  ): number => major(rows
+    .filter((r) => r.glAccountCode === code)
+    .reduce((s, r) => s + (mode === 'credit'
+      ? minor(Number(r.credit)) - minor(Number(r.debit))
+      : minor(Number(r.debit)) - minor(Number(r.credit))), 0));
+  const prePeriodControlLines = await fetchControlLines(start);
+  const throughEndControlLines = await fetchControlLines(endExclusive);
+
+  // The tax engine's document-level detail for the period (GST/HST
+  // components of the document tax snapshots), used to corroborate
+  // lines 103/106. Best-effort: when the snapshot delegate is
+  // unavailable or the read fails, the worksheet reports the lines as
+  // not corroborated instead of failing the whole return view.
+  let engineDetail: { outputTax: number; recoverableTax: number; snapshotCount: number } | null = null;
+  try {
+    type SnapshotRow = { direction: string; components: { outputTaxHome: unknown; recoverableTaxHome: unknown }[] };
+    const snapshotDelegate = (db as unknown as {
+      documentLineTaxSnapshot?: { findMany: (args: unknown) => Promise<SnapshotRow[]> };
+    }).documentLineTaxSnapshot;
+    if (snapshotDelegate?.findMany) {
+      const rows = await snapshotDelegate.findMany({
+        where: { companyId, taxPointDate: { gte: start, lt: endExclusive } },
+        include: {
+          components: {
+            where: { type: { in: ['gst', 'hst'] }, authority: 'cra' },
+            select: { outputTaxHome: true, recoverableTaxHome: true },
+          },
+        },
+      });
+      let outputMinor = 0;
+      let recoverableMinor = 0;
+      let snapshotCount = 0;
+      for (const row of rows) {
+        if (!row.components?.length) continue;
+        snapshotCount += 1;
+        for (const c of row.components) {
+          if (row.direction === 'sale') outputMinor += minor(Number(c.outputTaxHome) || 0);
+          if (row.direction === 'purchase') recoverableMinor += minor(Number(c.recoverableTaxHome) || 0);
+        }
+      }
+      if (snapshotCount > 0) {
+        engineDetail = { outputTax: major(outputMinor), recoverableTax: major(recoverableMinor), snapshotCount };
+      }
+    }
+  } catch {
+    engineDetail = null;
+  }
+
+  const worksheet = buildGstWorksheet({
+    result,
+    periodStart,
+    periodEnd,
+    registration: registration
+      ? { registrationNumber: registration.registrationNumber, filingFrequency: registration.filingFrequency, province: registration.province }
+      : null,
+    filed: exact ? { filedAt: exact.filedAt ? exact.filedAt.toISOString() : '', filingConfirmation: exact.filingConfirmation } : null,
+    accountNames,
+    control: {
+      output: {
+        accountCode: accounts.output,
+        opening: controlBalance(prePeriodControlLines, accounts.output, 'credit'),
+        closingPerGl: controlBalance(throughEndControlLines, accounts.output, 'credit'),
+      },
+      recoverable: {
+        accountCode: accounts.recoverable,
+        opening: controlBalance(prePeriodControlLines, accounts.recoverable, 'debit'),
+        closingPerGl: controlBalance(throughEndControlLines, accounts.recoverable, 'debit'),
+      },
+    },
+    engineDetail,
+  });
+
   const notes: string[] = [];
   if (!registration) notes.push('No GST/HST registration on file for this company. The return still computes from the ledger; add a registration (Settings → Tax or the mark-as-filed flow) to record filings.');
   const hasAdjustments = adjustments.add.length + adjustments.deduct.length + adjustments.instalments.length + adjustments.rebates.length > 0;
@@ -249,6 +350,7 @@ export async function computeGstReturn(
     locked: Boolean(lockedFiled),
     lockedFiled,
     notes,
+    worksheet,
   };
 }
 

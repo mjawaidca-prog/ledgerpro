@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { money } from '@/lib/money';
-import { Loader2, Download, ChevronDown, ChevronRight, Landmark, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Loader2, Download, ChevronDown, ChevronRight, Landmark, AlertTriangle, CheckCircle2, Scale, FileCheck } from 'lucide-react';
 
-const LINE_ORDER = ['101', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '114', '115'] as const;
+const LINE_ORDER = ['101', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113', '114', '115'] as const;
 const LABELS: Record<string, string> = {
   '101': 'Sales and other revenue',
   '103': 'GST/HST collected or collectible',
@@ -22,10 +22,15 @@ const LABELS: Record<string, string> = {
   '110': 'Instalments and other payments',
   '111': 'Rebates',
   '112': 'Total other credits',
+  '113': 'Balance',
   '114': 'Refund claimed',
   '115': 'Payment enclosed / amount owing',
 };
-const SUBTOTAL_LINES = new Set(['105', '108', '109', '112']);
+const SUBTOTAL_LINES = new Set(['105', '108', '109', '112', '113']);
+/** Adjustment lines draw their composition from the live draft groups below. */
+const ADJ_LINE_GROUP: Record<string, 'add' | 'deduct' | 'instalments' | 'rebates'> = {
+  '104': 'add', '107': 'deduct', '110': 'instalments', '111': 'rebates',
+};
 
 type AdjItem = { amount: number; note: string };
 type AdjDraft = { add: AdjItem[]; deduct: AdjItem[]; instalments: AdjItem[]; rebates: AdjItem[] };
@@ -54,7 +59,7 @@ function previewLines(base: Record<string, number>, draft: AdjDraft): Record<str
   return {
     ...base,
     '104': t104, '105': l105, '107': t107, '108': l108, '109': l109,
-    '110': t110, '111': t111, '112': l112,
+    '110': t110, '111': t111, '112': l112, '113': balance,
     '114': Math.max(0, -balance), '115': Math.max(0, balance),
   };
 }
@@ -138,6 +143,9 @@ export default function GstHstReturnPage() {
 
   const lines = data ? previewLines(data.result?.lines ?? {}, adjDraft) : {};
   const drill = data?.result?.drillDown ?? {};
+  const worksheet = data?.worksheet ?? null;
+  const wsByLine: Record<string, any> = {};
+  for (const wl of worksheet?.lines ?? []) wsByLine[wl.line] = wl;
 
   return (
     <AppShell>
@@ -151,6 +159,11 @@ export default function GstHstReturnPage() {
           {data && (
             <a href={`/api/reports/gst-hst-return?from=${data.periodStart}&to=${data.periodEnd}&format=csv`}>
               <Button variant="secondary"><Download size={14} /> CSV working copy</Button>
+            </a>
+          )}
+          {data && (
+            <a href={`/api/reports/gst-hst-return?from=${data.periodStart}&to=${data.periodEnd}&format=worksheet`}>
+              <Button variant="secondary"><FileCheck size={14} /> Audit package (JSON)</Button>
             </a>
           )}
         </div>
@@ -195,6 +208,10 @@ export default function GstHstReturnPage() {
               <tbody>
                 {LINE_ORDER.map((line) => {
                   const items = drill[line] ?? [];
+                  const adjItems = ADJ_LINE_GROUP[line] ? adjDraft[ADJ_LINE_GROUP[line]] : [];
+                  const formula = wsByLine[line]?.composition?.formula ?? null;
+                  const accounts = wsByLine[line]?.composition?.accounts ?? [];
+                  const expandable = items.length > 0 || adjItems.length > 0 || Boolean(formula);
                   const open = openLine === line;
                   return [
                     <tr key={line} className={`border-t border-[var(--border)] ${SUBTOTAL_LINES.has(line) ? 'font-semibold' : ''}`}>
@@ -202,29 +219,64 @@ export default function GstHstReturnPage() {
                       <td className="py-2 text-sm">{LABELS[line]}</td>
                       <td className="py-2 text-sm font-mono tabular-nums text-right">{money(lines[line] ?? 0)}</td>
                       <td className="py-2 text-right">
-                        {items.length > 0 && (
-                          <button className="text-[var(--text-muted)]" onClick={() => setOpenLine(open ? null : line)} aria-label={`Drill down line ${line}`}>
+                        {expandable && (
+                          <button className="text-[var(--text-muted)]" onClick={() => setOpenLine(open ? null : line)} aria-label={`Composition of line ${line}`}>
                             {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                           </button>
                         )}
                       </td>
                     </tr>,
-                    open && items.length > 0 && (
+                    open && expandable && (
                       <tr key={`${line}-detail`} className="bg-[var(--surface-2)]">
                         <td colSpan={4} className="p-3">
-                          <table className="w-full text-xs">
-                            <thead><tr className="text-left text-[var(--text-faint)]"><th>Date</th><th>Account</th><th>Description</th><th className="text-right">Contribution</th></tr></thead>
-                            <tbody>
-                              {items.map((d: any) => (
-                                <tr key={d.lineId} className="border-t border-[var(--border)]">
-                                  <td className="py-1">{d.date}</td>
-                                  <td className="py-1 font-mono">{d.accountCode}</td>
-                                  <td className="py-1">{d.description}</td>
-                                  <td className="py-1 text-right font-mono tabular-nums">{money(d.amount)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                          {formula && (
+                            <p className="text-xs text-[var(--text-muted)] mb-2">
+                              <span className="font-mono">{line} = {formula.terms.map((t: any, i: number) => `${i === 0 ? (t.sign < 0 ? '− ' : '') : (t.sign < 0 ? ' − ' : ' + ')}${t.line}`).join('')}</span>
+                              {' — '}{formula.note}. Based on the saved figures; unsaved adjustment edits are not reflected here.
+                            </p>
+                          )}
+                          {accounts.length > 0 && (
+                            <table className="w-full text-xs mb-2">
+                              <thead><tr className="text-left text-[var(--text-faint)]"><th>GL account</th><th className="text-right">Transactions</th><th className="text-right">Contribution</th></tr></thead>
+                              <tbody>
+                                {accounts.map((a: any) => (
+                                  <tr key={a.accountCode} className="border-t border-[var(--border)]">
+                                    <td className="py-1 font-mono">{a.accountCode}{a.accountName ? ` — ${a.accountName}` : ''}</td>
+                                    <td className="py-1 text-right">{a.transactionCount}</td>
+                                    <td className="py-1 text-right font-mono tabular-nums">{money(a.amount)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                          {items.length > 0 && (
+                            <table className="w-full text-xs">
+                              <thead><tr className="text-left text-[var(--text-faint)]"><th>Date</th><th>Account</th><th>Description</th><th className="text-right">Contribution</th></tr></thead>
+                              <tbody>
+                                {items.map((d: any) => (
+                                  <tr key={d.lineId} className="border-t border-[var(--border)]">
+                                    <td className="py-1">{d.date}</td>
+                                    <td className="py-1 font-mono">{d.accountCode}</td>
+                                    <td className="py-1">{d.description}</td>
+                                    <td className="py-1 text-right font-mono tabular-nums">{money(d.amount)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                          {adjItems.length > 0 && (
+                            <table className="w-full text-xs">
+                              <thead><tr className="text-left text-[var(--text-faint)]"><th>Adjustment</th><th className="text-right">Amount</th></tr></thead>
+                              <tbody>
+                                {adjItems.map((a: AdjItem, i: number) => (
+                                  <tr key={i} className="border-t border-[var(--border)]">
+                                    <td className="py-1">{a.note || '—'}</td>
+                                    <td className="py-1 text-right font-mono tabular-nums">{money(Number(a.amount) || 0)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
                         </td>
                       </tr>
                     ),
@@ -232,7 +284,7 @@ export default function GstHstReturnPage() {
                 })}
               </tbody>
             </table>
-            <p className="text-[10px] text-[var(--text-faint)] mt-3">Line 101 is rounded to the nearest whole dollar, as CRA requires. PST/RST and QST amounts are tracked in their own accounts and never enter these lines. Line definitions per CRA GST34 / Info Sheet GI-066.</p>
+            <p className="text-[10px] text-[var(--text-faint)] mt-3">Line 101 is rounded to the nearest whole dollar, as CRA requires. Every line is shown — a line with nothing to report reads $0.00 rather than disappearing. Expand a line to see the GL accounts and transactions behind it, its adjustments, or its formula. PST/RST and QST amounts are tracked in their own accounts and never enter these lines. Line definitions per CRA GST34 / Info Sheet GI-066.</p>
           </CardBody>
         </Card>
 
@@ -286,6 +338,104 @@ export default function GstHstReturnPage() {
                   </Button>
                 </>
               )}
+            </CardBody>
+          </Card>
+        )}
+
+        {worksheet && (
+          <Card className="mb-4">
+            <CardHeader><h3 className="t-h3 flex items-center gap-2"><Scale size={16} /> Reconciliation</h3></CardHeader>
+            <CardBody>
+              <p className="text-sm text-[var(--text-muted)] mb-3">
+                The tie-outs an auditor asks for first, computed from the saved figures. Differences are shown, never absorbed — a “review” or “difference” badge means the books and the return disagree by the amount shown.
+              </p>
+              <div className="space-y-3 mb-4">
+                {worksheet.reconciliations.map((check: any) => (
+                  <div key={check.id} className="border border-[var(--border)] rounded-md p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-semibold">{check.label}</span>
+                      <span className="spacer" />
+                      {check.status === 'pass' && <Badge variant="paid">Pass</Badge>}
+                      {check.status === 'warn' && <Badge variant="pending">Review</Badge>}
+                      {check.status === 'fail' && <Badge variant="overdue">Difference</Badge>}
+                    </div>
+                    <p className="text-xs text-[var(--text-muted)] mb-2">{check.detail}</p>
+                    <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+                      {check.figures.map((f: any) => (
+                        <span key={f.label}>{f.label}: <span className="font-mono tabular-nums">{money(f.amount)}</span></span>
+                      ))}
+                      {check.difference != null && (
+                        <span>Difference: <span className="font-mono tabular-nums">{money(check.difference)}</span></span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <h4 className="text-sm font-semibold mb-1">Control account continuity</h4>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[var(--text-faint)]">
+                    <th className="py-1">Account</th><th className="text-right">Opening</th><th className="text-right">Movement</th>
+                    <th className="text-right">Expected closing</th><th className="text-right">Closing per GL</th><th className="text-right">Difference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {worksheet.continuity.map((c: any) => (
+                    <tr key={c.role} className="border-t border-[var(--border)]">
+                      <td className="py-1 font-mono">{c.accountCode}{c.accountName ? ` — ${c.accountName}` : ''}</td>
+                      <td className="py-1 text-right font-mono tabular-nums">{money(c.opening)}</td>
+                      <td className="py-1 text-right font-mono tabular-nums">{money(c.movement)} <span className="text-[var(--text-faint)]">(line {c.movementLine})</span></td>
+                      <td className="py-1 text-right font-mono tabular-nums">{money(c.expectedClosing)}</td>
+                      <td className="py-1 text-right font-mono tabular-nums">{money(c.closingPerGl)}</td>
+                      <td className="py-1 text-right font-mono tabular-nums">{money(c.difference)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardBody>
+          </Card>
+        )}
+
+        {worksheet && (
+          <Card className="mb-4">
+            <CardHeader><h3 className="t-h3 flex items-center gap-2"><FileCheck size={16} /> File with CRA — NETFILE hand-off</h3></CardHeader>
+            <CardBody>
+              <p className="text-sm text-[var(--text-muted)] mb-3">
+                GST/HST NETFILE asks for four things: your CRA access code and three numbers from this return. Key them exactly as shown, for
+                registration <span className="font-mono">{worksheet.netfile.registrationNumber ?? '—'}</span>, period {worksheet.netfile.periodStart} – {worksheet.netfile.periodEnd}.
+                LedgerPro never submits to CRA — filing stays your act on CRA&apos;s site; record the confirmation below afterwards.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                <div className="border border-[var(--border)] rounded-md p-3">
+                  <p className="text-xs text-[var(--text-faint)] mb-1">Access code</p>
+                  <p className="text-sm">From CRA (your 4-digit code — not stored in LedgerPro)</p>
+                </div>
+                {worksheet.netfile.keyedNumbers.map((k: any) => (
+                  <div key={k.line} className="border border-[var(--border)] rounded-md p-3">
+                    <p className="text-xs text-[var(--text-faint)] mb-1">Line {k.line} — {k.label}</p>
+                    <p className="text-lg font-mono tabular-nums">{money(lines[k.line] ?? k.amount)}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm mb-3">
+                {worksheet.netfile.outcome === 'refund' && <>Result: a <strong>refund</strong> on line 114.</>}
+                {worksheet.netfile.outcome === 'payment' && <>Result: a <strong>payment owing</strong> on line 115.</>}
+                {worksheet.netfile.outcome === 'nil' && <>Result: a <strong>nil return</strong> — nothing to refund or pay.</>}
+                {' '}The full audit trail — every line&apos;s composition, continuity and reconciliation results — is in the audit package:
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <a href={`/api/reports/gst-hst-return?from=${data.periodStart}&to=${data.periodEnd}&format=worksheet`}>
+                  <Button variant="secondary"><Download size={14} /> Download audit package (gst-worksheet/1)</Button>
+                </a>
+                {worksheet.netfile.filing.filed ? (
+                  <p className="text-sm text-[var(--text-muted)]">
+                    Filed — recorded {worksheet.netfile.filing.filedAt?.slice(0, 10)} with confirmation{' '}
+                    <span className="font-mono">{worksheet.netfile.filing.confirmation ?? '—'}</span>.
+                  </p>
+                ) : (
+                  <p className="text-sm text-[var(--text-muted)]">Not yet recorded as filed.</p>
+                )}
+              </div>
             </CardBody>
           </Card>
         )}
