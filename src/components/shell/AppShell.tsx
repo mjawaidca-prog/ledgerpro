@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import { Rail } from './Rail';
 import { Topbar } from './Topbar';
 import { NotificationsPanel } from './NotificationsPanel';
+import { CalculatorPanel } from './CalculatorPanel';
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
 
 function getCookie(name: string): string | null {
@@ -39,6 +40,7 @@ export function AppShell({
   const [theme, setThemeState] = useState<'light' | 'dark'>('light');
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showMfaNudge, setShowMfaNudge] = useState(false);
 
@@ -172,6 +174,8 @@ export function AppShell({
           userName={userName}
           userEmail={userEmail}
           className={mobileMenuOpen ? 'open' : ''}
+          calculatorOpen={calculatorOpen}
+          onCalculatorToggle={() => setCalculatorOpen((o) => !o)}
         />
       </div>
       <div className="main">
@@ -257,6 +261,12 @@ export function AppShell({
       <NotificationsPanel
         open={notificationsOpen}
         onClose={() => setNotificationsOpen(false)}
+      />
+
+      <CalculatorPanel
+        open={calculatorOpen}
+        onClose={() => setCalculatorOpen(false)}
+        companyId={companyId}
       />
     </div>
   );

@@ -30,6 +30,7 @@ import {
   Factory,
   KeyRound,
   Camera,
+  Calculator,
 } from 'lucide-react';
 
 interface RailProps {
@@ -39,6 +40,9 @@ interface RailProps {
   userName: string;
   userEmail: string;
   className?: string;
+  /** Calculator panel (Phase 1, item 5): the button toggles the floating panel rendered by AppShell. */
+  calculatorOpen?: boolean;
+  onCalculatorToggle?: () => void;
 }
 
 const mainNavItems = [
@@ -71,7 +75,7 @@ const settingsNavItems = [
   { href: '/settings/security',        label: 'Security',           icon: ShieldCheck },
 ];
 
-export function Rail({ companyName, companyPlan, companyId, userName, userEmail, className }: RailProps) {
+export function Rail({ companyName, companyPlan, companyId, userName, userEmail, className, calculatorOpen, onCalculatorToggle }: RailProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const availableCompanies = (session?.user as any)?.availableCompanies || [];
@@ -116,6 +120,17 @@ export function Rail({ companyName, companyPlan, companyId, userName, userEmail,
 
       {/* User footer */}
       <div className="s-foot">
+        {onCalculatorToggle && (
+          <button
+            onClick={onCalculatorToggle}
+            className={cn('nav-item', calculatorOpen && 'active')}
+            style={{ width: '100%' }}
+            aria-expanded={!!calculatorOpen}
+          >
+            <Calculator size={18} />
+            <span>Calculator</span>
+          </button>
+        )}
         {renderLink({ href: '/help', label: 'Help Center', icon: CircleHelp })}
         <div style={{ height: 1, background: 'var(--side-border)', margin: '6px 8px' }} />
         <div className="s-user">
