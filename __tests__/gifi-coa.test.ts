@@ -236,11 +236,44 @@ describe('POST /api/coa GIFI validation', () => {
     );
   });
 
-  it('creates an uncoded account when no code is given', async () => {
+  // GIFI-at-creation (Phase 1, design §2.1) supersedes the old
+  // "blank is fine" contract: a silent blank is now refused; the
+  // recorded "leave unmapped" choice is the way to create uncoded.
+  it('refuses an undecided account at creation (no code, no recorded choice)', async () => {
     const res = await POST(postRequest(base));
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/Leave unmapped/);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('creates an uncoded account when the unmapped choice is recorded', async () => {
+    const res = await POST(postRequest({ ...base, gifiUnmappedByChoice: true }));
     expect(res.status).toBe(201);
     expect(mockCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ gifiCode: null }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ gifiCode: null, gifiUnmappedByChoice: true }),
+      }),
+    );
+  });
+
+  it('creates a design-exempt account uncoded with no choice needed', async () => {
+    const res = await POST(postRequest({ code: '3100', name: 'Retained Earnings', type: 'equity' }));
+    expect(res.status).toBe(201);
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ gifiCode: null, gifiUnmappedByChoice: false }),
+      }),
+    );
+  });
+
+  it('stores the code, not the flag, when both are sent (they are exclusive)', async () => {
+    const res = await POST(postRequest({ ...base, gifiCode: '8710', gifiUnmappedByChoice: true }));
+    expect(res.status).toBe(201);
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ gifiCode: '8710', gifiUnmappedByChoice: false }),
+      }),
     );
   });
 
@@ -287,11 +320,31 @@ describe('PUT /api/coa/[id] GIFI validation', () => {
     );
   });
 
-  it('clears the code on blank', async () => {
+  // GIFI-at-creation (Phase 1): clearing is no longer silent — blank
+  // alone is refused; blank + the recorded choice clears and records.
+  it('refuses to clear a code silently (blank with no recorded choice)', async () => {
     const res = await PUT(putRequest('acct-1', { gifiCode: '' }), { params: { id: 'acct-1' } });
+    expect(res.status).toBe(400);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('clears the code when the unmapped choice is recorded', async () => {
+    const res = await PUT(putRequest('acct-1', { gifiCode: '', gifiUnmappedByChoice: true }), { params: { id: 'acct-1' } });
     expect(res.status).toBe(200);
     expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ gifiCode: null }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ gifiCode: null, gifiUnmappedByChoice: true }),
+      }),
+    );
+  });
+
+  it('records the unmapped choice on its own (worklist "Leave unmapped")', async () => {
+    const res = await PUT(putRequest('acct-1', { gifiCode: null, gifiUnmappedByChoice: true }), { params: { id: 'acct-1' } });
+    expect(res.status).toBe(200);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ gifiCode: null, gifiUnmappedByChoice: true }),
+      }),
     );
   });
 

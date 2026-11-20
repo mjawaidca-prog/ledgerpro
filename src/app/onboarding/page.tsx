@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { cn } from '@/lib/cn';
 import { fiscalYearDates, BUSINESS_TYPES, PROVINCE_OPTIONS } from '@/lib/taxes';
+import { INDUSTRY_OPTIONS, industryLabel } from '@/lib/industry-coa';
 import {
   Building2, BookOpen, Link2, Check, ArrowRight, ArrowLeft,
   CreditCard, Upload, FileText, Loader2, Calendar,
@@ -79,6 +80,7 @@ export default function OnboardingPage() {
         name: companyName || undefined,
         legalName: legalName || null,
         businessType: businessType,
+        industry: industry || null,
         businessNumber: businessNumber || null,
         gstNumber: gstNumber || null,
         province: province,
@@ -293,17 +295,16 @@ export default function OnboardingPage() {
               </div>
 
               <div className="field">
-                <label>Industry</label>
+                <label>Industry — what does this business mainly do?</label>
                 <select className="input" value={industry} onChange={(e) => setIndustry(e.target.value)}>
                   <option value="">Select industry...</option>
-                  <option value="technology">Technology / SaaS</option>
-                  <option value="professional">Professional Services</option>
-                  <option value="retail">Retail / E-commerce</option>
-                  <option value="construction">Construction</option>
-                  <option value="healthcare">Healthcare</option>
-                  <option value="realestate">Real Estate</option>
-                  <option value="other">Other</option>
+                  {INDUSTRY_OPTIONS.map((o) => (
+                    <option key={o.key} value={o.key}>{o.label}</option>
+                  ))}
                 </select>
+                <p className="text-[10px] text-[var(--text-faint)]">
+                  Your chart of accounts starts with the standard accounts, plus a starter pack for your industry.
+                </p>
               </div>
             </div>
           )}
@@ -312,7 +313,11 @@ export default function OnboardingPage() {
           {step === 1 && (
             <div className="space-y-3">
               <p className="text-sm text-[var(--text-muted)]">
-                Your account already has a standard chart of accounts set up. You can customize it later from Settings.
+                Your account already has a standard chart of accounts set up
+                {industry && industry !== 'general'
+                  ? <>, including the <strong>{industryLabel(industry)}</strong> starter pack for your industry</>
+                  : null}
+                . You can customize it later from Settings.
               </p>
               <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-xl p-4">
                 <h4 className="text-sm font-semibold text-[var(--text-strong)] mb-2">Included accounts:</h4>

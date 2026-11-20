@@ -35,7 +35,7 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 interface JournalEntryInput {
   entryDate: Date;
   description: string;
-  sourceType: 'invoice' | 'bill' | 'payment' | 'transfer' | 'manual' | 'revaluation' | 'payroll';
+  sourceType: 'invoice' | 'bill' | 'payment' | 'transfer' | 'manual' | 'revaluation' | 'payroll' | 'loan' | 'fixed_asset';
   sourceId?: string;
   createdBy?: string;
   paymentAccountId?: string;

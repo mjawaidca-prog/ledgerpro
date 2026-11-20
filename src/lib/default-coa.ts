@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { addonPackAccounts, industryPackAccounts } from './industry-coa';
 
 export type DefaultChartAccount = {
   code: string;
@@ -119,6 +120,33 @@ export function chartTemplateForBusinessType(
   return businessType === 'corporation' ? CORPORATION_CHART_OF_ACCOUNTS : DEFAULT_CHART_OF_ACCOUNTS;
 }
 
+/**
+ * The full chart template for a company: CORE + industry pack
+ * (Phase 1 item 2, design §1.1). CORE is exactly the business-type
+ * template above — with no industry (or 'general'), the result IS the
+ * CORE template, unchanged. A chosen industry layers its pack on top;
+ * pack accounts whose GL code already exists in CORE are dropped
+ * (packs only add). Optional add-on packs (design §1.3) layer the
+ * same way. Composition is pure and idempotent — provisioning below
+ * additionally skips accounts the company already has, by code and
+ * by name, so applying a pack twice never duplicates an account.
+ */
+export function chartTemplateForCompany(
+  businessType?: string | null,
+  industry?: string | null,
+  addons?: readonly string[],
+): readonly DefaultChartAccount[] {
+  const core = chartTemplateForBusinessType(businessType);
+  const pack = [
+    ...industryPackAccounts(industry),
+    ...(addons ?? []).flatMap((key) => addonPackAccounts(key)),
+  ];
+  if (pack.length === 0) return core;
+  const coreCodes = new Set(core.map((account) => account.code));
+  const extra = pack.filter((account) => !coreCodes.has(account.code));
+  return extra.length === 0 ? core : [...core, ...extra];
+}
+
 export function isFinancialAccountKind(value: unknown): value is FinancialAccountKind {
   return typeof value === 'string' && FINANCIAL_ACCOUNT_KINDS.includes(value as FinancialAccountKind);
 }
@@ -127,27 +155,36 @@ export async function ensureDefaultChartOfAccounts(
   companyId: string,
   client: ChartAccountClient = db,
   businessType?: string | null,
+  industry?: string | null,
 ) {
   // Template selection (GIFI plan D1): a corporation gets the
   // corporation variant. Callers that know the type pass it; otherwise
   // resolve it from the company row when the client can (the lazy
   // ensure calls in the API routes pass a chart-only client, in which
   // case the default template applies, exactly as before).
-  let template = chartTemplateForBusinessType(businessType);
-  if (businessType === undefined) {
+  // Industry packs (Phase 1 item 2): the same resolution applies to
+  // Company.industry — pass it when known, else it is read from the
+  // company row, so a company created with an industry keeps receiving
+  // its pack accounts on every lazy ensure, and a company with no
+  // industry gets CORE only, exactly as before.
+  let resolvedBusinessType = businessType;
+  let resolvedIndustry = industry;
+  if (businessType === undefined || industry === undefined) {
     try {
       const companyClient = (client as any).company;
       if (companyClient?.findUnique) {
         const company = await companyClient.findUnique({
           where: { id: companyId },
-          select: { businessType: true },
+          select: { businessType: true, industry: true },
         });
-        template = chartTemplateForBusinessType(company?.businessType);
+        if (businessType === undefined) resolvedBusinessType = company?.businessType;
+        if (industry === undefined) resolvedIndustry = company?.industry;
       }
     } catch {
       // Resolution is best-effort — fall back to the default template.
     }
   }
+  const template = chartTemplateForCompany(resolvedBusinessType, resolvedIndustry);
 
   const defaultCodes = template.map((account) => account.code);
   const existing = await client.chartOfAccount.findMany({

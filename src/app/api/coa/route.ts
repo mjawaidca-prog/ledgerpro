@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany } from '@/lib/api-helpers';
 import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
 import { validateGifiCode, gifiTypeWarning } from '@/lib/gifi';
+import { gifiDecisionError } from '@/lib/gifi-readiness';
 import { getGLActivity, endOfDay, coaSummaryFromActivity } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const body = await req.json();
-    const { code, name, type, detailType, parentCode, description, gifiCode } = body;
+    const { code, name, type, detailType, parentCode, description, gifiCode, gifiUnmappedByChoice } = body;
 
     if (!code || !name || !type) {
       return NextResponse.json({ error: 'Code, name, and type are required' }, { status: 400 });
@@ -94,6 +95,23 @@ export async function POST(req: NextRequest) {
     const gifi = validateGifiCode(gifiCode);
     if (!gifi.ok) {
       return NextResponse.json({ error: gifi.error }, { status: 400 });
+    }
+
+    // GIFI-at-creation (improvement plan Phase 1, design §2.1): a new
+    // account must carry a GIFI DECISION — a code, a design exemption
+    // (Retained Earnings / Opening Balance Equity / Owner's Capital /
+    // Owner's Draw stay uncoded by design), or the recorded deliberate
+    // choice to leave it unmapped. A silent blank is refused here so
+    // no client can recreate the old "saved uncoded by accident" gap.
+    const decisionError = gifiDecisionError({
+      name,
+      type,
+      detailType: detailType || null,
+      gifiCode: gifi.code,
+      gifiUnmappedByChoice: gifiUnmappedByChoice === true,
+    });
+    if (decisionError) {
+      return NextResponse.json({ error: decisionError }, { status: 400 });
     }
 
     // Check for duplicate code
@@ -120,6 +138,9 @@ export async function POST(req: NextRequest) {
         parentCode: parentCode || null,
         description: description || null,
         gifiCode: gifi.code,
+        // The decision flag is only meaningful without a code; a coded
+        // account is decided by its code, so the two stay exclusive.
+        gifiUnmappedByChoice: gifi.code ? false : gifiUnmappedByChoice === true,
         balance: 0,
         active: true,
       },

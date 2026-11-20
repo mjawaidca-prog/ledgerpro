@@ -44,6 +44,9 @@ export const COMPANY_PURGE_DELEGATES = [
   'fxRevaluation',
   'interCompanyTransaction', // via link companyAId/companyBId or its entries
   'journalLine', // via journalEntry.companyId
+  'loanPayment', // via loan.companyId (Phase 1 loan tool)
+  'loanAdvance', // via loan.companyId
+  'fixedAssetDisposal', // via fixedAsset.companyId (Phase 1 CCA register)
   'transferMatch', // must precede journalEntry (entries restrict-reference it)
   'journalEntry', // self-ref reversalOfId nulled first
   'receipt', // references transaction + chartOfAccount (SetNull): before both
@@ -55,6 +58,8 @@ export const COMPANY_PURGE_DELEGATES = [
   'bill',
   'budgetLine', // via budget.companyId
   'budget',
+  'loan', // GL references are code strings, not FKs — safe anywhere before company
+  'fixedAsset', // GL references are code strings, not FKs — safe anywhere before company
   'recurringLine', // via template.companyId
   'recurringTemplate',
   'taxCodeComponent', // via taxCodeVersion.taxCode.companyId
@@ -150,6 +155,9 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
     },
 
     { delegate: 'journalLine', run: (tx) => tx.journalLine.deleteMany({ where: { journalEntry: { companyId } } }) },
+    { delegate: 'loanPayment', run: (tx) => tx.loanPayment.deleteMany({ where: { loan: { companyId } } }) },
+    { delegate: 'loanAdvance', run: (tx) => tx.loanAdvance.deleteMany({ where: { loan: { companyId } } }) },
+    { delegate: 'fixedAssetDisposal', run: (tx) => tx.fixedAssetDisposal.deleteMany({ where: { asset: { companyId } } }) },
     { delegate: 'transferMatch', run: (tx) => tx.transferMatch.deleteMany(byCompany) },
     { delegate: 'journalEntryUpdate', run: (tx) => tx.journalEntry.updateMany({ where: { companyId }, data: { reversalOfId: null } }) },
     { delegate: 'journalEntry', run: (tx) => tx.journalEntry.deleteMany(byCompany) },
@@ -170,6 +178,8 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
 
     { delegate: 'budgetLine', run: (tx) => tx.budgetLine.deleteMany({ where: { budget: { companyId } } }) },
     { delegate: 'budget', run: (tx) => tx.budget.deleteMany(byCompany) },
+    { delegate: 'loan', run: (tx) => tx.loan.deleteMany(byCompany) },
+    { delegate: 'fixedAsset', run: (tx) => tx.fixedAsset.deleteMany(byCompany) },
     { delegate: 'recurringLine', run: (tx) => tx.recurringLine.deleteMany({ where: { template: { companyId } } }) },
     { delegate: 'recurringTemplate', run: (tx) => tx.recurringTemplate.deleteMany(byCompany) },
 

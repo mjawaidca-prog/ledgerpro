@@ -57,9 +57,9 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
   const readiness = useMemo(() => computeGifiReadiness(accounts), [accounts]);
 
   if (gifiFlowMode(businessType) === 'quiet') return null;
-  if (readiness.total === 0) return null;
+  if (readiness.total === 0 && readiness.decidedUnmapped.length === 0) return null;
 
-  const { total, coded, needsCode } = readiness;
+  const { total, coded, needsCode, decidedUnmapped } = readiness;
 
   async function saveRow(accountId: string) {
     const value = (picks[accountId] ?? '').trim();
@@ -89,6 +89,29 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
     }
   }
 
+  // GIFI-at-creation (Phase 1): the other decision. Recording "leave
+  // unmapped" through the same PUT the Edit form uses — the API stores
+  // it as gifiUnmappedByChoice and the row leaves the worklist, because
+  // the account is decided, not forgotten. It still exports unmapped.
+  async function markUnmapped(accountId: string) {
+    setSavingId(accountId);
+    setRowError((prev) => ({ ...prev, [accountId]: '' }));
+    try {
+      const res = await fetch(`/api/coa/${accountId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gifiCode: null, gifiUnmappedByChoice: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to save');
+      onSaved?.();
+    } catch (e) {
+      setRowError((prev) => ({ ...prev, [accountId]: e instanceof Error ? e.message : 'Failed to save' }));
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-sm)] p-5 mb-5">
       <div className="flex items-baseline gap-3 flex-wrap">
@@ -97,18 +120,25 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
           {coded} of {total} accounts coded
         </span>
         {needsCode.length > 0 ? (
-          <Badge variant="pending" dot={false}>{needsCode.length} need{needsCode.length === 1 ? 's' : ''} a GIFI code</Badge>
+          <Badge variant="pending" dot={false}>{needsCode.length} need{needsCode.length === 1 ? 's' : ''} a GIFI decision</Badge>
         ) : (
           <span className="inline-flex items-center gap-1 text-sm text-[var(--success)]">
-            <CheckCircle2 size={14} /> Every countable account has a GIFI code
+            <CheckCircle2 size={14} /> Every countable account has a GIFI decision
+          </span>
+        )}
+        {decidedUnmapped.length > 0 && (
+          <span className="text-xs text-[var(--text-faint)]">
+            {decidedUnmapped.length} account{decidedUnmapped.length === 1 ? '' : 's'} left unmapped by choice
           </span>
         )}
       </div>
       <p className="text-xs text-[var(--text-muted)] mt-1.5 max-w-[860px]">
         Counts active accounts that need a GIFI code for the Nexvar Tax (tb-gifi/1) export. Retained Earnings,
         Opening Balance Equity, and owner&apos;s capital/draw accounts are excluded — they stay uncoded by design,
-        because the tax software calculates retained earnings itself. A code lives on the account, so changing
-        one re-codes future exports, including a re-export of an earlier year.
+        because the tax software calculates retained earnings itself. An account can also be left unmapped
+        on purpose (“Leave unmapped” below): that decision is recorded, the account leaves this list, and it
+        still exports unmapped. A code lives on the account, so changing one re-codes future exports,
+        including a re-export of an earlier year.
       </p>
 
       {needsCode.length > 0 && (
@@ -159,14 +189,25 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
                       suggestedCodes={suggestions.map((s) => s.code)}
                     />
                   </div>
-                  <Button
-                    variant="secondary"
-                    onClick={() => saveRow(accountId)}
-                    disabled={savingId === accountId || !dirty || !hasValidGifiCode(pick)}
-                  >
-                    {savingId === accountId ? <Loader2 size={14} className="animate-spin" /> : null}
-                    Save
-                  </Button>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <Button
+                      variant="secondary"
+                      onClick={() => saveRow(accountId)}
+                      disabled={savingId === accountId || !dirty || !hasValidGifiCode(pick)}
+                    >
+                      {savingId === accountId ? <Loader2 size={14} className="animate-spin" /> : null}
+                      Save
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => markUnmapped(accountId)}
+                      disabled={savingId === accountId}
+                      className="text-xs text-[var(--text-faint)] hover:text-[var(--text-strong)] disabled:opacity-45"
+                      title="Record the decision to leave this account unmapped — it exports unmapped on purpose and leaves this list"
+                    >
+                      Leave unmapped
+                    </button>
+                  </div>
                 </div>
                 {rowError[accountId] && <p className="text-xs text-[var(--danger)] mt-1.5">{rowError[accountId]}</p>}
                 {rowWarning[accountId] && <p className="text-xs text-[var(--warning)] mt-1.5">{rowWarning[accountId]}</p>}

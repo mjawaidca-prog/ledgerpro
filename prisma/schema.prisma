@@ -70,6 +70,7 @@ model Company {
   fiscalYearEnd      DateTime? // e.g. 2025-12-31 (display mirror: manual first-year end when set, else auto +1y -1d)
   firstFiscalYearEnd DateTime? // manual last day of the FIRST fiscal year (short/long first year); null = derive from start
   businessType       BusinessType? // sole_proprietor, partnership, corporation, etc.
+  industry           String? // industry pack key (src/lib/industry-coa.ts); null = CORE chart only
   businessNumber     String? // Canada: BN (9 digits)
   gstNumber          String? // GST/HST registration number
   province           CanadianProvince? // AB, BC, MB, NB, NL, NS, NT, NU, ON, PE, QC, SK, YT
@@ -125,6 +126,9 @@ model Company {
 
   taxWorkpapers       TaxReturnWorkpaper[]
   taxWorkpaperRemittances TaxWorkpaperRemittance[]
+
+  loans               Loan[]
+  fixedAssets         FixedAsset[]
 
   // ── Public API (v1) ──
   // Company-level emergency disable switch. Off by default: a company must
@@ -259,6 +263,12 @@ model ChartOfAccount {
   type        GLType
   subType     AccountSubType? // classification for statement presentation — falls back to a code-range heuristic when unset
   gifiCode    String? // CRA General Index of Financial Information code, for T2/CaseWare export
+  // GIFI-at-creation decision (improvement plan Phase 1): true records a
+  // DELIBERATE "leave unmapped" choice made in the account form — the
+  // account exports unmapped on purpose, as distinct from an account
+  // nobody has decided about yet (gifiCode null + this false). Only
+  // meaningful when gifiCode is null; the API keeps the two exclusive.
+  gifiUnmappedByChoice Boolean @default(false)
   detailType  String?
   parentCode  String?
   description String?
@@ -1188,6 +1198,8 @@ enum JournalSource {
   manual
   revaluation
   payroll
+  loan
+  fixed_asset
 }
 
 model JournalLine {
@@ -1312,6 +1324,282 @@ enum BudgetPeriod {
   monthly
   quarterly
   annual
+}
+
+// ─── LOANS & INTEREST (improvement plan Phase 1, item 3) ────
+//
+// A loan register: every loan is born with an amortization schedule
+// (src/lib/loans/engine.ts) and every payment posts its principal /
+// interest split as an approval-gated journal (sourceType 'loan').
+// Shareholder loans are first-class: advances are tracked individually
+// (never netted silently) so the s.15(2) deadline engine and the s.80.4
+// benefit estimate (src/lib/loans/shareholder.ts) work per advance.
+// GL mapping is by ChartOfAccount.code, the same convention JournalLine
+// uses — a loan names the liability/asset account it controls, the
+// interest expense account, and the bank account payments move through.
+
+model Loan {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  kind   LoanKind
+  status LoanStatus @default(active)
+
+  // Counterparty: the lender for a term loan ("Ford Credit"); the
+  // shareholder's name for shareholder loans.
+  lenderName     String
+  purpose        String? // what the loan funded, e.g. "2023 Ford F-150"
+  assetAccountCode String? // GL account of the asset the proceeds bought, when any
+
+  // Original terms. principal is the amount advanced at inception; for
+  // shareholder loans it mirrors the first advance and the LoanAdvance
+  // rows are the source of truth for the running balance.
+  principal      Decimal @db.Decimal(14, 2)
+  annualRatePct  Decimal @db.Decimal(10, 4) // nominal annual rate, percent (6.99 = 6.99%)
+  rateType       LoanRateType @default(fixed)
+  // Compounding periods per year (12 = monthly, 2 = Canadian mortgage
+  // semi-annual, 4 = quarterly, 1 = annual). Null = matches payment frequency.
+  compoundingPerYear Int?
+  startDate      DateTime // date the loan was advanced / opened
+  firstPaymentDate DateTime? // term loans: first scheduled payment
+  paymentFrequency LoanPaymentFrequency @default(monthly)
+  // The schedule solves for whichever of these is missing: a stated
+  // payment (dealer paperwork states the payment, not always the term)
+  // or a stated number of payments.
+  paymentAmount    Decimal? @db.Decimal(14, 2)
+  numberOfPayments Int?
+  balloonAmount    Decimal? @db.Decimal(14, 2) // amount still owing after the last scheduled payment
+
+  // GL mapping (ChartOfAccount.code within this company).
+  loanAccountCode     String // liability controlled by this loan (term) / Due from|to Shareholder account
+  interestAccountCode String? // expense account for the interest portion (term loans)
+  paymentAccountCode  String? // bank GL account payments come from / advances move through
+
+  // Lender statement balance as last entered by the user — the third leg
+  // of the balance proof (schedule vs GL vs statement).
+  statementBalance     Decimal? @db.Decimal(14, 2)
+  statementBalanceDate DateTime?
+
+  // CRA prescribed rate (percent) used for the s.80.4 benefit estimate on
+  // shareholder loans; an estimate input, updated by the accountant.
+  prescribedRatePct Decimal? @db.Decimal(10, 4)
+
+  notes     String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments LoanPayment[]
+  advances LoanAdvance[]
+
+  @@index([companyId, kind])
+  @@index([companyId, status])
+}
+
+enum LoanKind {
+  term // amortizing third-party loan (vehicle, equipment, term debt)
+  shareholder_advance // corporation → shareholder (s.15(2) exposure)
+  shareholder_funding // shareholder → corporation (due-to side)
+}
+
+enum LoanRateType {
+  fixed
+  variable
+}
+
+enum LoanStatus {
+  active
+  paid_off
+  closed
+}
+
+enum LoanPaymentFrequency {
+  monthly
+  biweekly
+  weekly
+}
+
+// One scheduled payment of a term loan. Rows are generated from the
+// engine at loan creation and regenerated for the unposted tail when an
+// actual payment differs from the schedule (re-amortize from actuals).
+// A row becomes 'posted' only through the approval-gated posting route,
+// which stamps journalEntryId — a schedule row is never itself a posting.
+model LoanPayment {
+  id     String @id @default(cuid())
+  loanId String
+  loan   Loan   @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  periodNumber   Int
+  dueDate        DateTime
+  openingBalance Decimal @db.Decimal(14, 2)
+  paymentAmount  Decimal @db.Decimal(14, 2)
+  interestPortion  Decimal @db.Decimal(14, 2)
+  principalPortion Decimal @db.Decimal(14, 2)
+  closingBalance   Decimal @db.Decimal(14, 2)
+
+  status LoanPaymentStatus @default(scheduled)
+  // Set when posted: what actually moved (may differ from the schedule —
+  // the difference re-amortizes the remaining tail).
+  actualAmount     Decimal? @db.Decimal(14, 2)
+  actualDate       DateTime?
+  journalEntryId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([loanId, periodNumber])
+  @@index([loanId, status])
+  @@index([loanId, dueDate])
+}
+
+enum LoanPaymentStatus {
+  scheduled
+  posted
+  skipped
+}
+
+// One movement on a shareholder loan. Advances are tracked individually
+// because s.15(2) attaches a deadline to EACH advance (one year after
+// the end of the taxation year of the advance) — netting them silently
+// would hide exactly the exposure the tool exists to surface. Register
+// records only: recording an advance never posts a journal.
+model LoanAdvance {
+  id     String @id @default(cuid())
+  loanId String
+  loan   Loan   @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  kind   LoanAdvanceKind
+  advanceDate DateTime
+  amount Decimal @db.Decimal(14, 2)
+  notes  String?
+
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  @@index([loanId, advanceDate])
+}
+
+enum LoanAdvanceKind {
+  advance
+  repayment
+}
+
+// ─── FIXED ASSETS / CCA REGISTER ─────────────────────────
+// The asset register (improvement plan Phase 1, item 4; design
+// DESIGN-TAX-DOMAIN.md §3). LedgerPro owns asset FACTS and book
+// depreciation; Nexvar Tax owns the CCA computation. Facts are
+// captured at purchase — capital cost NET of ITCs and government
+// assistance, CCA class, available-for-use date, AIIP flag, and the
+// would-be-Class-53 flag for Class 43 property (the flag whose
+// missing capture path was Nexvar Tax battery finding BF-2) — and
+// flow to the return through the `cca-register/1` export
+// (src/lib/cca-register.ts) instead of being re-asked at year-end.
+// Book depreciation is computed per asset by src/lib/cca/engine.ts
+// and reaches the ledger only through the approval-gated annual
+// posting (sourceType 'fixed_asset'). Disposal status is derived
+// from the FixedAssetDisposal row — there is no status column to
+// drift out of sync with it.
+
+model FixedAsset {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Identity (design §3.2).
+  description  String
+  serialNumber String? // serial / VIN where relevant (vehicles)
+  vendor       String?
+  invoiceRef   String?
+  location     String?
+
+  // CRA CCA class code, limited to the classes Nexvar Tax models
+  // (src/lib/cca/classes.ts mirrors its parameter bundle).
+  ccaClass String
+
+  // Cost facts. capitalCost is the cost FOR CCA and for book
+  // depreciation: grossCost − itcClaimed − governmentAssistance,
+  // recomputed on every write so the three can never disagree.
+  grossCost            Decimal @db.Decimal(14, 2) // full invoice cost incl. taxes paid
+  itcClaimed           Decimal @default(0) @db.Decimal(14, 2) // GST/HST ITC claimed on the purchase
+  governmentAssistance Decimal @default(0) @db.Decimal(14, 2)
+  capitalCost          Decimal @db.Decimal(14, 2)
+
+  acquisitionDate     DateTime
+  availableForUseDate DateTime // CCA cannot be claimed before this date
+  aiip                Boolean  @default(false) // Accelerated Investment Incentive Property
+  wouldBeClass53      Boolean  @default(false) // Class 43 only: would have been Class 53 if acquired in 2025 (BF-2)
+  luxuryVehicle       Boolean  @default(false) // passenger vehicle over the cost cap — Class 10.1 separation
+
+  // GL mapping (ChartOfAccount.code within this company). The asset
+  // account is chosen from the existing chart; the accumulated
+  // depreciation and depreciation expense accounts are get-or-created
+  // by the register (src/lib/cca/server.ts chart hygiene).
+  assetAccountCode    String?
+  accumDepAccountCode String?
+  depExpenseAccountCode String?
+
+  // Book depreciation policy. DEFAULT (owner decision still open —
+  // see PHASE1-CCA-REGISTER.md): mirror_tax — book depreciation
+  // follows the CCA shape (class rate, declining balance, half-year /
+  // AIIP first-year factors) so the Sch 1 difference stays small for
+  // small corporations. The per-asset alternatives stay available
+  // behind this field: straight_line (bookLifeYears), declining_balance
+  // (bookRatePct), none. Book depreciation is NOT CCA and the register
+  // never presents it as the tax deduction (design §3.1).
+  bookMethod    BookDepreciationMethod @default(mirror_tax)
+  bookRatePct   Decimal?               @db.Decimal(10, 4) // declining_balance override, percent (30 = 30%)
+  bookLifeYears Int? // straight_line life; also the lease/life term for mirror-tax SL classes 13/14
+
+  // Register adoption mid-life: book depreciation already recorded in
+  // the GL through openingAccumThrough. The engine starts from
+  // capitalCost − openingAccumDep and does not re-derive those years.
+  openingAccumDep     Decimal   @default(0) @db.Decimal(14, 2)
+  openingAccumThrough DateTime?
+
+  notes     String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  disposal FixedAssetDisposal?
+
+  @@index([companyId, ccaClass])
+  @@index([companyId, availableForUseDate])
+}
+
+enum BookDepreciationMethod {
+  mirror_tax // book depreciation follows the CCA shape (default — see FixedAsset)
+  straight_line // cost / bookLifeYears per year, no tax factors
+  declining_balance // bookRatePct on NBV, no tax factors
+  none // not depreciated in the books
+}
+
+// One disposal per asset. Proceeds and date are FACTS the tax engine
+// needs (recapture / terminal loss are computed in Nexvar Tax from
+// the pool); the book gain/loss (proceeds − NBV, GIFI 8210) is
+// computed in the register. 'shareholder_taken' carries a deemed-
+// proceeds warning in the UI — it is never silent (design §3.2).
+model FixedAssetDisposal {
+  id      String     @id @default(cuid())
+  assetId String     @unique
+  asset   FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  disposalDate DateTime
+  proceeds     Decimal        @db.Decimal(14, 2)
+  reason       DisposalReason
+  notes        String?
+
+  createdBy String?
+  createdAt DateTime @default(now())
+}
+
+enum DisposalReason {
+  sold
+  scrapped
+  shareholder_taken // taken by the shareholder — deemed proceeds thinking applies
+  traded_in
+  other
 }
 
 // ─── PERIOD CLOSE ──────────────────────────────────────────

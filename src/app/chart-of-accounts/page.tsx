@@ -12,11 +12,10 @@ import { money, moneySigned } from '@/lib/money';
 import { useRouter } from 'next/navigation';
 import { Search, Download, Loader2, ChevronDown, ChevronRight, ExternalLink, Plus, X, Pencil } from 'lucide-react';
 import { exportChartOfAccounts } from '@/lib/export';
-import { GifiCodePicker } from '@/components/coa/GifiCodePicker';
+import { GifiDecisionField } from '@/components/coa/GifiDecisionField';
 import { GifiReadinessPanel } from '@/components/coa/GifiReadinessPanel';
 import { hasValidGifiCode } from '@/lib/gifi';
-import { suggestGifiCodes } from '@/lib/gifi-suggestions';
-import type { GifiReadinessAccountInput } from '@/lib/gifi-readiness';
+import { hasGifiDecision, type GifiReadinessAccountInput } from '@/lib/gifi-readiness';
 import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import type { Column } from '@/components/ui/DataTable';
 
@@ -27,6 +26,7 @@ interface COAEntry {
   type: 'asset' | 'liability' | 'equity' | 'income' | 'expense';
   subType: string | null;
   gifiCode: string | null;
+  gifiUnmappedByChoice: boolean;
   detailType: string | null;
   parentCode: string | null;
   description: string | null;
@@ -97,6 +97,8 @@ export default function ChartOfAccountsPage() {
   const [newParentCode, setNewParentCode] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newGifiCode, setNewGifiCode] = useState('');
+  // GIFI-at-creation (Phase 1): the recorded "leave unmapped" decision.
+  const [newGifiUnmapped, setNewGifiUnmapped] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // Non-blocking warnings returned by the API (e.g. a GIFI code whose
@@ -108,6 +110,7 @@ export default function ChartOfAccountsPage() {
   const [editDetailType, setEditDetailType] = useState('');
   const [editSubType, setEditSubType] = useState('');
   const [editGifiCode, setEditGifiCode] = useState('');
+  const [editGifiUnmapped, setEditGifiUnmapped] = useState(false);
   const [editDescription, setEditDescription] = useState('');
   const [editActive, setEditActive] = useState(true);
   const [editSaving, setEditSaving] = useState(false);
@@ -120,6 +123,7 @@ export default function ChartOfAccountsPage() {
     setEditDetailType(acct.detailType || '');
     setEditSubType(acct.subType || '');
     setEditGifiCode(acct.gifiCode || '');
+    setEditGifiUnmapped(acct.gifiUnmappedByChoice === true);
     setEditDescription(acct.description || '');
     setEditActive(acct.active);
     setEditError(null);
@@ -137,6 +141,7 @@ export default function ChartOfAccountsPage() {
           detailType: editDetailType.trim() || null,
           subType: editSubType || null,
           gifiCode: editGifiCode.trim() || null,
+          gifiUnmappedByChoice: editGifiUnmapped,
           description: editDescription.trim() || null,
           active: editActive,
         }),
@@ -166,6 +171,7 @@ export default function ChartOfAccountsPage() {
           parentCode: newParentCode.trim() || null,
           description: newDescription.trim() || null,
           gifiCode: newGifiCode || null,
+          gifiUnmappedByChoice: newGifiUnmapped,
         }),
       });
       const json = await res.json();
@@ -184,6 +190,7 @@ export default function ChartOfAccountsPage() {
     setNewCode(''); setNewName(''); setNewType('expense');
     setNewDetailType(''); setNewParentCode(''); setNewDescription('');
     setNewGifiCode('');
+    setNewGifiUnmapped(false);
     setSaveError(null);
   }
 
@@ -238,6 +245,20 @@ export default function ChartOfAccountsPage() {
     });
   }
 
+  // GIFI-at-creation (Phase 1): Save stays disabled until the GIFI
+  // state is a decision — a valid code, a design exemption, or the
+  // recorded "leave unmapped" choice. Mirrors the API rule
+  // (gifiDecisionError) so the button, not a 400, teaches the rule.
+  const newGifiDecided = hasGifiDecision({
+    name: newName, type: newType, detailType: newDetailType || null,
+    gifiCode: newGifiCode || null, gifiUnmappedByChoice: newGifiUnmapped,
+  });
+  const editGifiDecided = !editingAccount || hasGifiDecision({
+    name: editName, type: editingAccount.type, detailType: editDetailType || null,
+    subType: editSubType || null,
+    gifiCode: editGifiCode || null, gifiUnmappedByChoice: editGifiUnmapped,
+  });
+
   // Group by type
   const grouped: Record<string, COAEntry[]> = {};
   for (const acct of accounts) {
@@ -286,7 +307,7 @@ export default function ChartOfAccountsPage() {
     },
     {
       key: 'gifiCode', header: 'GIFI', sortable: true,
-      render: (row) => <GifiCell code={row.gifiCode} />,
+      render: (row) => <GifiCell code={row.gifiCode} byChoice={row.gifiUnmappedByChoice} />,
     },
     {
       key: 'balance', header: 'Balance', type: 'num', sortable: true, align: 'right',
@@ -439,7 +460,7 @@ export default function ChartOfAccountsPage() {
                       >
                         <span className="font-mono text-[var(--text-muted)] w-[60px]">{parent.code}</span>
                         <span className="font-medium text-[var(--text-strong)] flex-1 group-hover:text-[var(--primary)] transition-colors">{parent.name}</span>
-                        <GifiCell code={parent.gifiCode} />
+                        <GifiCell code={parent.gifiCode} byChoice={parent.gifiUnmappedByChoice} />
                         <span className="text-xs text-[var(--text-muted)]">{parent.detailType}</span>
                         <button onClick={(e) => openEdit(parent, e)} className="p-1 rounded hover:bg-[var(--surface-3)] opacity-0 group-hover:opacity-100 transition-opacity">
                           <Pencil size={12} className="text-[var(--text-faint)]" />
@@ -462,7 +483,7 @@ export default function ChartOfAccountsPage() {
                           >
                             <span className="font-mono text-[var(--text-faint)] w-[60px] pl-6">{child.code}</span>
                             <span className="text-[var(--text)] flex-1 group-hover:text-[var(--primary)] transition-colors">{child.name}</span>
-                            <GifiCell code={child.gifiCode} />
+                            <GifiCell code={child.gifiCode} byChoice={child.gifiUnmappedByChoice} />
                             <span className="text-xs text-[var(--text-muted)]">{child.detailType}</span>
                             <button onClick={(e) => openEdit(child, e)} className="p-1 rounded hover:bg-[var(--surface-3)] opacity-0 group-hover:opacity-100 transition-opacity">
                               <Pencil size={12} className="text-[var(--text-faint)]" />
@@ -531,11 +552,14 @@ export default function ChartOfAccountsPage() {
               </div>
               <div className="field">
                 <label>GIFI Code <span className="text-[var(--text-faint)]">(for CRA T2 export — the account code above is a different number)</span></label>
-                <GifiCodePicker
+                <GifiDecisionField
+                  name={newName}
+                  accountType={newType}
+                  detailType={newDetailType || null}
                   value={newGifiCode}
                   onChange={setNewGifiCode}
-                  accountType={newType}
-                  suggestedCodes={suggestGifiCodes({ name: newName, type: newType, detailType: newDetailType || null }).map((s) => s.code)}
+                  unmappedByChoice={newGifiUnmapped}
+                  onUnmappedByChoiceChange={setNewGifiUnmapped}
                 />
               </div>
               <div className="field">
@@ -544,9 +568,14 @@ export default function ChartOfAccountsPage() {
               </div>
             </div>
 
+            {!newGifiDecided && (
+              <p className="text-xs text-[var(--text-muted)] mt-4">
+                To save: use the suggested GIFI code, pick a different one, or tick “Leave unmapped”.
+              </p>
+            )}
             <div className="flex gap-3 mt-6 justify-end">
               <Button variant="secondary" onClick={() => { setShowNewModal(false); resetForm(); }}>Cancel</Button>
-              <Button onClick={createAccount} disabled={saving || !newCode.trim() || !newName.trim()}>
+              <Button onClick={createAccount} disabled={saving || !newCode.trim() || !newName.trim() || !newGifiDecided}>
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
                 Create Account
               </Button>
@@ -589,11 +618,15 @@ export default function ChartOfAccountsPage() {
               </div>
               <div className="field">
                 <label>GIFI Code <span className="text-[var(--text-faint)]">(for CRA T2 export)</span></label>
-                <GifiCodePicker
+                <GifiDecisionField
+                  name={editName}
+                  accountType={editingAccount.type}
+                  detailType={editDetailType || null}
+                  subType={editSubType || null}
                   value={editGifiCode}
                   onChange={setEditGifiCode}
-                  accountType={editingAccount.type}
-                  suggestedCodes={suggestGifiCodes({ name: editName, type: editingAccount.type, detailType: editDetailType || null, gifiCode: editGifiCode || null }).map((s) => s.code)}
+                  unmappedByChoice={editGifiUnmapped}
+                  onUnmappedByChoiceChange={setEditGifiUnmapped}
                 />
               </div>
               <div className="field">
@@ -606,9 +639,14 @@ export default function ChartOfAccountsPage() {
               </label>
             </div>
 
+            {!editGifiDecided && (
+              <p className="text-xs text-[var(--text-muted)] mt-4">
+                To save: use the suggested GIFI code, pick a different one, or tick “Leave unmapped”.
+              </p>
+            )}
             <div className="flex gap-3 mt-6 justify-end">
               <Button variant="secondary" onClick={() => setEditingAccount(null)}>Cancel</Button>
-              <Button onClick={saveEdit} disabled={editSaving || !editName.trim()}>
+              <Button onClick={saveEdit} disabled={editSaving || !editName.trim() || !editGifiDecided}>
                 {editSaving ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={14} />}
                 Save Changes
               </Button>
@@ -623,9 +661,11 @@ export default function ChartOfAccountsPage() {
 /**
  * GIFI cell for the chart list: the code when the account carries a
  * valid assignable one; an amber flag when it is missing or holds a
- * legacy invalid value (both export as unmapped).
+ * legacy invalid value (both export as unmapped); a quiet "by choice"
+ * note when the unmapped state is a recorded decision (Phase 1), so a
+ * decided account never reads as a gap.
  */
-function GifiCell({ code }: { code: string | null }) {
+function GifiCell({ code, byChoice }: { code: string | null; byChoice?: boolean }) {
   if (code && hasValidGifiCode(code)) {
     return <span className="font-mono text-xs text-[var(--text-muted)]" title={`GIFI ${code}`}>GIFI {code}</span>;
   }
@@ -635,6 +675,9 @@ function GifiCell({ code }: { code: string | null }) {
         GIFI {code} ⚠
       </span>
     );
+  }
+  if (byChoice) {
+    return <span className="text-xs text-[var(--text-faint)]" title="Left unmapped on purpose — a recorded decision, not a gap">No GIFI · by choice</span>;
   }
   return <span className="text-xs text-[var(--warning)]" title="No GIFI code — this account exports unmapped">No GIFI</span>;
 }

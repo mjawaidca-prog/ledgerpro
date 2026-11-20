@@ -240,3 +240,37 @@ export function suggestGifiCodes(input: GifiSuggestionInput): GifiSuggestion[] {
 
   return out;
 }
+
+// ── Mixed-account detection (design §2.1, point 4) ───────────────────
+//
+// Some account names describe a MIXED payment — the canonical case is
+// Muja's "Motor Vehicle — Ford Credit Payments" (account 5410, left
+// unmapped for a real reason): one payment blends loan principal (a
+// balance-sheet amount) and interest (an expense), which take
+// different GIFI codes, so no single code is honest for the whole
+// account. The design's rule: an account that mixes principal and
+// interest should not be coded as one thing — the fix is to split it
+// (loan liability + interest expense), not to pick a code. This helper
+// only DETECTS and explains; the form shows the notice and the user
+// still makes a decision (a code, or deliberate unmapped). Advisory,
+// never a block.
+//
+// Deliberately narrow — a payment word AND a borrowing word — so
+// ordinary accounts ("Accounts Payable", "Insurance") never trip it.
+
+const MIXED_PAYMENT_WORDS: readonly string[] = ['payment', 'payments', 'pmt'];
+const MIXED_BORROWING_WORDS: readonly string[] = ['loan', 'credit', 'financ', 'mortgage'];
+
+/**
+ * Plain-language warning when an account name sounds like a combined
+ * loan payment (principal + interest in one account), or null. Shown
+ * in the account form in place of a confident single-code suggestion.
+ */
+export function mixedGifiAccountNotice(input: { name: string }): string | null {
+  const normalized = normalizeAccountName(input.name ?? '');
+  if (!normalized) return null;
+  const hasPayment = MIXED_PAYMENT_WORDS.some((w) => normalized.includes(w));
+  const hasBorrowing = MIXED_BORROWING_WORDS.some((w) => normalized.includes(w));
+  if (!hasPayment || !hasBorrowing) return null;
+  return 'This name sounds like a loan payment. One loan payment usually mixes principal (a balance-sheet amount) and interest (an expense), which take different GIFI codes — so no single code is right for the whole account. The clean fix is to split it: keep the loan itself as a liability account and post the interest to an interest expense account. You can still save this account — just make its GIFI decision below with that in mind.';
+}

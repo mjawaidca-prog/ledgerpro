@@ -26,6 +26,8 @@ import {
   Target,
   ArrowLeftRight,
   CircleHelp,
+  CircleDollarSign,
+  Factory,
   KeyRound,
   Camera,
 } from 'lucide-react';
@@ -51,6 +53,8 @@ const mainNavItems = [
   { href: '/chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
   { href: '/reports',       label: 'Reports',            icon: BarChart3 },
   { href: '/budgets',       label: 'Budgets',            icon: Target },
+  { href: '/loans',         label: 'Loans',              icon: CircleDollarSign },
+  { href: '/fixed-assets',  label: 'Fixed Assets',       icon: Factory },
   { href: '/contacts',      label: 'Contacts',           icon: Users },
   { href: '/intercompany',  label: 'Related Parties',    icon: ArrowLeftRight },
 ];

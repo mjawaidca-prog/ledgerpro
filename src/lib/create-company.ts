@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
+import { normalizeIndustry } from '@/lib/industry-coa';
 import { derivedFiscalYearEnd } from '@/lib/fiscal-year';
 
 type CompanyClient = Prisma.TransactionClient | typeof db;
@@ -15,9 +16,16 @@ export async function createCompanyForUser(
   userId: string,
   companyName: string,
   businessType?: 'sole_proprietor' | 'partnership' | 'corporation' | 'nonprofit' | 'other' | null,
+  industry?: string | null,
 ) {
   const freePlan = await client.plan.findFirst({ where: { name: 'Free Trial' } });
   if (!freePlan) throw new Error('No free trial plan found. Run seed first.');
+
+  // Industry is usually set later, at onboarding; when a caller already
+  // knows it, storing the normalized pack key here lets the chart seed
+  // layer the industry pack on CORE from day one. Unknown values are
+  // dropped (null = CORE only) rather than stored.
+  const normalizedIndustry = normalizeIndustry(industry);
 
   const fiscalYearStart = new Date(new Date().getFullYear().toString() + '-01-01');
   const company = await client.company.create({
@@ -27,6 +35,7 @@ export async function createCompanyForUser(
       // already knows it, storing it here lets the chart seed pick the
       // matching template (corporation variant) from day one.
       ...(businessType ? { businessType } : {}),
+      ...(normalizedIndustry ? { industry: normalizedIndustry } : {}),
       fiscalYearStart,
       // Phase 0 (P0-5): end is derived from start from day one, so a new
       // company's two fields can never start out inconsistent.
@@ -58,7 +67,7 @@ export async function createCompanyForUser(
     },
   });
 
-  await ensureDefaultChartOfAccounts(company.id, client as any, businessType);
+  await ensureDefaultChartOfAccounts(company.id, client as any, businessType, normalizedIndustry);
 
   return company;
 }

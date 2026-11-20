@@ -21,6 +21,10 @@
  *    accounts, likewise left uncoded by the template design. Counting
  *    them would make "fully coded" unreachable and train users to
  *    ignore the counter.
+ *  - Accounts the user DELIBERATELY left unmapped in the form
+ *    (gifiUnmappedByChoice, Phase 1 GIFI-at-creation) are excluded the
+ *    same way — the decision is made — and reported separately as
+ *    decidedUnmapped so screens can name them as a choice, not a gap.
  *
  * Entity behaviour (plan D5, approved default): corporations,
  * partnerships and nonprofits get the full flow — GIFI is how their
@@ -45,6 +49,13 @@ export interface GifiReadinessAccountInput {
   subType?: string | null;
   detailType?: string | null;
   gifiCode?: string | null;
+  /**
+   * GIFI-at-creation (Phase 1): the recorded DELIBERATE "leave
+   * unmapped" decision. True only ever alongside a null code (the API
+   * keeps them exclusive). Absent on rows fetched before the column
+   * existed — treated as false.
+   */
+  gifiUnmappedByChoice?: boolean | null;
   active?: boolean;
 }
 
@@ -64,6 +75,15 @@ export interface GifiReadiness {
   coded: number;
   /** The worklist: countable accounts with no code, or an invalid one. */
   needsCode: GifiReadinessItem[];
+  /**
+   * Active, non-exempt accounts the user DELIBERATELY left unmapped
+   * (Phase 1 decision flag). Excluded from total/needsCode — the
+   * decision is made, so nagging would train users to ignore the
+   * counter, the same reasoning as the D2 design exemptions. They
+   * still export as gifiCode: null; this list exists so screens can
+   * name them as "unmapped by choice" rather than as gaps.
+   */
+  decidedUnmapped: GifiReadinessAccountInput[];
 }
 
 /** Trim, lowercase, collapse whitespace, unify apostrophes — for name matching. */
@@ -105,7 +125,9 @@ export function gifiAccountStatus(account: GifiReadinessAccountInput): GifiAccou
 
 /**
  * The readiness computation. Inactive accounts are ignored (the export
- * ignores them too); design-exempt accounts are ignored (see header).
+ * ignores them too); design-exempt accounts are ignored (see header);
+ * deliberately-unmapped accounts are decided, so they leave the
+ * worklist and are reported separately (see GifiReadiness).
  */
 export function computeGifiReadiness(
   accounts: readonly GifiReadinessAccountInput[],
@@ -113,12 +135,17 @@ export function computeGifiReadiness(
   let total = 0;
   let coded = 0;
   const needsCode: GifiReadinessItem[] = [];
+  const decidedUnmapped: GifiReadinessAccountInput[] = [];
 
   for (const account of accounts) {
     if (account.active === false) continue;
     if (isGifiDesignExempt(account)) continue;
-    total += 1;
     const status = gifiAccountStatus(account);
+    if (status !== 'coded' && account.gifiUnmappedByChoice === true) {
+      decidedUnmapped.push(account);
+      continue;
+    }
+    total += 1;
     if (status === 'coded') {
       coded += 1;
     } else {
@@ -130,7 +157,54 @@ export function computeGifiReadiness(
     }
   }
 
-  return { total, coded, needsCode };
+  return { total, coded, needsCode, decidedUnmapped };
+}
+
+// ── GIFI-at-creation: the decision rule (Phase 1, design §2.1) ──────
+//
+// "No account can be saved without a GIFI decision." A decision is any
+// one of:
+//   1. a valid assignable code on the account;
+//   2. a design exemption (D2 — Retained Earnings, Opening Balance
+//      Equity, Owner's Capital / Owner's Draw stay uncoded by design,
+//      so for them uncoded IS the decided state);
+//   3. the recorded deliberate choice to leave the account unmapped
+//      (gifiUnmappedByChoice).
+// Anything else — blank code, no flag, non-exempt — is an undecided
+// account, and the create/edit API refuses to save it that way. The
+// account forms mirror this rule to disable Save until a decision
+// exists, so the API error is a backstop, not the primary UX.
+
+export interface GifiDecisionInput {
+  name?: string | null;
+  type?: string | null;
+  subType?: string | null;
+  detailType?: string | null;
+  gifiCode?: string | null;
+  gifiUnmappedByChoice?: boolean | null;
+}
+
+/** True when the account's GIFI state is a decision, per the rule above. */
+export function hasGifiDecision(input: GifiDecisionInput): boolean {
+  if (hasValidGifiCode((input.gifiCode ?? '').trim())) return true;
+  if (input.gifiUnmappedByChoice === true) return true;
+  return isGifiDesignExempt({
+    code: '',
+    name: input.name ?? '',
+    type: input.type ?? '',
+    subType: input.subType ?? null,
+    detailType: input.detailType ?? null,
+  });
+}
+
+/**
+ * The API error for a save that carries no GIFI decision, or null when
+ * the decision exists. Message is written for the bookkeeper, not the
+ * developer — it names the two ways to make the decision.
+ */
+export function gifiDecisionError(input: GifiDecisionInput): string | null {
+  if (hasGifiDecision(input)) return null;
+  return 'Choose a GIFI code for this account, or tick "Leave unmapped" to record that it stays uncoded on purpose — every account needs one decision or the other before it can be saved';
 }
 
 export type GifiFlowMode = 'full' | 'quiet';

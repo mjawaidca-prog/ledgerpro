@@ -3,6 +3,8 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { getServerSession } from '@/lib/auth';
 import { createCompanyForUser } from '@/lib/create-company';
+import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
+import { isKnownIndustryValue, normalizeIndustry } from '@/lib/industry-coa';
 import { derivedFiscalYearEnd, firstFiscalYearOf, validateFiscalYearEnd } from '@/lib/fiscal-year';
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +42,7 @@ export async function GET(req: NextRequest) {
         fiscalYearEnd: m.company.fiscalYearEnd,
         firstFiscalYearEnd: m.company.firstFiscalYearEnd,
         businessType: m.company.businessType,
+        industry: m.company.industry,
         businessNumber: m.company.businessNumber,
         gstNumber: m.company.gstNumber,
         province: m.company.province,
@@ -81,8 +84,13 @@ export async function POST(req: NextRequest) {
     if (name.length < 2) {
       return NextResponse.json({ error: 'Company name must be at least 2 characters' }, { status: 400 });
     }
+    if (body?.industry !== undefined && !isKnownIndustryValue(body.industry)) {
+      return NextResponse.json({ error: 'Unknown industry.' }, { status: 400 });
+    }
 
-    const company = await db.$transaction((tx) => createCompanyForUser(tx, userId, name));
+    const company = await db.$transaction((tx) =>
+      createCompanyForUser(tx, userId, name, undefined, body?.industry),
+    );
 
     await auditLog(company.id, userId, 'company.create', 'company', company.id, { name });
 
@@ -110,6 +118,30 @@ export async function PUT(req: NextRequest) {
     for (const key of allowed) {
       if (body[key] !== undefined) {
         data[key] = body[key];
+      }
+    }
+
+    // ── Industry (Phase 1 item 2) ──
+    // Stores the normalized pack key from src/lib/industry-coa.ts.
+    // When the industry CHANGES to a pack, the pack's accounts are
+    // layered onto the chart after the update (provisioning is
+    // idempotent — accounts the company already has are skipped, and
+    // switching industries never removes accounts). Clearing the
+    // industry (null / '') stores null and changes nothing on the
+    // chart: CORE-only applies to new provisioning, history stays.
+    let industryChangedTo: string | null = null;
+    if (body.industry !== undefined) {
+      if (!isKnownIndustryValue(body.industry)) {
+        return NextResponse.json({ error: 'Unknown industry.' }, { status: 400 });
+      }
+      const normalized = normalizeIndustry(body.industry);
+      const current = await db.company.findUnique({
+        where: { id: companyId },
+        select: { industry: true },
+      });
+      data.industry = normalized;
+      if (normalized && normalized !== (current?.industry ?? null)) {
+        industryChangedTo = normalized;
       }
     }
 
@@ -217,6 +249,10 @@ export async function PUT(req: NextRequest) {
       where: { id: companyId },
       data,
     });
+
+    if (industryChangedTo) {
+      await ensureDefaultChartOfAccounts(companyId, db, updated.businessType, industryChangedTo);
+    }
 
     await auditLog(companyId, userId, 'company.update', 'company', companyId, body);
 
