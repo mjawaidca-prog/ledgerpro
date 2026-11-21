@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { money } from '@/lib/money';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, FileUp } from 'lucide-react';
 
 function kindLabel(kind: string): string {
   if (kind === 'term') return 'Term loan';
@@ -56,6 +56,9 @@ export default function LoansPage() {
           </p>
         </div>
         <div className="spacer" />
+        <Button variant="secondary" onClick={() => router.push('/loans/import')}>
+          <FileUp size={16} /> Import from statement
+        </Button>
         <Button onClick={() => router.push('/loans/new')}>
           <Plus size={16} /> New Loan
         </Button>

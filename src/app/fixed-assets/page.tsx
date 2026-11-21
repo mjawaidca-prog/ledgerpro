@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Alert } from '@/components/ui/Alert';
 import { money } from '@/lib/money';
 import { Plus, Loader2, Download, CheckCircle2 } from 'lucide-react';
+import WritebackCard from './WritebackCard';
 
 export default function FixedAssetsPage() {
   const router = useRouter();
@@ -180,6 +181,8 @@ export default function FixedAssetsPage() {
               </CardBody>
             </Card>
           )}
+
+          <WritebackCard />
 
           {assets.length === 0 ? (
             <Card>

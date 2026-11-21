@@ -61,18 +61,88 @@ export interface AzureProviderConfig {
   timeoutMs?: number;
 }
 
-/** Build the provider from env, or null when either variable is absent. */
-export function createAzureProviderFromEnv(env: NodeJS.ProcessEnv): ReceiptOcrProvider | null {
+/** The env-derived config, or null when either variable is absent. */
+export function azureConfigFromEnv(env: NodeJS.ProcessEnv): AzureProviderConfig | null {
   const endpoint = env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT?.trim();
   const key = env.AZURE_DOCUMENT_INTELLIGENCE_KEY?.trim();
   if (!endpoint || !key) return null;
-  return createAzureDocumentIntelligenceProvider({ endpoint, key });
+  return { endpoint, key };
+}
+
+/** Build the provider from env, or null when either variable is absent. */
+export function createAzureProviderFromEnv(env: NodeJS.ProcessEnv): ReceiptOcrProvider | null {
+  const config = azureConfigFromEnv(env);
+  if (!config) return null;
+  return createAzureDocumentIntelligenceProvider(config);
+}
+
+/**
+ * The one Azure Document Intelligence transport — submit the document
+ * bytes to a model, poll the operation to completion, return the raw
+ * analyze result. Every document reader in the app (the receipt
+ * provider here, the loan-statement provider in
+ * src/lib/loans/statement-ocr.ts) goes through this function so there
+ * is exactly one OCR stack: one timeout policy, one set of error
+ * messages, one place a second service would be wired in.
+ */
+export async function analyzeDocumentWithAzure(
+  config: AzureProviderConfig,
+  modelId: string,
+  input: { buffer: Buffer; mimeType: string },
+): Promise<any> {
+  const endpoint = config.endpoint.replace(/\/+$/, '');
+  const fetchImpl: FetchLike = config.fetchImpl ?? ((url, init) => fetch(url, init) as any);
+  const pollIntervalMs = config.pollIntervalMs ?? POLL_INTERVAL_MS;
+  const timeoutMs = config.timeoutMs ?? AZURE_DI_TIMEOUT_MS;
+  return withExtractionTimeout(
+    (async () => {
+      const submit = await fetchImpl(
+        `${endpoint}/documentintelligence/documentModels/${modelId}:analyze?api-version=${AZURE_DI_API_VERSION}`,
+        {
+          method: 'POST',
+          headers: {
+            'Ocp-Apim-Subscription-Key': config.key,
+            'Content-Type': input.mimeType,
+          },
+          body: input.buffer,
+        },
+      );
+      if (submit.status !== 202) {
+        const detail = await submit.text().catch(() => '');
+        throw new Error(`Azure Document Intelligence rejected the document (HTTP ${submit.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+      }
+      const operationUrl = submit.headers.get('Operation-Location') ?? submit.headers.get('operation-location');
+      if (!operationUrl) throw new Error('Azure Document Intelligence did not return an operation URL.');
+
+      // Poll the operation until it settles. The caller's timeout
+      // bounds the race; this deadline also stops the loop itself
+      // so an abandoned poll never runs on in the background.
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        if (Date.now() > deadline) {
+          throw new Error(`Azure Document Intelligence timed out after ${Math.round(timeoutMs / 1000)}s.`);
+        }
+        const poll = await fetchImpl(operationUrl, {
+          headers: { 'Ocp-Apim-Subscription-Key': config.key },
+        });
+        if (!poll.ok) throw new Error(`Azure Document Intelligence polling failed (HTTP ${poll.status}).`);
+        const result = await poll.json();
+        if (result.status === 'succeeded') {
+          return result;
+        }
+        if (result.status === 'failed') {
+          const message = result.error?.message ?? 'The document could not be read.';
+          throw new Error(`Azure Document Intelligence failed: ${message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+    })(),
+    timeoutMs,
+  );
 }
 
 export function createAzureDocumentIntelligenceProvider(config: AzureProviderConfig): ReceiptOcrProvider {
   const endpoint = config.endpoint.replace(/\/+$/, '');
-  const fetchImpl: FetchLike = config.fetchImpl ?? ((url, init) => fetch(url, init) as any);
-  const pollIntervalMs = config.pollIntervalMs ?? POLL_INTERVAL_MS;
 
   return {
     id: AZURE_DI_PROVIDER_ID,
@@ -81,52 +151,8 @@ export function createAzureDocumentIntelligenceProvider(config: AzureProviderCon
       if (!(AZURE_DI_MIME_TYPES as readonly string[]).includes(mimeType)) {
         throw new Error(`Azure Document Intelligence cannot read ${mimeType} documents.`);
       }
-      const timeoutMs = config.timeoutMs ?? AZURE_DI_TIMEOUT_MS;
-      return withExtractionTimeout(
-        (async () => {
-          const submit = await fetchImpl(
-            `${endpoint}/documentintelligence/documentModels/${AZURE_DI_MODEL}:analyze?api-version=${AZURE_DI_API_VERSION}`,
-            {
-              method: 'POST',
-              headers: {
-                'Ocp-Apim-Subscription-Key': config.key,
-                'Content-Type': mimeType,
-              },
-              body: buffer,
-            },
-          );
-          if (submit.status !== 202) {
-            const detail = await submit.text().catch(() => '');
-            throw new Error(`Azure Document Intelligence rejected the document (HTTP ${submit.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`);
-          }
-          const operationUrl = submit.headers.get('Operation-Location') ?? submit.headers.get('operation-location');
-          if (!operationUrl) throw new Error('Azure Document Intelligence did not return an operation URL.');
-
-          // Poll the operation until it settles. The caller's timeout
-          // bounds the race; this deadline also stops the loop itself
-          // so an abandoned poll never runs on in the background.
-          const deadline = Date.now() + timeoutMs;
-          for (;;) {
-            if (Date.now() > deadline) {
-              throw new Error(`Azure Document Intelligence timed out after ${Math.round(timeoutMs / 1000)}s.`);
-            }
-            const poll = await fetchImpl(operationUrl, {
-              headers: { 'Ocp-Apim-Subscription-Key': config.key },
-            });
-            if (!poll.ok) throw new Error(`Azure Document Intelligence polling failed (HTTP ${poll.status}).`);
-            const result = await poll.json();
-            if (result.status === 'succeeded') {
-              return mapAzureAnalyzeResult(result);
-            }
-            if (result.status === 'failed') {
-              const message = result.error?.message ?? 'The document could not be read.';
-              throw new Error(`Azure Document Intelligence failed: ${message}`);
-            }
-            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-          }
-        })(),
-        timeoutMs,
-      );
+      const result = await analyzeDocumentWithAzure(config, AZURE_DI_MODEL, { buffer, mimeType });
+      return mapAzureAnalyzeResult(result);
     },
   };
 }

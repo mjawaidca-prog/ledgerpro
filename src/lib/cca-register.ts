@@ -21,11 +21,12 @@
  *    amortization expense actually in the trial balance (GIFI
  *    8670/8570 accounts) — the difference is REPORTED, never hidden;
  *  - the Schedule 1 inputs that are machine-supplied: the book
- *    amortization add-back. `ccaClaimed` is RESERVED (null): the CCA
- *    figure is computed in Nexvar Tax at filing time and flows back
- *    through the write-back loop (design §3.4 — deferred, pending an
- *    owner decision), which will also populate each class's
- *    `openingUccAsFiled`. LedgerPro never invents either number.
+ *    amortization add-back, and — once a `cca-writeback/1` payload
+ *    for the year has been imported (design §3.4, Phase 3 item 5) —
+ *    the CCA claimed AS FILED, plus each class's `openingUccAsFiled`
+ *    from the prior year's filed closing UCC. Both stay null until a
+ *    write-back supplies them: LedgerPro never invents either
+ *    number, it only carries filed ones.
  *
  * Server-side only (the hash uses node:crypto, via tb-gifi).
  */
@@ -91,6 +92,19 @@ export interface BuildCcaRegisterInput {
    * ledger has no such accounts to compare against.
    */
   ledgerAmortizationExpenseCents: number | null;
+  /**
+   * CCA claimed for THIS fiscal year as filed, from the latest
+   * `cca-writeback/1` record for the year (design §3.4). Null when
+   * no write-back has been imported — the figure is computed in
+   * Nexvar Tax at filing time and only ever arrives filed.
+   */
+  ccaClaimedCents?: number | null;
+  /**
+   * Opening UCC as filed, per class: the prior fiscal year's filed
+   * closing UCC from the latest `cca-writeback/1` record for that
+   * year. Classes absent from the map export null.
+   */
+  openingUccAsFiledCentsByClass?: Record<string, number>;
 }
 
 export interface BuildCcaRegisterResult {
@@ -138,10 +152,14 @@ export function buildCcaRegisterPayload(input: BuildCcaRegisterInput): BuildCcaR
     label: c.label,
     ratePct: c.ratePct,
     method: c.method,
-    // Reserved for the write-back loop (design §3.4): the opening UCC
-    // as filed on last year's return. Null until Nexvar Tax writes it
-    // back — LedgerPro does not keep a shadow UCC.
-    openingUccAsFiled: null,
+    // The opening UCC as filed on last year's return, from the
+    // latest cca-writeback/1 record for the prior year (design
+    // §3.4). Null until a write-back supplies it — LedgerPro does
+    // not keep a shadow UCC.
+    openingUccAsFiled:
+      input.openingUccAsFiledCentsByClass?.[c.ccaClass] != null
+        ? centsToMoney(input.openingUccAsFiledCentsByClass[c.ccaClass])
+        : null,
     openingCapitalCost: centsToMoney(c.openingCapitalCostCents),
     additions: c.additionAssetIds.map((id) => {
       const a = byId.get(id);
@@ -204,10 +222,11 @@ export function buildCcaRegisterPayload(input: BuildCcaRegisterInput): BuildCcaR
     schedule1: {
       // Machine-supplied Sch 1 inputs (design §3.1/§3.3): add back
       // the book amortization; the CCA claimed is deducted against
-      // it. ccaClaimed is RESERVED — it is computed in Nexvar Tax at
-      // filing time and returns via the write-back loop (§3.4).
+      // it. ccaClaimed is the AS-FILED total from the latest
+      // cca-writeback/1 record for the year (§3.4) — null until a
+      // write-back has been imported.
       bookAmortizationAddBack: centsToMoney(bookExpenseCents),
-      ccaClaimed: null,
+      ccaClaimed: input.ccaClaimedCents != null ? centsToMoney(input.ccaClaimedCents) : null,
     },
   };
 

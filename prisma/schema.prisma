@@ -112,6 +112,8 @@ model Company {
   budgets             Budget[]
   periodCloses        PeriodClose[]
   healthFlagDismissals HealthFlagDismissal[]
+  askBooksQueries     AskBooksQuery[]
+  reconRejectedPairings ReconRejectedPairing[]
   recurringTemplates  RecurringTemplate[]
   categorizationRules CategorizationRule[]
   reportTemplates     ReportTemplate[]
@@ -137,6 +139,7 @@ model Company {
 
   loans               Loan[]
   fixedAssets         FixedAsset[]
+  ccaWritebacks       CcaWriteback[]
 
   // ── Public API (v1) ──
   // Company-level emergency disable switch. Off by default: a company must
@@ -147,6 +150,7 @@ model Company {
   bankConnections   BankConnection[]
   receipts          Receipt[]
   receiptUploadLinks ReceiptUploadLink[]
+  loanStatements    LoanStatement[]
 }
 
 enum BusinessType {
@@ -518,6 +522,7 @@ model Transaction {
   bankFeedTransaction BankFeedTransaction?
   receipts            Receipt[]
   aiSuggestions       AiSuggestion[]
+  reconRejectedPairings ReconRejectedPairing[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1261,6 +1266,7 @@ enum JournalSource {
   payroll
   loan
   fixed_asset
+  cca_writeback
 }
 
 model JournalLine {
@@ -1489,8 +1495,9 @@ model Loan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  payments LoanPayment[]
-  advances LoanAdvance[]
+  payments   LoanPayment[]
+  advances   LoanAdvance[]
+  statements LoanStatement[]
 
   @@index([companyId, kind])
   @@index([companyId, status])
@@ -1582,6 +1589,67 @@ model LoanAdvance {
 enum LoanAdvanceKind {
   advance
   repayment
+}
+
+// A lender statement (PDF or photo) captured for the loan tool
+// (improvement plan Phase 3, item 3): photograph the Ford Credit
+// statement and the schedule check is drafted for review. The document
+// storage mirrors Receipt (bytes in Postgres, 'db' backend) but a
+// statement is NOT a receipt — it never enters the receipts inbox or
+// the expense flows; its lifecycle is: stored → AI-read through the
+// SAME document-intelligence provider layer as receipts
+// (extractionStatus: pending → extracted | failed | unavailable, the
+// raw read with per-field confidences in extractionFields) → checked
+// against a loan's schedule → applied by a reviewer (the loan's
+// statement-balance leg is set from it, and the re-amortization
+// correction is recorded here). Nothing saves or posts from a
+// statement without that reviewer action.
+model LoanStatement {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // The loan this statement was applied to. Null until the reviewer
+  // picks an existing loan or creates a new one from the statement.
+  loanId String?
+  loan   Loan?   @relation(fields: [loanId], references: [id], onDelete: SetNull)
+
+  originalFileName String
+  mimeType         String
+  sizeBytes        Int
+  sha256           String
+
+  // Storage: same convention as Receipt v1 — bytes in Postgres ('db').
+  storageBackend String  @default("db")
+  storageKey     String?
+  imageData      Bytes?
+
+  // AI document read (provider layer: src/lib/receipts/ocr-provider.ts
+  // conventions; loan mapping: src/lib/loans/statement-ocr.ts).
+  // 'unavailable' = no provider configured — the document is stored
+  // and the manual path is unchanged; nothing is fabricated.
+  extractionStatus   String  @default("pending")
+  extractionProvider String?
+  extractionFields   Json?
+  extractionError    String?
+
+  // The schedule check recorded when the reviewer applied this
+  // statement: the schedule's balance at the statement date vs the
+  // statement's own balance (difference = statement − schedule), and
+  // whether the proposed re-amortization correction was accepted.
+  checkStatementDate    DateTime?
+  checkStatementBalance Decimal? @db.Decimal(14, 2)
+  checkScheduleBalance  Decimal? @db.Decimal(14, 2)
+  checkDifference       Decimal? @db.Decimal(14, 2)
+  correctionApplied     Boolean  @default(false)
+  appliedAt             DateTime?
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, createdAt])
+  @@index([loanId])
 }
 
 // ─── FIXED ASSETS / CCA REGISTER ─────────────────────────
@@ -1699,6 +1767,54 @@ enum DisposalReason {
   shareholder_taken // taken by the shareholder — deemed proceeds thinking applies
   traded_in
   other
+}
+
+// ─── CCA WRITE-BACK (design §3.4) ──────────────────────────
+// One record per imported `cca-writeback/1` payload: the CCA
+// claimed and closing UCC by class AS FILED in Nexvar Tax, plus
+// the payload's Schedule 1 book/tax adjustment lines. A second
+// import for the same fiscal year versions (the old record is
+// kept, isLatest moves) — effects flow from the latest only.
+// The Sch 1 lines become a PROPOSED year-end journal on the
+// record; a preparer approves it before anything posts
+// (sourceType 'cca_writeback'). Contract:
+// src/lib/cca-writeback.CONTRACT.md.
+model CcaWriteback {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  contractVersion String
+  businessNumber  String // as carried in the payload (full account form)
+  fiscalYearStart DateTime
+  fiscalYearEnd   DateTime
+
+  // Filing source (payload.source).
+  returnId           String
+  filedAt            DateTime
+  confirmationNumber String?
+
+  // The full payload exactly as received, hash included — the
+  // audit record of what was filed. Classes and Sch 1 lines are
+  // read back out of it; they are never re-typed anywhere.
+  payload Json
+  hash    String
+
+  isLatest Boolean @default(true)
+
+  // Proposed Sch 1 journal lifecycle: 'none' (the payload carried
+  // no Sch 1 lines) | 'proposed' | 'posted' (journalEntryId set) |
+  // 'superseded' (a newer version arrived while still unposted).
+  journalStatus  String  @default("none")
+  proposedLines  Json?
+  journalEntryId String?
+
+  importedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId, fiscalYearEnd])
+  @@index([companyId, isLatest])
 }
 
 // ─── PERIOD CLOSE ──────────────────────────────────────────
@@ -2565,4 +2681,53 @@ model HealthFlagDismissal {
 
   @@unique([companyId, fingerprint])
   @@index([companyId])
+}
+
+// ─── RECONCILIATION ASSISTANT (Phase 3 item 1) ─────────────────────
+// Reviewer-rejected pairings for the match-proposal engine
+// (src/lib/recon/). A rejection is keyed to the exact pairing — this
+// bank row × this target — so the assistant never proposes it again,
+// while a different row (next month's line) or a different target is
+// unaffected. Split rejections store targetType 'split' with the
+// sorted 'type:id' combination key as targetId. Confirmed matches
+// need no table: they are read back from Transaction.matchedDocs,
+// which the existing match flow already writes.
+model ReconRejectedPairing {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  targetType String // 'invoice' | 'bill' | 'journal' | 'split'
+  targetId   String // doc/entry id; for 'split', the combination key
+  targetRef  String? // display snapshot ("INV-1044")
+  reason     String?
+
+  decidedBy String?
+  createdAt DateTime @default(now())
+
+  @@unique([transactionId, targetType, targetId])
+  @@index([companyId, transactionId])
+}
+
+// ─── ASK YOUR BOOKS (Phase 3, item 4) ───────────────────────────
+// The audit trail for the grounded question box (src/lib/ask/):
+// every question asked, the library intent chosen for it (null when
+// the question was refused), the validated parameters, and which
+// selector chose it. Parameters are periods, day thresholds, limits
+// and a category phrase — an answer's FIGURES are never logged.
+model AskBooksQuery {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String? // user who asked, when known
+  question  String
+  intentId  String? // null = refused (outside the library)
+  params    String? // JSON of validated parameters — never amounts
+  source    String // 'matcher' | 'llm' | 'none'
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
 }

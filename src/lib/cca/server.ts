@@ -22,6 +22,10 @@ import {
   type FiscalYearRange,
 } from '@/lib/fiscal-year';
 import { buildCcaRegisterPayload, type BuildCcaRegisterResult } from '@/lib/cca-register';
+import {
+  closingUccByClassFromPayload,
+  totalCcaClaimedFromPayload,
+} from '@/lib/cca-writeback';
 import { formatContractBn } from '@/lib/tb-gifi';
 import { toCents, toDollars } from '@/lib/loans/engine';
 import { dateToYmd, ymdToDate } from '@/lib/loans/server';
@@ -364,6 +368,35 @@ export async function assembleCcaRegisterExport(
   }
   const ctx = fiscalContextOf(company);
   const target = fiscalYearRangeContaining(ctx.anchor, asOfYmd, ctx.firstYear);
+
+  // Filed figures from the write-back loop (design §3.4): the
+  // latest cca-writeback/1 record for THIS year supplies the CCA
+  // claimed as filed; the latest record for the PRIOR year supplies
+  // each class's opening UCC as filed (its closing UCC). Absent a
+  // write-back both stay null — the export never invents them.
+  const latestWritebacks = await db.ccaWriteback.findMany({
+    where: { companyId, isLatest: true },
+    select: { fiscalYearStart: true, fiscalYearEnd: true, payload: true },
+  });
+  const filedForYear = latestWritebacks.find(
+    (w) => dateToYmd(w.fiscalYearStart) === target.start && dateToYmd(w.fiscalYearEnd) === target.end
+  );
+  const priorYearEnd = (() => {
+    const d = ymdToDate(target.start);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return dateToYmd(d);
+  })();
+  const filedForPriorYear = latestWritebacks.find(
+    (w) => dateToYmd(w.fiscalYearEnd) === priorYearEnd
+  );
+  const ccaClaimedCents = filedForYear ? totalCcaClaimedFromPayload(filedForYear.payload) : null;
+  const openingUccAsFiledCentsByClass: Record<string, number> = {};
+  if (filedForPriorYear) {
+    for (const [cls, cents] of closingUccByClassFromPayload(filedForPriorYear.payload)) {
+      openingUccAsFiledCentsByClass[cls] = cents;
+    }
+  }
+
   const assets = await loadRegister(companyId);
 
   const earliest =
@@ -446,6 +479,8 @@ export async function assembleCcaRegisterExport(
         : null,
     })),
     ledgerAmortizationExpenseCents,
+    ccaClaimedCents,
+    openingUccAsFiledCentsByClass,
   });
 
   return { result, fiscalYear: target };

@@ -43,6 +43,16 @@ interface MatchSuggestion {
   journalPreview: { code: string; name: string; memo: string; debit: number; credit: number }[];
 }
 
+// Reconciliation assistant (Phase 3 item 1) — ranked match proposals.
+interface MatchProposal {
+  kind: 'single' | 'split' | 'doc_remainder';
+  targets: { type: 'invoice' | 'bill' | 'journal'; id: string; ref: string; contactName: string | null; amount: number }[];
+  remainder: number;
+  confidence: number;
+  tier: 'high' | 'likely';
+  reasons: string[];
+}
+
 type Mode = 'suggest' | 'categorize' | 'split' | 'find' | null;
 
 export default function ReviewPage({ params }: { params: { accountId: string } }) {
@@ -52,6 +62,7 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
   const [selected, setSelected] = useState<QueueRow | null>(null);
   const [mode, setMode] = useState<Mode>(null);
   const [matches, setMatches] = useState<MatchSuggestion[] | null>(null);
+  const [proposals, setProposals] = useState<MatchProposal[] | null>(null);
   const [categories, setCategories] = useState<{ id: string; code: string; name: string; type: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +105,13 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
     setSelected(row);
     setMode(null);
     setError(null);
+    setProposals(null);
+    // Reconciliation assistant proposals — splits and journal-entry
+    // matches the classic suggested-match card doesn't cover.
+    fetchWithTenantHeaders(`/api/bank-transactions/${row.id}/match-proposals`)
+      .then((r) => r.json())
+      .then((json) => setProposals(json.data?.proposals ?? []))
+      .catch(() => setProposals([]));
     if (row.suggested) {
       const res = await fetchWithTenantHeaders(`/api/bank-transactions/${row.id}/suggested-matches`);
       const json = await res.json();
@@ -223,7 +241,7 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
     }
   };
 
-  const postMatch = async (docs: { type: string; id: string; amount: number }[]) => {
+  const postMatch = async (docs: { type: string; id: string; amount: number }[], holdRemainder = false) => {
     if (!selected) return;
     setBusy(true);
     setError(null);
@@ -231,13 +249,70 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
       const res = await fetchWithTenantHeaders(`/api/bank-transactions/${selected.id}/match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ docs }),
+        body: JSON.stringify({ docs, holdRemainder }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed');
       load();
       setSelected(null);
       setMode(null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Assistant proposal confirm: document targets go through the same
+  // match endpoint as the classic card; a journal target links the row
+  // to the existing entry (nothing new is posted).
+  const confirmProposal = async (p: MatchProposal) => {
+    if (!selected) return;
+    if (p.targets.every((t) => t.type !== 'journal')) {
+      await postMatch(
+        p.targets.map((t) => ({ type: t.type, id: t.id, amount: t.amount })),
+        p.kind === 'doc_remainder'
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetchWithTenantHeaders(`/api/bank-transactions/${selected.id}/match-proposals/confirm-journal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryId: p.targets[0].id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed');
+      load();
+      setSelected(null);
+      setMode(null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectProposal = async (p: MatchProposal) => {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetchWithTenantHeaders(`/api/bank-transactions/${selected.id}/match-proposals/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: p.kind,
+          targets: p.targets.map((t) => ({ type: t.type, id: t.id, ref: t.ref })),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed');
+      const refreshed = await fetchWithTenantHeaders(`/api/bank-transactions/${selected.id}/match-proposals`);
+      const refreshedJson = await refreshed.json();
+      setProposals(refreshedJson.data?.proposals ?? []);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -395,6 +470,47 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
                       Find another
                     </button>
                   </div>
+                </div>
+              )}
+
+              {proposals && proposals.length > 0 && (
+                <div className="space-y-3">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.10em] text-[var(--text-muted)]">
+                    Reconciliation assistant · {proposals.length} proposal{proposals.length === 1 ? '' : 's'}
+                  </div>
+                  {proposals.map((p, i) => (
+                    <div key={i} className="rounded-[var(--r-lg)] bg-[var(--surface-2)] border border-[var(--border)] p-3.5">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.10em] text-[var(--text-muted)]">
+                        {p.tier === 'high' ? 'High confidence' : 'Likely match'} · {Math.round(p.confidence * 100)}%
+                        {p.kind === 'split' ? ' · Split' : p.kind === 'doc_remainder' ? ' · Partial + remainder' : p.targets[0].type === 'journal' ? ' · Existing entry' : ''}
+                      </div>
+                      <div className="text-[14px] font-semibold text-[var(--text-strong)] mt-1">
+                        {p.targets.map((t) => (t.type === 'journal' ? `Journal entry · ${N(t.amount)}` : `${t.ref}${t.contactName ? ` · ${t.contactName}` : ''} · ${N(t.amount)}`)).join('  +  ')}
+                        {p.kind === 'doc_remainder' ? `  +  ${N(p.remainder)} on account` : ''}
+                      </div>
+                      <ul className="text-xs text-[var(--text-muted)] mt-1 space-y-0.5">
+                        {p.reasons.map((r, j) => (
+                          <li key={j}>{r}</li>
+                        ))}
+                      </ul>
+                      <div className="flex gap-2 mt-2.5">
+                        <button
+                          onClick={() => confirmProposal(p)}
+                          disabled={busy}
+                          className="flex-1 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--text-faint)] text-white text-[13px] font-semibold px-4 py-2 transition-colors"
+                        >
+                          {busy ? 'Matching…' : 'Confirm match'}
+                        </button>
+                        <button
+                          onClick={() => rejectProposal(p)}
+                          disabled={busy}
+                          className="rounded-full border border-[var(--border)] text-[13px] font-medium px-4 py-2 text-[var(--text)] hover:border-[var(--border-strong)] transition-colors"
+                        >
+                          Not this match
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 

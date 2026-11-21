@@ -52,6 +52,7 @@ export const COMPANY_PURGE_DELEGATES = [
   'receipt', // references transaction + chartOfAccount (SetNull): before both
   'receiptUploadLink', // references company + user (global) only
   'aiSuggestion', // Phase 2 AI categorization: references transaction — before it
+  'reconRejectedPairing', // Phase 3 recon assistant: references transaction — before it
   'transaction',
   'invoiceLineItem', // via invoice.companyId
   'billLineItem', // via bill.companyId
@@ -59,8 +60,10 @@ export const COMPANY_PURGE_DELEGATES = [
   'bill',
   'budgetLine', // via budget.companyId
   'budget',
+  'loanStatement', // Phase 3 statement capture: company-scoped; loan link is SetNull — before loan
   'loan', // GL references are code strings, not FKs — safe anywhere before company
   'fixedAsset', // GL references are code strings, not FKs — safe anywhere before company
+  'ccaWriteback', // via company only (Phase 3 CCA write-back records)
   'recurringLine', // via template.companyId
   'recurringTemplate',
   'taxCodeComponent', // via taxCodeVersion.taxCode.companyId
@@ -90,6 +93,7 @@ export const COMPANY_PURGE_DELEGATES = [
   'notification', // companyId column but NO FK relation — orphans otherwise
   'gifiSuggestionEvent', // Phase 2 GIFI v2 learning events
   'healthFlagDismissal', // Phase 2 books-health dismissals
+  'askBooksQuery', // Phase 3 ask-your-books audit log
   'chartOfAccount',
   'financialAccount',
   'relatedPartyLink', // companyAId OR companyBId (cross-company guardrail)
@@ -173,6 +177,7 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
     { delegate: 'receiptUploadLink', run: (tx) => tx.receiptUploadLink.deleteMany(byCompany) },
 
     { delegate: 'aiSuggestion', run: (tx) => tx.aiSuggestion.deleteMany(byCompany) },
+    { delegate: 'reconRejectedPairing', run: (tx) => tx.reconRejectedPairing.deleteMany(byCompany) },
     { delegate: 'transaction', run: (tx) => tx.transaction.deleteMany(byCompany) },
 
     { delegate: 'invoiceLineItem', run: (tx) => tx.invoiceLineItem.deleteMany({ where: { invoice: { companyId } } }) },
@@ -182,8 +187,10 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
 
     { delegate: 'budgetLine', run: (tx) => tx.budgetLine.deleteMany({ where: { budget: { companyId } } }) },
     { delegate: 'budget', run: (tx) => tx.budget.deleteMany(byCompany) },
+    { delegate: 'loanStatement', run: (tx) => tx.loanStatement.deleteMany(byCompany) },
     { delegate: 'loan', run: (tx) => tx.loan.deleteMany(byCompany) },
     { delegate: 'fixedAsset', run: (tx) => tx.fixedAsset.deleteMany(byCompany) },
+    { delegate: 'ccaWriteback', run: (tx) => tx.ccaWriteback.deleteMany(byCompany) },
     { delegate: 'recurringLine', run: (tx) => tx.recurringLine.deleteMany({ where: { template: { companyId } } }) },
     { delegate: 'recurringTemplate', run: (tx) => tx.recurringTemplate.deleteMany(byCompany) },
 
@@ -216,6 +223,7 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
     { delegate: 'notification', run: (tx) => tx.notification.deleteMany(byCompany) },
     { delegate: 'gifiSuggestionEvent', run: (tx) => tx.gifiSuggestionEvent.deleteMany(byCompany) },
     { delegate: 'healthFlagDismissal', run: (tx) => tx.healthFlagDismissal.deleteMany(byCompany) },
+    { delegate: 'askBooksQuery', run: (tx) => tx.askBooksQuery.deleteMany(byCompany) },
     { delegate: 'chartOfAccount', run: (tx) => tx.chartOfAccount.deleteMany(byCompany) },
     { delegate: 'financialAccount', run: (tx) => tx.financialAccount.deleteMany(byCompany) },
 

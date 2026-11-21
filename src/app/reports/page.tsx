@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn';
 import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
-  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark, PackageCheck, HeartPulse,
+  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark, PackageCheck, HeartPulse, CalendarClock, MessageCircleQuestion,
 } from 'lucide-react';
 
 const reports = [
@@ -46,6 +46,20 @@ const reports = [
     href: '/reports/books-health',
     icon: HeartPulse,
     color: 'bg-[var(--danger-soft)] text-[var(--danger)]',
+  },
+  {
+    title: 'Cash-Flow Outlook',
+    description: 'The next 13 weeks from due dates and your payroll pattern: open invoices and bills, loan schedules, recurring entries, payroll with CRA remittances on the 15th, and GST/HST owing — every week drills down to its items, and the first negative week is called out.',
+    href: '/reports/cash-flow-outlook',
+    icon: CalendarClock,
+    color: 'bg-[var(--primary-soft)] text-[var(--accent)]',
+  },
+  {
+    title: 'Ask Your Books',
+    description: 'Plain-language questions answered only from computed report figures — spending, revenue, who owes you, GST/HST position, loans, cash — each with its workings and the source report. Anything it cannot compute exactly, it refuses.',
+    href: '/reports/ask-books',
+    icon: MessageCircleQuestion,
+    color: 'bg-[var(--primary-soft)] text-[var(--accent)]',
   },
   {
     title: 'Year-End Package',
