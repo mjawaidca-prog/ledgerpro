@@ -18,6 +18,15 @@
  * is not an assignable catalogue code (a legacy free-text typo) lists
  * as "invalid" — the export treats it as unmapped.
  *
+ * Suggestions come from engine v2 (src/lib/gifi-suggestions-v2.ts),
+ * the same ranked engine the account forms use, re-ranked by the
+ * caller's learning context when one is supplied. Saves report the
+ * ranked codes that were shown (`gifiShownCodes`) in the PUT payload,
+ * exactly like the account forms, so the route records the same
+ * GifiSuggestionEvent (shown vs chosen) and worklist choices teach
+ * the engine too. The recorder is telemetry-only and swallows its
+ * own failures, so this can never fail a worklist save.
+ *
  * Sole proprietors (quiet flow, plan D5) never see this panel: they
  * file a T2125, not GIFI statements. The picker stays available in
  * their account forms.
@@ -33,13 +42,21 @@ import {
   gifiFlowMode,
   type GifiReadinessAccountInput,
 } from '@/lib/gifi-readiness';
-import { suggestGifiCodes } from '@/lib/gifi-suggestions';
+import { rankGifiSuggestions } from '@/lib/gifi-suggestions-v2';
+import type { GifiLearningContext } from '@/lib/gifi-learning';
 import { hasValidGifiCode } from '@/lib/gifi';
 
 interface GifiReadinessPanelProps {
   /** The company's ACTIVE accounts (the export's population). */
   accounts: readonly GifiReadinessAccountInput[];
   businessType: string | null | undefined;
+  /**
+   * GIFI v2 learning context (pattern statistics from past choices),
+   * fetched by the parent from GET /api/coa/gifi-events — the same
+   * context the account forms rank with. Optional and advisory:
+   * without it, v2 ranks on rules + catalogue alone.
+   */
+  learning?: GifiLearningContext;
   /** Called after a successful save so the parent can refetch. */
   onSaved?: () => void;
 }
@@ -48,7 +65,7 @@ const TYPE_LABELS: Record<string, string> = {
   asset: 'Asset', liability: 'Liability', equity: 'Equity', income: 'Income', expense: 'Expense',
 };
 
-export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiReadinessPanelProps) {
+export function GifiReadinessPanel({ accounts, businessType, learning, onSaved }: GifiReadinessPanelProps) {
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
@@ -61,6 +78,16 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
 
   const { total, coded, needsCode, decidedUnmapped } = readiness;
 
+  // The ranked codes a row is showing, in display order — reported
+  // with the save so the route records the suggestion event (shown
+  // vs chosen), the same payload the account forms send. Ranking is
+  // deterministic for a given account + learning context, so this
+  // recomputation yields exactly the list the row rendered.
+  function shownCodesFor(accountId: string): string[] {
+    const account = accounts.find((a) => (a.id ?? a.code) === accountId);
+    return account ? rankGifiSuggestions(account, learning).map((s) => s.code) : [];
+  }
+
   async function saveRow(accountId: string) {
     const value = (picks[accountId] ?? '').trim();
     setSavingId(accountId);
@@ -69,7 +96,7 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
       const res = await fetch(`/api/coa/${accountId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gifiCode: value || null }),
+        body: JSON.stringify({ gifiCode: value || null, gifiShownCodes: shownCodesFor(accountId) }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to save');
@@ -100,7 +127,7 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
       const res = await fetch(`/api/coa/${accountId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gifiCode: null, gifiUnmappedByChoice: true }),
+        body: JSON.stringify({ gifiCode: null, gifiUnmappedByChoice: true, gifiShownCodes: shownCodesFor(accountId) }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to save');
@@ -146,7 +173,7 @@ export function GifiReadinessPanel({ accounts, businessType, onSaved }: GifiRead
           {needsCode.map((account) => {
             const accountId = account.id ?? account.code;
             const pick = picks[accountId] ?? '';
-            const suggestions = suggestGifiCodes(account);
+            const suggestions = rankGifiSuggestions(account, learning);
             const dirty = pick !== '' && pick !== (account.storedGifiCode ?? '');
             return (
               <div key={accountId} className="py-3">

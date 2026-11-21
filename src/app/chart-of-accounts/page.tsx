@@ -390,6 +390,7 @@ export default function ChartOfAccountsPage() {
       <GifiReadinessPanel
         accounts={readinessAccounts}
         businessType={businessType}
+        learning={gifiLearning}
         onSaved={() => { fetchCOA(); fetchReadinessAccounts(); }}
       />
 
