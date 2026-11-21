@@ -14,6 +14,14 @@ export type HelpSection = {
   images?: HelpImage[];
 };
 
+export type HelpVideo = {
+  title: string;
+  url: string;
+  /** ISO 8601 duration, e.g. 'PT5M22S'. */
+  duration?: string;
+  description?: string;
+};
+
 export type HelpArticle = {
   slug: string;
   title: string;
@@ -22,6 +30,7 @@ export type HelpArticle = {
   keywords: string[];
   sections: HelpSection[];
   action?: { label: string; href: string };
+  video?: HelpVideo;
 };
 
 export const HELP_CATEGORIES = [
