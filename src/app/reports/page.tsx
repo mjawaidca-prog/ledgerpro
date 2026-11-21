@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn';
 import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
-  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark,
+  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark, PackageCheck,
 } from 'lucide-react';
 
 const reports = [
@@ -39,6 +39,13 @@ const reports = [
     href: '/reports/trial-balance',
     icon: Scale,
     color: 'bg-[var(--success-soft)] text-[var(--success)]',
+  },
+  {
+    title: 'Year-End Package',
+    description: 'The T2 handoff: pre-flight checks (Pass / Warn / Block) on a cover sheet, then one hashed bundle with the trial balance, CCA register, loan schedules, and GST worksheets.',
+    href: '/reports/year-end-package',
+    icon: PackageCheck,
+    color: 'bg-[var(--primary-soft)] text-[var(--accent)]',
   },
   {
     title: 'General Ledger',
