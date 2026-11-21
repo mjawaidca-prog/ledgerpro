@@ -14,14 +14,6 @@ export type HelpSection = {
   images?: HelpImage[];
 };
 
-export type HelpVideo = {
-  title: string;
-  url: string;
-  /** ISO 8601 duration, e.g. 'PT5M22S'. */
-  duration?: string;
-  description?: string;
-};
-
 export type HelpArticle = {
   slug: string;
   title: string;
@@ -30,7 +22,6 @@ export type HelpArticle = {
   keywords: string[];
   sections: HelpSection[];
   action?: { label: string; href: string };
-  video?: HelpVideo;
 };
 
 export const HELP_CATEGORIES = [
@@ -879,6 +870,580 @@ const BASE_HELP_ARTICLES: HelpArticle[] = [
         ],
       },
     ],
+  },
+  {
+    slug: 'loans-and-interest',
+    title: 'Loans and interest',
+    category: 'Accounting controls',
+    summary: 'Track term loans and shareholder loans with a real amortization schedule, post each payment’s principal-and-interest split on approval, and see fiscal-year interest totals.',
+    keywords: ['loan', 'interest', 'amortization', 'schedule', 'shareholder loan', 'section 15(2)', 'borrowings', 'ford credit'],
+    sections: [
+      {
+        heading: 'Create a loan from whatever the paperwork states',
+        steps: [
+          'Open Loans and choose New Loan.',
+          'Choose the kind: a term loan from a lender, money the company lent a shareholder, or money a shareholder lent the company.',
+          'Enter the lender, principal, interest rate, start date, and the accounts the loan maps to.',
+          'Use the solve toggle: if the paperwork states the payment (a dealer statement usually does), enter the payment and frequency and LedgerPro works out the term; if it states the rate and term, LedgerPro works out the payment.',
+          'Save. The amortization schedule is generated, and the loan gets its own liability account plus the shared Interest Expense account — a loan payment never has to sit in a mixed expense account again.',
+        ],
+      },
+      {
+        heading: 'Post a payment',
+        steps: [
+          'Open the loan and find the payment row in the schedule. A schedule row is a proposal only — nothing has posted yet.',
+          'Choose Post. If the actual amount or date differed from the schedule, enter what really happened.',
+          'LedgerPro posts one balanced journal: debit loan principal, debit interest expense, credit the bank account.',
+          'When the actual amount differed, the unposted remainder of the schedule re-amortizes from the true balance at the same contractual payment.',
+          'Use Missed for a skipped payment: the schedule rolls forward one period and the obligation stays visible — it never silently disappears.',
+        ],
+      },
+      {
+        heading: 'Prove the balance three ways',
+        text: 'The loan page compares three balances: the schedule balance, the general-ledger loan-account balance, and the lender statement balance you enter (with its date). Differences are shown as signed amounts with a ties-out or investigate badge — surfaced, never hidden. The page also shows the current portion: principal due within the next 12 months.',
+      },
+      {
+        heading: 'Shareholder loans',
+        notes: [
+          'Each advance is recorded separately and never netted silently against another. Every advance carries its own subsection 15(2) deadline: one year after the end of the taxation year in which the advance was made.',
+          'Warnings appear at 180, 90, and 30 days before the deadline, and when an advance is overdue.',
+          'A repayment followed by a new advance within 90 days is flagged as a series of loans and repayments — it is not treated as a cure.',
+          'The subsection 80.4 deemed-interest benefit is estimated from daily balances using the prescribed rate your accountant supplies (it changes quarterly).',
+          'The tool warns only — it proposes no clearing journals. The legitimate paths it names are repayment, salary (T4), or dividend (T5).',
+        ],
+      },
+      {
+        heading: 'Fiscal-year interest totals',
+        text: 'The Loans list and each loan page show interest totals per loan for each fiscal year, sliced on your company’s own year-end, plus a company-wide roll-up — the figure that lands on GIFI 8710 at tax time. A loan’s schedule can also be exported as CSV.',
+      },
+    ],
+    action: { label: 'Open Loans', href: '/loans' },
+  },
+  {
+    slug: 'loan-statement-capture',
+    title: 'Import a loan from its statement',
+    category: 'Accounting controls',
+    summary: 'Photograph or upload a lender statement and let LedgerPro read the balance, payment, and rate — then pre-fill a new loan or check an existing loan’s schedule against it.',
+    keywords: ['loan statement', 'import', 'ai read', 'schedule check', 'statement balance', 'lender statement'],
+    sections: [
+      {
+        heading: 'Import from statement',
+        steps: [
+          'Open Loans and choose Import from statement.',
+          'Upload the lender statement — a PDF or a photo (JPEG, PNG, or WebP, up to 5 MB). iPhone HEIC photos are not supported; use the “Most Compatible” camera setting or a PDF.',
+          'LedgerPro reads the lender name, statement date, current balance, payment amount, interest rate, and next payment date.',
+          'The account number is only ever shown masked beyond its last four digits, and the full number never leaves the statement.',
+        ],
+      },
+      {
+        heading: 'Review what was read',
+        notes: [
+          'Every field carries the reader’s confidence. A field read below 80% confidence is outlined in amber — check those against the paper before you rely on them.',
+          'A field the statement does not print stays blank from end to end. It is never inferred or guessed.',
+          'One figure is labelled “calculated”: the remaining number of payments, which LedgerPro derives from the balance, payment, and rate. It was not read from the statement, and you confirm the payment frequency in the loan form.',
+        ],
+      },
+      {
+        heading: 'Two ways to use the read',
+        steps: [
+          'New loan: choose the new-loan path and the create form arrives pre-filled from the statement. Confirm the details (including the bank account payments move through) and create the loan.',
+          'Existing loan: pick the term loan the statement belongs to and choose Compare. You see the statement balance against the schedule balance at the statement date, with the difference to the cent: Matches to the cent, Small difference (within $5), or Large difference.',
+          'To accept the statement, tick the correction and choose Apply. Only unposted schedule rows are rebuilt, re-amortized from the statement balance; posted payments are never touched.',
+          'Applying also records the check on the statement itself, so the comparison stays on record.',
+        ],
+      },
+      {
+        heading: 'If the read is unavailable',
+        text: 'When document reading is not switched on for your deployment, the upload still stores safely and the statement is marked unavailable — no values are invented. Enter the loan manually as usual, and retry the read later from the same statement.',
+      },
+    ],
+    action: { label: 'Import a statement', href: '/loans/import' },
+  },
+  {
+    slug: 'fixed-assets-cca-register',
+    title: 'Fixed assets and the CCA register',
+    category: 'Accounting controls',
+    summary: 'Record each capital asset with its CCA facts at purchase — class, cost net of input tax credits, available-for-use date — and post book depreciation once a year, on approval.',
+    keywords: ['fixed assets', 'cca', 'capital cost allowance', 'depreciation', 'ucc', 'aiip', 'asset register', 'class 10'],
+    sections: [
+      {
+        heading: 'Add an asset with its tax facts',
+        steps: [
+          'Open Fixed Assets and choose New asset.',
+          'Describe the asset: description, serial or VIN, vendor, invoice reference, and location.',
+          'Pick the CCA class. The picker offers the classes Nexvar Tax models, with plain-language labels and the same rates the tax side uses.',
+          'Enter the gross cost, the input tax credit claimed, and any government assistance. The capital cost LedgerPro carries is the net — gross minus ITC minus assistance — because that net figure is what CCA is computed on.',
+          'Set the acquisition date and the available-for-use date. Depreciation and CCA both key off the available-for-use date.',
+        ],
+      },
+      {
+        heading: 'Flags that matter at tax time',
+        notes: [
+          'AIIP flag: defaults from the dates (acquired after November 20, 2018 and available for use before 2028) and can be overridden when the property does not qualify.',
+          'Would-be-Class-53 flag: Class 43 manufacturing property can carry this flag here, at purchase — so the question never has to be reconstructed at filing time.',
+          'Luxury-vehicle flag: a luxury passenger vehicle sits in Class 10.1, separate from the regular Class 10 pool.',
+          'Adopting an existing register mid-life: enter the opening accumulated book depreciation and the date it runs to. History is adopted as stated, not re-derived.',
+        ],
+      },
+      {
+        heading: 'Book depreciation — once a year, on approval',
+        text: 'LedgerPro computes a per-asset book depreciation schedule on your fiscal calendar. The default method mirrors the tax method (class rate, declining balance, half-year rule and accelerated first-year factors), and each asset can instead use straight-line over a life you set, its own declining rate, or no depreciation. Book depreciation is not the CCA deduction — the tax claim is computed in Nexvar Tax from the exported facts.',
+        steps: [
+          'On the Fixed Assets page, review the year’s depreciation preview.',
+          'Choose Approve & post. One balanced journal posts (depreciation or amortization expense against accumulated depreciation), once per fiscal year — a year cannot be posted twice.',
+        ],
+      },
+      {
+        heading: 'Disposals and the Nexvar Tax export',
+        notes: [
+          'Record a disposal with its proceeds, date, and reason. The book gain or loss (proceeds minus net book value) is computed and shown; the disposal record itself never posts a journal.',
+          'An asset taken over by a shareholder carries a warning instead of silence: proceeds are deemed to be at fair market value.',
+          'Download the CCA register export (cca-register/1) from the Fixed Assets page. It carries each class’s capital-cost continuity, additions with their AIIP and Class 53 flags, disposals, and the book position — the feed for Nexvar Tax’s Schedule 8.',
+        ],
+      },
+    ],
+    action: { label: 'Open Fixed Assets', href: '/fixed-assets' },
+  },
+  {
+    slug: 'cca-write-back',
+    title: 'CCA write-back from Nexvar Tax',
+    category: 'Canadian tax',
+    summary: 'After the T2 is filed in Nexvar Tax, import the filed CCA figures back into LedgerPro so next year’s register opens from what was actually filed — and approve the proposed Schedule 1 journal.',
+    keywords: ['write-back', 'cca', 'ucc', 'filed', 'schedule 1', 'nexvar tax', 'closing ucc'],
+    sections: [
+      {
+        heading: 'Import the filed figures',
+        steps: [
+          'In Nexvar Tax, produce the cca-writeback/1 file for the filed return.',
+          'In LedgerPro, open Fixed Assets and find the “Nexvar Tax write-back — filed CCA & UCC” card.',
+          'Paste the payload or choose the file, then choose Import write-back.',
+          'Before storing anything, LedgerPro verifies the file’s integrity hash and checks it three ways: this company, this business number, and an exact fiscal year of this company.',
+        ],
+      },
+      {
+        heading: 'What the import changes',
+        notes: [
+          'The register’s export now reports the CCA claimed for the filed year, and each class opens the next year at its filed closing UCC. Until a write-back arrives, those fields stay empty — LedgerPro keeps no shadow UCC of its own.',
+          'An amended return is a real event: import the new file and both versions stay on record, with every effect flowing from the latest.',
+          'Importing the byte-identical file a second time is refused as a duplicate.',
+        ],
+      },
+      {
+        heading: 'Read the variance view',
+        text: 'For each class, the filed closing UCC is compared with the closing UCC the register expected, projected from the filed opening plus the register’s own facts for the year. When the difference is exactly the claim difference, the view says the claim differed — that is arithmetic, not a guess. Assets or disposals recorded after filing are named as the cause when the dates support it; anything else is labelled unexplained and points you to a Schedule 8 comparison. The first filed year establishes the baseline, so it shows no variance.',
+      },
+      {
+        heading: 'Approve the proposed journal',
+        steps: [
+          'If the write-back carries Schedule 1 adjustment lines, the card shows a proposed year-end journal built from them, through accumulated depreciation and the depreciation expense account.',
+          'Review the lines, then choose Approve & post. Nothing posts before that approval.',
+          'Posting into a closed period is blocked, with the period named. A superseded version’s proposal can never be posted.',
+          'A write-back with no Schedule 1 lines proposes no journal — and the card says so plainly. The filed figures still land and feed the export.',
+        ],
+      },
+    ],
+    action: { label: 'Open Fixed Assets', href: '/fixed-assets' },
+  },
+  {
+    slug: 'calculator',
+    title: 'The built-in calculator',
+    category: 'Getting started',
+    summary: 'A desk calculator that floats over any screen — with a running tape, percent, and +Tax / −Tax keys set to your company’s sales-tax rate.',
+    keywords: ['calculator', 'tape', 'tax key', 'percent', 'quick calc'],
+    sections: [
+      {
+        heading: 'Open it anywhere',
+        text: 'Choose Calculator in the left rail footer. The panel floats at the bottom-right of the screen with no backdrop and no navigation — the page underneath stays fully usable while it is open. It stays mounted as you move between screens, and its tape survives opening and closing within your session.',
+      },
+      {
+        heading: 'How it calculates',
+        notes: [
+          'Chained operations run strictly left to right, like a desk calculator: 2 + 3 × 4 = 20. There is no operator precedence.',
+          'Arithmetic is exact decimal math: 0.1 + 0.2 is exactly 0.3, and division by zero or an out-of-range result shows an Error state instead of a wrong number.',
+          'Percent follows classic calculator behaviour: with + or − pending it takes that percentage of the running total (200 + 10 % = 220); with × or ÷ pending, or on its own, it divides by 100.',
+          'The full keyboard works while the panel is open: digits, + − * /, Enter or = for equals, Backspace, Delete for clear-entry, %, and Esc to close. Keystrokes are ignored while you are typing in a page field, so forms keep their input.',
+          'AC clears the calculation but deliberately keeps the tape; CE clears just the entry in progress, mid-chain included.',
+        ],
+      },
+      {
+        heading: '+Tax and −Tax',
+        notes: [
+          '+Tax adds sales tax to the displayed amount; −Tax backs it out. The tax rounds to the cent, the way an invoice rounds it, so adding then removing tax returns the exact starting figure.',
+          'The rate defaults to your active company’s province rate, labelled on the panel (for example, “Company province: 13% HST · Ontario”). Switching companies re-derives the default.',
+          'Presets cover 5% GST and 13%, 15%, and 14% HST, or enter a custom rate — a combined rate such as 14.975% works. A rate you choose yourself is remembered on this device.',
+        ],
+      },
+      {
+        heading: 'The tape',
+        notes: [
+          'Every completed calculation appends a line — the expression and its result — up to 50 entries.',
+          'Click any tape result to recall it as the current entry.',
+          'Use the copy button beside the display to copy the current value, and Clear tape to empty the tape.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'gst-hst-worksheet',
+    title: 'The GST/HST worksheet and NETFILE hand-off',
+    category: 'Canadian tax',
+    summary: 'Read every line of the GST34 (101–115) with its composition, reconcile the return against your books, and hand the four NETFILE numbers to CRA.',
+    keywords: ['gst', 'hst', 'worksheet', 'netfile', 'line 101', 'line 109', 'line 115', 'reconciliation', 'confirmation number'],
+    sections: [
+      {
+        heading: 'Every line, with its workings',
+        steps: [
+          'Open Reports, then GST/HST Return, and compute the period.',
+          'All fourteen lines (101, 103–115) are shown. Nil lines are shown as nil, never hidden.',
+          'Expand any line to see what it is made of: lines 101, 103, and 106 break down by account, with the underlying transactions; adjustment lines (104, 107, 110, 111) list their items; calculated lines (105, 108, 109, 112–115) show their formula over the other lines.',
+        ],
+      },
+      {
+        heading: 'Reconcile before you file',
+        text: 'The Reconciliation card checks the differences CRA auditors ask about first. Each check carries a Pass, Review, or Difference badge with its figures shown — a difference is displayed, never absorbed into the numbers.',
+        notes: [
+          'Line 101 vs GL revenue accounts: passes when the only difference is whole-dollar rounding (within 50¢).',
+          'Control-account continuity for GST/HST payable: opening balance plus line 103, against the ledger balance at period end.',
+          'The same continuity for the recoverable (ITC) account against line 106.',
+          'Lines 103 and 106 vs the document-level tax engine: a difference here is a warning rather than a failure — tax-point dates and journal dates can legitimately differ — and a period with no document detail is reported as not corroborated instead of silently passing.',
+          'Return arithmetic: every calculated line is re-derived from its inputs.',
+        ],
+      },
+      {
+        heading: 'The NETFILE hand-off',
+        steps: [
+          'NETFILE is a four-number return: your access code plus lines 101, 109, and 114 (refund) or 115 (owing). The hand-off card shows exactly those numbers, with your registration number and period.',
+          'Your access code is yours — LedgerPro shows a slot for it but never stores it.',
+          'File on CRA’s site yourself. LedgerPro prepares and records the return; it does not submit it.',
+          'Back in LedgerPro, record the filing. The CRA confirmation number and filing date are stored on the period, shown on the hand-off card, and the period locks.',
+          'Download the audit package (the gst-worksheet/1 JSON, beside the CSV working copy) when an accountant or a CRA review asks where a number came from — it carries every line’s composition, the continuity, and the reconciliation results.',
+        ],
+      },
+    ],
+    action: { label: 'Open the GST/HST return', href: '/reports/gst-hst-return' },
+  },
+  {
+    slug: 'year-end-package',
+    title: 'The year-end package',
+    category: 'Reporting and groups',
+    summary: 'Run nine pre-flight checks on a cover sheet, then download one hash-stamped bundle — trial balance, CCA register, loan schedules, GST worksheets — for your accountant or Nexvar Tax.',
+    keywords: ['year-end', 'package', 'pre-flight', 'cover sheet', 'accountant', 'bundle', 'close'],
+    sections: [
+      {
+        heading: 'Run the pre-flight',
+        steps: [
+          'Open Reports, then Year-End Package.',
+          'Pick a date — the package covers the fiscal year containing that date.',
+          'Choose Run pre-flight and read the cover sheet.',
+          'Every check reports Pass, Warn, Block, or Not checked. A check that cannot be run says so, with the reason — nothing is skipped silently.',
+        ],
+      },
+      {
+        heading: 'What the nine checks look for',
+        notes: [
+          'Trial balance balances. Out of balance blocks, with the difference named.',
+          'Every account carries a GIFI decision. Undecided accounts are named with their balances as a warning — they export unmapped for mapping review; they do not block.',
+          'Suspense and clearing accounts at zero. A non-zero balance blocks: that is a books problem, not a mapping problem.',
+          'The fiscal year is closed, with no entries dated inside it that were posted after the close.',
+          'Loans tie to the ledger — schedule vs ledger and schedule vs statement differences warn, unposted due payments warn, and shareholder-loan deadlines within 12 months are named.',
+          'Asset-register tax facts are complete. An asset carrying a CCA class Nexvar Tax does not model blocks, because its Schedule 8 feed would be wrong.',
+          'GST/HST periods due by year-end have a filing recorded, with the CRA confirmation. With no GST/HST registration on file this check is Not checked — filing periods belong to the registration.',
+          'Bank accounts are reconciled through year-end. With no bank or credit accounts set up, this check is Not checked.',
+          'Payroll T4 / PD7A tie-out is always Not checked: the T4 summary and remittance records live in Nexvar Pay. The cover sheet states that rather than implying the tie-out was verified.',
+        ],
+      },
+      {
+        heading: 'Download the bundle',
+        steps: [
+          'Choose Download package.',
+          'With any Block, a confirmation names the blocking checks and says the books should be corrected first. The bundle is still generated if you proceed — the cover sheet inside it prints the blocks.',
+          'Inside the bundle: the trial balance with the prior year’s own figures as the comparative, a general-ledger detail summary, the CCA register, loan schedules with fiscal-year interest, one GST worksheet per filing period in the year, and the payroll journals Nexvar Pay posted into these books (or an explicit note of what to bring from Nexvar Pay when there are none).',
+          'The bundle (year-end-package/1) is hash-stamped. The SHA-256 shown on the page is the fingerprint the receiving side verifies.',
+        ],
+      },
+    ],
+    action: { label: 'Open the year-end package', href: '/reports/year-end-package' },
+  },
+  {
+    slug: 'ai-categorization',
+    title: 'AI categorization on bank import',
+    category: 'Banking',
+    summary: 'Imported rows the rules leave behind arrive with a suggested category, a confidence, and a plain-language reason — you confirm or correct, and LedgerPro learns from the correction.',
+    keywords: ['ai', 'categorization', 'suggestion', 'confidence', 'bank import', 'review queue', 'bulk confirm'],
+    sections: [
+      {
+        heading: 'Where suggestions come from',
+        text: 'Suggestions are layered, most-trusted first, and each one names its source:',
+        notes: [
+          'Your bank rules, then your categorization rules. A rule match names the rule that fired.',
+          'Your own history: how you have coded this payee before, in this direction — “You coded all 14 past payments to ‘Shell’ as Vehicle Fuel.” A payee you have coded inconsistently gets no history suggestion; mixed history teaches nothing.',
+          'For payees nothing else can place, an AI suggestion may appear when the AI layer is enabled on your deployment. It chooses only from your own accounts, and it is shown as an AI suggestion, never disguised as a rule.',
+        ],
+      },
+      {
+        heading: 'Confirm, correct, or bulk-confirm',
+        steps: [
+          'Open the Banking review queue. A row with a suggestion shows “AI suggests …” with its confidence.',
+          'Open the row. The suggestion card shows the source (From your rules / From your history / AI suggestion), the confidence, and the reason.',
+          'Choose Confirm suggestion to categorize with it. Categorizing is not posting — posting stays the separate, existing step.',
+          'To correct it, pick a different category instead. The correction is recorded, and the history layer learns from the final category you chose.',
+          'When several rows carry high-confidence suggestions from your rules or history, a Confirm all bar appears. It confirms only those rows. An AI suggestion joins the bulk set only after you have accepted that same payee-and-account pattern individually before.',
+        ],
+      },
+      {
+        heading: 'What it never does',
+        notes: [
+          'Nothing is categorized silently, and nothing posts without your existing confirmation flow.',
+          'A suggestion is a proposal with its reasoning shown. The confidence is there so you can judge how hard to look before confirming.',
+        ],
+      },
+    ],
+    action: { label: 'Open Banking', href: '/banking' },
+  },
+  {
+    slug: 'receipt-reading-draft-bills',
+    title: 'Receipt reading and draft expenses',
+    category: 'Sales and expenses',
+    summary: 'Uploaded receipts are read automatically — vendor, date, tax, and total, each with a confidence — and one click turns a read receipt into a draft expense for review.',
+    keywords: ['receipt', 'ai read', 'draft expense', 'bill', 'confidence', 'extract', 'ocr'],
+    sections: [
+      {
+        heading: 'What the read gives you',
+        notes: [
+          'After upload, the receipt is read and the inbox shows an “AI read” badge — or “AI read failed”, with a Retry AI read action.',
+          'Vendor, date, subtotal, tax, total, currency, and line items are filled in, each carrying the reader’s own confidence.',
+          'Any field read below 80% confidence is outlined in amber with a “check” hint. Look at those against the paper before relying on them.',
+          'A field the receipt does not show is left blank, never invented.',
+          'If the read is marked unavailable, document reading is not switched on for your deployment: nothing was read and nothing was guessed. The receipt works exactly as it did before — type the fields in, then attach it or expense it manually.',
+        ],
+      },
+      {
+        heading: 'Create the draft expense',
+        steps: [
+          'Open the read receipt and choose Create draft expense.',
+          'LedgerPro builds a draft expense (an EXP-#### bill) in Expenses: the vendor — found, or created as a supplier — the date, and lines that balance to the cent.',
+          'The tax split rides along: recoverable GST/HST is separated so that, when you post, it lands in your input tax credit account rather than inside the cost.',
+          'The receipt stays linked to the draft from both sides as its source document — the audit trail behind the entry.',
+          'Open the draft in Expenses, set or adjust the expense account, and post it through the normal bills flow. Creating the draft posts nothing.',
+        ],
+      },
+      {
+        heading: 'Where the category comes from',
+        text: 'The draft takes the category your rules suggest for that merchant. If no rule fires, it falls back to the category you most recently used for that vendor’s bank transactions, labelled as coming from history. Either way, you confirm the account in the draft before posting.',
+      },
+    ],
+    action: { label: 'Open Receipts', href: '/receipts' },
+  },
+  {
+    slug: 'gifi-coding',
+    title: 'GIFI coding: every account gets a decision',
+    category: 'Canadian tax',
+    summary: 'No account saves without a GIFI decision — a suggested code with its reason, your own pick, or a recorded choice to leave it unmapped — and a worklist keeps undecided accounts visible.',
+    keywords: ['gifi', 't2', 'chart of accounts', 'mapping', 'readiness', 'worklist', 'unmapped'],
+    sections: [
+      {
+        heading: 'The decision at account creation',
+        steps: [
+          'Create or edit an account on the Chart of Accounts page.',
+          'The suggestion banner shows the top suggested code with its CRA description and a plain-language reason. Choose Use to accept it in one tap.',
+          'Open “Other suggestions” to see the runners-up, each with its own reason and Use button — or search the full catalogue in the picker.',
+          'If no code honestly fits yet, tick “Leave unmapped — I’ll code it later.” The choice is recorded on the account.',
+          'Save stays disabled until one of those decisions exists. A silently blank code is no longer possible.',
+        ],
+      },
+      {
+        heading: 'Suggestions that learn',
+        notes: [
+          'Ranking starts from the chart template and keyword rules, then learns from your saves: when you keep choosing a different code for similar account names, the suggestion re-ranks and says why — “You usually code these as 2621 here.”',
+          'Precise codes beat general ones: Holdbacks Payable is suggested its exact code, not the general payables code it used to get.',
+          'A few accounts stay uncoded by design — Retained Earnings, Opening Balance Equity, Owner’s Capital, and Owner’s Draw. The form says so instead of demanding a decision, though you may still assign a code voluntarily.',
+          'An account whose name mixes a payment with a borrowing (for example, “Motor Vehicle — Ford Credit Payments”) gets a notice instead of a confident suggestion: one payment mixes principal and interest, which take different codes. The clean fix is the Loan tool, or splitting the account.',
+        ],
+      },
+      {
+        heading: 'The readiness worklist',
+        steps: [
+          'On the Chart of Accounts page, open the GIFI readiness panel. It shows “X of Y coded” and how many accounts still need a GIFI decision.',
+          'Work through the rows: apply the suggested code, pick another, or use the row’s Leave unmapped action. The choice is recorded the same way as in the account form, and worklist choices teach the suggestions too.',
+          'Accounts left unmapped by choice are counted separately and leave the worklist.',
+          'An undecided account still exports to Nexvar Tax as unmapped — never dropped, never given a guessed code — and lands in mapping review there.',
+        ],
+      },
+    ],
+    action: { label: 'Open chart of accounts', href: '/chart-of-accounts' },
+  },
+  {
+    slug: 'industry-chart-templates',
+    title: 'Industry chart templates and industry suggestions',
+    category: 'Getting started',
+    summary: 'A new company starts with the standard chart plus a pack of accounts for its industry — every pack account born GIFI-coded — and LedgerPro can suggest a better-fitting pack later, from your real activity.',
+    keywords: ['industry', 'template', 'chart of accounts', 'onboarding', 'pack', 'construction', 'trucking', 'farming'],
+    sections: [
+      {
+        heading: 'One chart, plus a pack',
+        text: 'Every company starts from the same standard Canadian chart of accounts. During setup, the question “Industry — what does this business mainly do?” adds a pack of the accounts that industry actually needs: construction gets holdbacks receivable and holdbacks payable, real-estate rental gets rental revenue front and centre, farming gets the crop, livestock, and program-payment accounts, and a holding company gets the split between Canadian and foreign dividends. Every pack account arrives already GIFI-coded. Choosing “Something else / general” adds nothing — the standard chart on its own.',
+      },
+      {
+        heading: 'Changing or adding an industry later',
+        notes: [
+          'Setting an industry on an existing company layers the pack onto its chart. Accounts are added, never removed, and applying the same pack twice adds nothing twice.',
+          'Clearing the industry removes nothing either. Once an account exists, it is part of the company’s history.',
+          'Existing companies are never retro-fitted silently — a pack is offered and applied, never imposed.',
+        ],
+      },
+      {
+        heading: 'Industry suggestions',
+        steps: [
+          'After real activity builds up, the dashboard may show a card: “Your books look like a … business”, with up to three pieces of evidence in plain language — for example, that rent is 99% of income, or that fuel purchases are a large share of expenses.',
+          'Choose Add the pack to apply it through the same layering, or Dismiss the suggestion.',
+          'A suggestion is never applied automatically.',
+          'Dismissing one industry does not suppress a different suggestion later, if your books change enough to point somewhere else.',
+          'No card appears when the evidence is thin, or when two industries score too closely — a close race suggests nothing.',
+        ],
+      },
+    ],
+    action: { label: 'Open dashboard', href: '/dashboard' },
+  },
+  {
+    slug: 'books-health',
+    title: 'Books Health: the anomaly and duplicate radar',
+    category: 'Reporting and groups',
+    summary: 'A checklist that reads your books the way a reviewer would — duplicate payments, outliers, stale coding, unreconciled accounts, loan proofs, and filing gaps — every flag naming its evidence.',
+    keywords: ['books health', 'anomaly', 'duplicate', 'outlier', 'radar', 'checklist', 'dismiss'],
+    sections: [
+      {
+        heading: 'The three groups',
+        text: 'Open Reports, then Books Health. Findings are grouped as Needs attention, Worth a look, and Healthy. Every check reports in one of the three, so a clean result is stated outright — not just implied by the absence of flags. A fourth section, Dismissed, keeps what you have set aside, together with your reasons.',
+      },
+      {
+        heading: 'What it watches',
+        notes: [
+          'Duplicate payments: the same payee and amount within five days (five, so a fixed weekly payment never flags itself), and identical journal lines appearing in different entries.',
+          'Payments out of their usual range: at least three times a payee’s typical amount, and at least $500.',
+          'Round-number clusters: three or more payments of $500 or more, in exact $100 multiples, to one payee.',
+          'GIFI decisions outstanding, ranked by dollar volume so the biggest gap is worked first.',
+          'Bank rows still uncategorized after 14 days, shown as one aggregate with the count, total, and oldest items.',
+          'Suspense and clearing accounts that are not at zero.',
+          'Bank accounts reconciled long ago — or never.',
+          'Loan balances that do not tie three ways (schedule, ledger, statement), and shareholder-loan deadlines inside 90 days.',
+          'GST/HST periods that have ended with no filing recorded.',
+        ],
+      },
+      {
+        heading: 'Dismissals that stick — precisely',
+        steps: [
+          'Open a flag and read its figures and drill-down items. Follow Review to reach the source records when the flag needs work.',
+          'To set a flag aside, dismiss it with a reason. The reason stays on record.',
+          'A dismissal silences exactly that item: dismiss “these two Telus payments are both real” and that pair never returns — but a new duplicate pair, or the same suspense account at a different balance, comes back as a new flag.',
+          'Restore a dismissal from the Dismissed section at any time.',
+        ],
+      },
+    ],
+    action: { label: 'Open Books Health', href: '/reports/books-health' },
+  },
+  {
+    slug: 'reconciliation-assistant',
+    title: 'The reconciliation assistant',
+    category: 'Banking',
+    summary: 'For each unreconciled bank row, the assistant proposes what it matches — one document, an exact-sum split, a document plus a remainder, or an existing journal entry — with a confidence and its reasons. You confirm; nothing auto-clears.',
+    keywords: ['reconciliation', 'assistant', 'match', 'proposal', 'split', 'bank review'],
+    sections: [
+      {
+        heading: 'Proposals, ranked by evidence',
+        text: 'In Banking review, selecting a row loads its proposals in the Reconciliation assistant panel above the categorize area. Each proposal shows its kind (Split, Partial + remainder, or Existing entry), a confidence, and its reasons in plain language — the statement names the invoice reference, the amount is exact, you matched this payee this way before.',
+        notes: [
+          'A proposal’s parts must add up to the bank row to the cent. The only exception is Partial + remainder, where the remainder is named explicitly and held on account through the existing match flow.',
+          'Exact evidence always outranks the fuzzier remainder kind, and proposals below the confidence floor are not shown at all.',
+        ],
+      },
+      {
+        heading: 'Confirm or reject',
+        steps: [
+          'Choose Confirm match on the right proposal. Document matches post through exactly the same matching path as manual matching — splits are simply several documents at once.',
+          'An Existing entry proposal links the row to a journal entry that already exists (loan payments and manual entries are common cases). No new journal is created.',
+          'Choose Not this match to reject a pairing. The rejection is recorded and that pairing is never proposed again for that row; a rejected document is also kept out of splits for that row.',
+          'Rejecting one month’s pairing does not affect next month’s row — rejections belong to the exact row and pairing.',
+        ],
+      },
+      {
+        heading: 'It learns from confirmations',
+        text: 'Every confirmed match — from the assistant or from the classic match card — feeds the assistant’s memory. A payee you repeatedly match the same way earns a boost, with the reason shown: “You matched the last 3 ‘Ford Credit’ lines to loan payments.” The assistant proposes only; clearing a row always takes your confirmation.',
+      },
+    ],
+    action: { label: 'Open Banking', href: '/banking' },
+  },
+  {
+    slug: 'cash-flow-outlook',
+    title: 'The 13-week cash-flow outlook',
+    category: 'Reporting and groups',
+    summary: 'Thirteen weeks of projected cash from due dates, loan schedules, your payroll pattern, and CRA due dates — every figure traceable to the items under it, and the first negative week called out by date.',
+    keywords: ['cash flow', 'outlook', 'forecast', '13 weeks', 'projection', 'remittance'],
+    sections: [
+      {
+        heading: 'What goes in',
+        notes: [
+          'The opening position is the current balance of your bank and cash accounts, combined, with each account’s balance listed. Credit cards are excluded — their balance is money owing, not a position.',
+          'Open invoices land on their due dates; invoices already overdue appear in week 1. Open bills land on their due dates; overdue bills, and bills with no due date (labelled as such), appear in week 1.',
+          'Loan payments come from each loan’s own amortization schedule, on their real dates.',
+          'Recurring entries project forward on their saved cadence — only the part that actually moves through a bank account counts.',
+          'Payroll follows the pattern of your last three payroll journals — their cadence and average amounts, split between pay day and source deductions — with CRA remittances placed on the 15th of the following month, the regular-remitter schedule.',
+          'GST/HST net owing for unfiled periods lands on its CRA due date. A refund position is never projected; CRA refund timing is not predictable.',
+        ],
+      },
+      {
+        heading: 'Reading the outlook',
+        steps: [
+          'Open Reports, then Cash-Flow Outlook.',
+          'The table shows each week’s money in, money out, net, and running balance, starting from the Monday of the current week.',
+          'Expand any week to drill into the items under a figure — invoice and bill numbers, loan names, payroll dates. Every total is the sum of the items listed under it.',
+          'If the balance dips below zero, a warning names the week, the exact date, and that day’s balance. The check walks day by day, so a mid-week dip is caught even when the week closes positive.',
+          'Known items dated just after week 13 are listed under “Just beyond this window” — not dropped.',
+        ],
+      },
+      {
+        heading: 'The assumptions, in the open',
+        text: 'The page prints how the outlook is built (“How this outlook is built”). Everything sits on its due date — there is no “this customer usually pays late” modelling. Payroll is not projected at all when fewer than three payroll journals exist, or when the most recent one is old enough that the pattern looks stopped; the page says so instead of guessing. If your payroll journals do not split source deductions into liability accounts, no separate remittance is projected, and the page explains why.',
+      },
+    ],
+    action: { label: 'Open the cash-flow outlook', href: '/reports/cash-flow-outlook' },
+  },
+  {
+    slug: 'ask-your-books',
+    title: 'Ask Your Books',
+    category: 'Reporting and groups',
+    summary: 'Plain-language questions answered only from LedgerPro’s computed report figures — with the workings shown, and an honest refusal for anything outside the list.',
+    keywords: ['ask', 'question', 'ai', 'reports', 'grounded', 'natural language'],
+    sections: [
+      {
+        heading: 'What it can answer',
+        text: 'Ask Your Books answers a fixed library of questions, each computed by the same report code behind the reports themselves:',
+        notes: [
+          'How much did we spend on a category this period — with the prior period beside it.',
+          'Total revenue for a period.',
+          'Who owes us money, over a number of days you choose.',
+          'Top customers, and top vendors, for a period.',
+          'The GST/HST position for a period.',
+          'Loan balances and next payment dates.',
+          'CCA by class — book figures: capital cost, accumulated book depreciation, and net book value.',
+          'Cash by account, grouped by currency — balances in different currencies are never added together.',
+          'Payroll cost for a period, from the payroll journals posted by Nexvar Pay.',
+        ],
+      },
+      {
+        heading: 'Every answer shows its workings',
+        text: 'An answer carries the figures, the workings in plain language — which report, which period, and which filters produced them — and a link to the source report, so you can verify it in one click. CCA answers state plainly that LedgerPro keeps no tax UCC: UCC as filed lives in Nexvar Tax. Questions are matched against the library by pattern matching built into LedgerPro; when the AI layer is enabled on your deployment, a model may also choose — but it may only select a library question and its parameters. It never sees your ledger figures and never produces a number.',
+      },
+      {
+        heading: 'What it refuses — honestly',
+        notes: [
+          'A question outside the library gets a refusal, plus the full list of questions it can answer, with examples you can click.',
+          'Advice, predictions, and commands are refused the same way — “Should I claim CCA on…”, “Will we…”, “Delete…”, “How do I file…”. Ask Your Books reports on your books; it does not advise, predict, file, or change anything.',
+          'A category that matches no account is answered as “no account matches”, never as a silent zero.',
+          'Every question is logged with the library question chosen and its parameters — never with amounts.',
+        ],
+      },
+    ],
+    action: { label: 'Open Ask Your Books', href: '/reports/ask-books' },
   },
 ];
 
