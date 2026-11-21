@@ -44,6 +44,25 @@ export async function GET(req: NextRequest) {
       select: { id: true, name: true, companyName: true },
     });
 
+    // AI categorization (Phase 2 item 1): latest pending suggestion per
+    // row, with its bulk-confirm eligibility, for the review queue.
+    const { isBulkEligible, loadAcceptedLlmPatterns } = await import('@/lib/ai/categorization');
+    const rowIds = rows.map((t) => t.id);
+    const pendingSuggestions = rowIds.length
+      ? await db.aiSuggestion.findMany({
+          where: { companyId, transactionId: { in: rowIds }, outcome: 'pending' },
+          orderBy: { createdAt: 'desc' },
+          include: { suggestedCategory: { select: { code: true, name: true } } },
+        })
+      : [];
+    const acceptedLlmPatterns = pendingSuggestions.some((s) => s.source === 'llm')
+      ? await loadAcceptedLlmPatterns(db, companyId)
+      : new Set<string>();
+    const aiSuggestionByTx = new Map<string, (typeof pendingSuggestions)[number]>();
+    for (const s of pendingSuggestions) {
+      if (!aiSuggestionByTx.has(s.transactionId)) aiSuggestionByTx.set(s.transactionId, s);
+    }
+
     const queueRows = rows.map((t) => {
       const posted = t.status === 'reconciled' && t.matchRef;
       let pill: 'Match found' | 'To categorize' | 'Needs match' | 'Categorized' | 'Posted' = 'To categorize';
@@ -94,6 +113,21 @@ export async function GET(req: NextRequest) {
         contact: t.contact ? { id: t.contact.id, name: t.contact.companyName || t.contact.name } : null,
         appliedRule: t.appliedRule ? { id: t.appliedRule.id, name: t.appliedRule.name } : null,
         payeeGuess: t.payeeGuess,
+        aiSuggestion: (() => {
+          const s = aiSuggestionByTx.get(t.id);
+          if (!s || t.categoryId) return null;
+          return {
+            categoryCode: s.suggestedCategory.code,
+            categoryName: s.suggestedCategory.name,
+            confidence: Number(s.confidence),
+            reason: s.reason,
+            source: s.source,
+            bulkEligible: isBulkEligible(
+              { source: s.source as any, confidence: Number(s.confidence), payeeKey: s.payeeKey, categoryId: s.suggestedCategoryId },
+              acceptedLlmPatterns,
+            ),
+          };
+        })(),
         taxCode: t.taxCode,
         splits: t.splits,
         matchedDocs: t.matchedDocs,

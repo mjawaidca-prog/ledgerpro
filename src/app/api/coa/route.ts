@@ -4,6 +4,7 @@ import { requireCompany } from '@/lib/api-helpers';
 import { ensureDefaultChartOfAccounts } from '@/lib/default-coa';
 import { validateGifiCode, gifiTypeWarning } from '@/lib/gifi';
 import { gifiDecisionError } from '@/lib/gifi-readiness';
+import { recordGifiSuggestionEvent, sanitizeShownCodes } from '@/lib/gifi-events-server';
 import { getGLActivity, endOfDay, coaSummaryFromActivity } from '@/lib/reporting';
 export const dynamic = 'force-dynamic';
 
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
     if (error) return error;
 
     const body = await req.json();
-    const { code, name, type, detailType, parentCode, description, gifiCode, gifiUnmappedByChoice } = body;
+    const { code, name, type, detailType, parentCode, description, gifiCode, gifiUnmappedByChoice, gifiShownCodes } = body;
 
     if (!code || !name || !type) {
       return NextResponse.json({ error: 'Code, name, and type are required' }, { status: 400 });
@@ -145,6 +146,21 @@ export async function POST(req: NextRequest) {
         active: true,
       },
     });
+
+    // GIFI v2 learning (Phase 2): when the form reported the ranked
+    // suggestions it showed, record the event (shown vs chosen) that
+    // re-ranks future suggestions. Telemetry only — the recorder
+    // swallows its own failures, so this can never fail the create.
+    const shownCodes = sanitizeShownCodes(gifiShownCodes);
+    if (shownCodes.length > 0) {
+      await recordGifiSuggestionEvent({
+        companyId,
+        accountName: name,
+        accountType: type,
+        shownCodes,
+        chosenCode: gifi.code,
+      });
+    }
 
     // A valid code from the "wrong" statement area saves with a warning,
     // not a block — contra and clearing accounts are real exceptions.

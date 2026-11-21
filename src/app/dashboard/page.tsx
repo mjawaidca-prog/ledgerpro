@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { AppShell } from '@/components/shell/AppShell';
+import { IndustrySuggestionCard } from '@/components/dashboard/IndustrySuggestionCard';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
@@ -169,6 +170,10 @@ export default function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {/* ── Industry re-detection (Phase 2 item 5) — renders nothing
+          unless the books clearly fit a different industry pack ── */}
+      <IndustrySuggestionCard />
 
       {/* ── Error ── */}
       {error && (

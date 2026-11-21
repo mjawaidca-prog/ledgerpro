@@ -71,6 +71,11 @@ model Company {
   firstFiscalYearEnd DateTime? // manual last day of the FIRST fiscal year (short/long first year); null = derive from start
   businessType       BusinessType? // sole_proprietor, partnership, corporation, etc.
   industry           String? // industry pack key (src/lib/industry-coa.ts); null = CORE chart only
+  // Industry re-detection (Phase 2 item 5): the pack key of the most
+  // recent re-detection suggestion the user dismissed, so the same
+  // suggestion never nags twice. A DIFFERENT detected industry still
+  // surfaces. Null = nothing dismissed.
+  industrySuggestionDismissedKey String?
   businessNumber     String? // Canada: BN (9 digits)
   gstNumber          String? // GST/HST registration number
   province           CanadianProvince? // AB, BC, MB, NB, NL, NS, NT, NU, ON, PE, QC, SK, YT
@@ -97,13 +102,16 @@ model Company {
   bills               Bill[]
   accounts            FinancialAccount[]
   chartOfAccounts     ChartOfAccount[]
+  gifiSuggestionEvents GifiSuggestionEvent[]
   transactions        Transaction[]
+  aiSuggestions       AiSuggestion[]
   journalEntries      JournalEntry[]
   importBatches       ImportBatch[]
   transferMatches     TransferMatch[]
   auditLogs           AuditLog[]
   budgets             Budget[]
   periodCloses        PeriodClose[]
+  healthFlagDismissals HealthFlagDismissal[]
   recurringTemplates  RecurringTemplate[]
   categorizationRules CategorizationRule[]
   reportTemplates     ReportTemplate[]
@@ -294,11 +302,44 @@ model ChartOfAccount {
   taxRoundingConfigurations       CompanyTaxConfiguration[] @relation("TaxRoundingAccount")
   taxClearingConfigurations       CompanyTaxConfiguration[] @relation("TaxClearingAccount")
   suggestedReceipts               Receipt[]                 @relation("ReceiptSuggestedCategory")
+  aiSuggestions                   AiSuggestion[]            @relation("AiSuggestedCategory")
 
   @@unique([companyId, code])
   @@unique([companyId, id])
   @@index([companyId, type])
   @@index([parentCode])
+}
+
+// GIFI suggestion event (improvement plan Phase 2, item 3): one row per
+// account-form GIFI decision — the ranked codes the form SHOWED and the
+// code the user CHOSE (null = the deliberate "leave unmapped" decision).
+// Engine v2 aggregates these into per-company and cross-company pattern
+// statistics that re-rank future suggestions (src/lib/gifi-learning.ts).
+// Learning telemetry only: no bookkeeping reads this table, and a failed
+// write never blocks an account save. The cross-company aggregate only
+// ever exposes patternTokens/patternExact + counts — never company data.
+model GifiSuggestionEvent {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  accountName String
+  accountType String // GLType value at decision time, as text (ranking keys on it)
+  // Anonymized name patterns (src/lib/gifi-learning.ts) — precomputed at
+  // write time so aggregation is a plain groupBy.
+  patternExact  String
+  patternTokens String
+  shownCodes    String // JSON array of GIFI codes, in the order shown
+  chosenCode    String? // null = decided "leave unmapped"
+  wasTopSuggestion Boolean @default(false)
+  wasOverride      Boolean @default(false)
+  source           String  @default("account-form")
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, patternTokens])
+  @@index([companyId, patternExact])
+  @@index([patternTokens, accountType])
 }
 
 enum GLType {
@@ -476,6 +517,7 @@ model Transaction {
   transferMatchId     String? // set by transfer matching engine
   bankFeedTransaction BankFeedTransaction?
   receipts            Receipt[]
+  aiSuggestions       AiSuggestion[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -550,7 +592,26 @@ model Receipt {
 
   suggestedCategoryId String?
   suggestedCategory   ChartOfAccount? @relation("ReceiptSuggestedCategory", fields: [suggestedCategoryId], references: [id], onDelete: SetNull)
-  suggestedSource     String? // categorization_rule | bank_rule | manual
+  suggestedSource     String? // categorization_rule | bank_rule | history | manual
+
+  // AI document OCR (Phase 2 item 2): a document-intelligence provider
+  // (Azure prebuilt receipt) reads the stored document and returns the
+  // fields WITH per-field confidence — stored verbatim in
+  // extractionFields so a reviewer sees exactly what the model said.
+  // extractionStatus: pending → extracted | failed | unavailable
+  // ('unavailable' = no provider configured; the document is still
+  // stored and the ocr* fields above keep whatever the text pipeline
+  // or the user provided — the AI pipeline never invents values).
+  extractionStatus   String  @default("pending")
+  extractionProvider String?
+  extractionFields   Json?
+  extractionError    String?
+
+  // The draft expense (Bill, kind='expense', status='draft') created
+  // from this receipt's extraction — a loose reference, the same
+  // pattern as JournalEntry.sourceId. The bill is reviewed and posted
+  // from Expenses; this column is the receipt's link back to it.
+  draftBillId String?
 
   createdBy String?
   createdAt DateTime @default(now())
@@ -1266,6 +1327,44 @@ enum ImportStatus {
   confirmed
   imported
   error
+}
+
+// ─── AI CATEGORIZATION (Phase 2 item 1) ────────────────────
+// One row per engine suggestion on an imported transaction: the layered
+// engine (bank rules → categorization rules → company memory → LLM tail)
+// writes source/confidence/reason at import; the reviewer's final decision
+// is recorded back (outcome accepted/overridden + finalCategoryId) as the
+// audit trail and the learning signal. Plain strings, not enums — the
+// value sets are engine-internal and evolve with the layers.
+model AiSuggestion {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  payeeKey String // normalized payee the suggestion was computed for ('' when none)
+  source   String // 'bank_rule' | 'categorization_rule' | 'memory' | 'llm'
+
+  suggestedCategoryId String
+  suggestedCategory   ChartOfAccount @relation("AiSuggestedCategory", fields: [suggestedCategoryId], references: [id])
+
+  confidence Float // 0–1
+  reason     String // one-line plain-language "why"
+  model      String? // LLM model name when source = 'llm'
+
+  outcome         String    @default("pending") // 'pending' | 'accepted' | 'overridden'
+  finalCategoryId String? // the category the human actually used (null while pending)
+  viaBulk         Boolean   @default(false) // accepted through bulk confirmation
+  decidedAt       DateTime?
+  decidedBy       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, transactionId])
+  @@index([companyId, payeeKey, outcome])
+  @@index([companyId, outcome])
 }
 
 // ─── AUDIT LOG ─────────────────────────────────────────────
@@ -2444,4 +2543,26 @@ model SubscriberFollowUp {
   @@unique([companyId])
   @@index([status, nextFollowUpAt])
   @@index([assignedAdminId])
+}
+
+// ─── BOOKS HEALTH (Phase 2, item 4) ─────────────────────────────
+// A reviewer's dismissal of one anomaly-radar flag. The radar itself
+// is computed deterministically from the books on every page load
+// (src/lib/health/engine.ts) — nothing about a flag is stored. A
+// dismissal is keyed to the flag's stable fingerprint, so it silences
+// exactly the flagged item (this duplicate pair, this account, this
+// period) and nothing else: when the underlying item changes, its
+// fingerprint changes and the flag comes back for a fresh look.
+model HealthFlagDismissal {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fingerprint String // "<ruleId>:<fnv1a hash of the flag's stable item key>"
+  ruleId      String
+  reason      String
+  dismissedBy String? // user id of the reviewer who dismissed it
+  createdAt   DateTime @default(now())
+
+  @@unique([companyId, fingerprint])
+  @@index([companyId])
 }

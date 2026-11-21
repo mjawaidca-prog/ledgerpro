@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
-import { Camera, FileText, Loader2, Paperclip, Trash2, Unlink, Check, Smartphone, Copy, RefreshCw, X } from 'lucide-react';
+import { Camera, FileText, Loader2, Paperclip, Trash2, Unlink, Check, Smartphone, Copy, RefreshCw, X, Sparkles, FilePlus2 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { RECEIPT_ACCEPT } from '@/lib/receipts/validate';
 import { readReceiptTextInBrowser } from '@/lib/receipts/client-ocr';
@@ -25,7 +25,27 @@ interface ReceiptRow {
   suggestedCategoryId: string | null;
   suggestedCategoryCode: string | null;
   suggestedSource: string | null;
+  extractionStatus: 'pending' | 'extracted' | 'failed' | 'unavailable';
+  extractionProvider: string | null;
+  extractionError: string | null;
+  fieldConfidences: {
+    vendor: number | null;
+    date: number | null;
+    total: number | null;
+    taxAmount: number | null;
+    currency: number | null;
+  } | null;
+  extractedCurrency: string | null;
+  draftBillId: string | null;
 }
+
+/** Fields the AI read with low confidence get the reviewer's eye first. */
+const LOW_CONFIDENCE = 0.8;
+const lowConf = (receipt: ReceiptRow, field: 'vendor' | 'date' | 'total' | 'taxAmount') =>
+  receipt.extractionStatus === 'extracted' &&
+  receipt.fieldConfidences?.[field] !== null &&
+  receipt.fieldConfidences?.[field] !== undefined &&
+  (receipt.fieldConfidences[field] as number) < LOW_CONFIDENCE;
 
 interface TxRow {
   id: string;
@@ -150,9 +170,11 @@ export default function ReceiptsPage() {
       setTab('inbox');
       setToast({
         message:
-          json.data.receipt.ocrStatus === 'done'
-            ? 'Receipt uploaded — check the suggested fields below, then attach it to its bank transaction.'
-            : 'Receipt uploaded. Text could not be read automatically, so type the merchant, date, and total before attaching.',
+          json.data.receipt.extractionStatus === 'extracted'
+            ? 'Receipt uploaded and read by AI — check the fields below (anything outlined in amber is worth a second look), then attach it or create a draft expense.'
+            : json.data.receipt.ocrStatus === 'done'
+              ? 'Receipt uploaded — check the suggested fields below, then attach it to its bank transaction.'
+              : 'Receipt uploaded. Text could not be read automatically, so type the merchant, date, and total before attaching.',
         ok: true,
       });
       await load();
@@ -433,6 +455,54 @@ function ReceiptCard({
     }
   }
 
+  async function createDraft() {
+    setBusy(true);
+    try {
+      // Persist any edits first so the draft uses the confirmed fields.
+      await patch({
+        merchant: merchant || null,
+        date: date || null,
+        total: total === '' ? null : Number(total),
+        taxAmount: taxAmount === '' ? null : Number(taxAmount),
+        categoryId: categoryId || null,
+      });
+      const res = await fetch(`/api/receipts/${receipt.id}/create-draft`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Creating the draft expense failed.');
+      notify(
+        `Draft expense ${json.data.billId} created in Expenses with this receipt as its source. Review it there and post it when you are ready — nothing has been posted yet.`,
+        true,
+      );
+      await onChanged();
+    } catch (e: any) {
+      notify(e.message, false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryExtract() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/receipts/${receipt.id}/extract`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'The AI read failed.');
+      notify(
+        json.data.extraction.status === 'extracted'
+          ? 'AI read complete — check the fields below.'
+          : json.data.extraction.status === 'unavailable'
+            ? 'AI read is not configured for this workspace yet — the standard read above still applies.'
+            : `The AI read failed${json.data.extraction.error ? `: ${json.data.extraction.error}` : '.'}`,
+        json.data.extraction.status === 'extracted',
+      );
+      await onChanged();
+    } catch (e: any) {
+      notify(e.message, false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function detach() {
     setBusy(true);
     try {
@@ -465,6 +535,12 @@ function ReceiptCard({
   const inputCls =
     'w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)]';
   const labelCls = 'block text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-1';
+  // Amber outline for fields the AI read with low confidence — the
+  // reviewer's eye should land on those first.
+  const flagStyle = (flagged: boolean): React.CSSProperties | undefined =>
+    flagged ? { borderColor: '#d97706', boxShadow: '0 0 0 1px #d97706' } : undefined;
+  const anyLowConfidence =
+    lowConf(receipt, 'vendor') || lowConf(receipt, 'date') || lowConf(receipt, 'total') || lowConf(receipt, 'taxAmount');
 
   return (
     <Card>
@@ -478,6 +554,16 @@ function ReceiptCard({
             ? `Read automatically${receipt.confidence !== null ? ` · ${Math.round(receipt.confidence * 100)}% of fields found` : ''}`
             : 'Not read automatically — enter the details'}
         </span>
+        {receipt.extractionStatus === 'extracted' && (
+          <span className="flex items-center gap-1 rounded-full bg-[#eef4ff] px-2 py-0.5 text-[11px] font-semibold text-[#2f4b9b]">
+            <Sparkles size={11} /> AI read
+          </span>
+        )}
+        {receipt.extractionStatus === 'failed' && (
+          <span className="rounded-full bg-[#fdf0ef] px-2 py-0.5 text-[11px] font-semibold text-[#8f1d17]">
+            AI read failed
+          </span>
+        )}
         <span className="rounded-full bg-[var(--surface-3)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text)]">
           {receipt.status}
         </span>
@@ -506,24 +592,24 @@ function ReceiptCard({
 
           <div className="grid flex-1 grid-cols-2 gap-3 lg:grid-cols-4">
             <div className="col-span-2">
-              <label className={labelCls}>Merchant</label>
-              <input className={inputCls} value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. STAPLES" />
+              <label className={labelCls}>Merchant {lowConf(receipt, 'vendor') ? '· AI is unsure — check' : ''}</label>
+              <input className={inputCls} style={flagStyle(lowConf(receipt, 'vendor'))} value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. STAPLES" />
             </div>
             <div>
-              <label className={labelCls}>Date</label>
-              <input className={inputCls} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <label className={labelCls}>Date {lowConf(receipt, 'date') ? '· check' : ''}</label>
+              <input className={inputCls} style={flagStyle(lowConf(receipt, 'date'))} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div>
-              <label className={labelCls}>Total (tax incl.)</label>
-              <input className={inputCls} inputMode="decimal" value={total} onChange={(e) => setTotal(e.target.value)} placeholder="0.00" />
+              <label className={labelCls}>Total (tax incl.) {lowConf(receipt, 'total') ? '· check' : ''}</label>
+              <input className={inputCls} style={flagStyle(lowConf(receipt, 'total'))} inputMode="decimal" value={total} onChange={(e) => setTotal(e.target.value)} placeholder="0.00" />
             </div>
             <div>
-              <label className={labelCls}>Tax on receipt</label>
-              <input className={inputCls} inputMode="decimal" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} placeholder="0.00" />
+              <label className={labelCls}>Tax on receipt {lowConf(receipt, 'taxAmount') ? '· check' : ''}</label>
+              <input className={inputCls} style={flagStyle(lowConf(receipt, 'taxAmount'))} inputMode="decimal" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} placeholder="0.00" />
             </div>
             <div className="col-span-2">
               <label className={labelCls}>
-                Category {receipt.suggestedSource ? `(suggested by ${receipt.suggestedSource === 'manual' ? 'you' : 'a rule'})` : ''}
+                Category {receipt.suggestedSource ? `(suggested by ${receipt.suggestedSource === 'manual' ? 'you' : receipt.suggestedSource === 'history' ? 'your history' : 'a rule'})` : ''}
               </label>
               <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                 <option value="">Choose a category…</option>
@@ -541,6 +627,11 @@ function ReceiptCard({
             </div>
           </div>
         </div>
+        {anyLowConfidence && (
+          <p className="mt-2 text-xs text-[#b45309]">
+            Fields outlined in amber were read by AI with low confidence — double-check those against the receipt image.
+          </p>
+        )}
 
         <div className="mt-4 border-t border-[var(--border)] pt-3">
           {receipt.status === 'attached' ? (
@@ -600,6 +691,47 @@ function ReceiptCard({
               </Button>
               {(!date || !total) && (
                 <span className="text-xs text-[var(--text-muted)]">Add a date and a total above first.</span>
+              )}
+            </div>
+          )}
+          {receipt.status !== 'attached' && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-dashed border-[var(--border)] pt-3">
+              <Sparkles size={14} className="text-[var(--text-muted)]" />
+              {receipt.draftBillId ? (
+                <span className="text-sm text-[var(--text-muted)]">
+                  Draft expense <span className="font-semibold text-[var(--text)]">{receipt.draftBillId}</span> was
+                  created from this receipt —{' '}
+                  <a href="/expenses" className="font-semibold text-[var(--text-strong)] underline">
+                    review and post it in Expenses
+                  </a>
+                  . This receipt stays linked as its source document.
+                </span>
+              ) : receipt.extractionStatus === 'extracted' ? (
+                <>
+                  <span className="text-sm text-[var(--text-muted)]">
+                    Or skip the bank row entirely — turn the AI read into a draft expense with this receipt attached
+                    as the source document:
+                  </span>
+                  <Button variant="secondary" size="sm" onClick={createDraft} disabled={busy}>
+                    <FilePlus2 size={14} /> Create draft expense
+                  </Button>
+                </>
+              ) : receipt.extractionStatus === 'failed' ? (
+                <>
+                  <span className="text-sm text-[var(--text-muted)]">
+                    The AI read failed{receipt.extractionError ? ` (${receipt.extractionError})` : ''} — the fields
+                    above are from the standard read.
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={retryExtract} disabled={busy}>
+                    <RefreshCw size={14} /> Retry AI read
+                  </Button>
+                </>
+              ) : (
+                <span className="text-sm text-[var(--text-muted)]">
+                  {receipt.extractionStatus === 'unavailable'
+                    ? 'AI read is not configured for this workspace — when it is, extracted receipts can become draft expenses from here.'
+                    : 'AI read is pending for this receipt.'}
+                </span>
               )}
             </div>
           )}

@@ -14,6 +14,7 @@ import { loadActiveCategorizationRules } from '@/lib/banking/categorization-appl
 import type { BankRuleLike } from '@/lib/banking/rules';
 import { validateReceiptUpload } from './validate';
 import { extractReceiptText, type ExtractedText } from './extract';
+import { runReceiptExtraction } from './extraction-pipeline';
 import { parseReceiptText } from './parse';
 import { suggestForReceipt, buildReceiptSplit, type ReceiptSuggestion } from './suggest';
 
@@ -39,6 +40,23 @@ export function serializeReceipt(r: any) {
     suggestedCategoryId: r.suggestedCategoryId ?? null,
     suggestedCategoryCode: r.suggestedCategory?.code ?? null,
     suggestedSource: r.suggestedSource ?? null,
+    // AI document OCR (Phase 2 item 2): status + the model's own
+    // per-field confidences, so the inbox can highlight what to check.
+    extractionStatus: r.extractionStatus ?? 'pending',
+    extractionProvider: r.extractionProvider ?? null,
+    extractionError: r.extractionError ?? null,
+    fieldConfidences: r.extractionFields
+      ? {
+          vendor: r.extractionFields.vendor?.confidence ?? null,
+          date: r.extractionFields.date?.confidence ?? null,
+          total: r.extractionFields.total?.confidence ?? null,
+          taxAmount: r.extractionFields.taxAmount?.confidence ?? null,
+          currency: r.extractionFields.currency?.confidence ?? null,
+        }
+      : null,
+    extractedCurrency: r.extractionFields?.currency?.value ?? null,
+    extractedLineItems: Array.isArray(r.extractionFields?.lineItems) ? r.extractionFields.lineItems : [],
+    draftBillId: r.draftBillId ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -127,6 +145,23 @@ export async function createReceiptFromUpload(args: {
     },
     include: { suggestedCategory: { select: { code: true } } },
   });
+
+  // AI document read (Phase 2 item 2): when a provider is configured,
+  // run it over the stored document and mirror its fields into the
+  // suggestion columns. Best-effort by contract — the pipeline records
+  // its own outcome on the row (extracted | failed | unavailable) and
+  // an AI outage must never fail an upload, so any throw is swallowed
+  // here and the receipt simply keeps its text-pipeline read.
+  try {
+    await runReceiptExtraction({ companyId: args.companyId, receiptId: receipt.id });
+    const refreshed = await (db as any).receipt.findFirst({
+      where: { id: receipt.id, companyId: args.companyId },
+      include: { suggestedCategory: { select: { code: true } } },
+    });
+    if (refreshed) return serializeReceipt(refreshed);
+  } catch {
+    // The stored receipt above is the source of truth; return it as-is.
+  }
 
   return serializeReceipt(receipt);
 }

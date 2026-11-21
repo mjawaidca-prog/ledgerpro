@@ -99,6 +99,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       },
     });
 
+    // AI categorization learning (Phase 2 item 1): record whether the
+    // human took the pending suggestion or overrode it — the audit trail
+    // and the signal future suggestions learn from. Best-effort: a
+    // recording failure never fails the categorization itself.
+    try {
+      const { recordSuggestionOutcome } = await import('@/lib/ai/categorization');
+      await recordSuggestionOutcome(db, {
+        companyId,
+        transactionId: params.id,
+        finalCategoryId: categoryId,
+        userId: userId ?? undefined,
+      });
+    } catch (e) {
+      console.error('[categorize] AI suggestion outcome recording failed:', e);
+    }
+
     let entryId: string | null = null;
     if (post) {
       const { postBankRow } = await import('@/lib/banking/posting');

@@ -9,9 +9,11 @@
  * presents the decision in the design's order —
  *
  *  1. one suggested code with a plain-language reason and a one-tap
- *     [Use NNNN] button (suggestions come from
- *     src/lib/gifi-suggestions.ts — template twins, then keyword
- *     rules over the CRA catalogue);
+ *     [Use NNNN] button (suggestions come from the v2 ranked engine,
+ *     src/lib/gifi-suggestions-v2.ts — v1's template twins + keyword
+ *     rules, catalogue detail/sibling expansion, and re-ranking by
+ *     this company's recorded choices; the runners-up are one tap
+ *     away under "Other suggestions");
  *  2. the full searchable picker, for "a different code";
  *  3. a quiet, deliberate "Leave unmapped — I'll code it later"
  *     checkbox: the only way to save without a code, and it is
@@ -33,13 +35,15 @@
  * enforces the same rule server-side.
  */
 
-import { useMemo } from 'react';
-import { AlertTriangle, Lightbulb } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronUp, Lightbulb } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { GifiCodePicker } from '@/components/coa/GifiCodePicker';
 import { hasValidGifiCode } from '@/lib/gifi';
 import { isGifiDesignExempt } from '@/lib/gifi-readiness';
-import { mixedGifiAccountNotice, suggestGifiCodes } from '@/lib/gifi-suggestions';
+import { mixedGifiAccountNotice } from '@/lib/gifi-suggestions';
+import { rankGifiSuggestions, type RankedGifiSuggestion } from '@/lib/gifi-suggestions-v2';
+import type { GifiLearningContext } from '@/lib/gifi-learning';
 
 interface GifiDecisionFieldProps {
   /** Account name as currently typed — drives suggestions/exemption. */
@@ -54,6 +58,19 @@ interface GifiDecisionFieldProps {
   /** The recorded deliberate "leave unmapped" choice. */
   unmappedByChoice: boolean;
   onUnmappedByChoiceChange: (choice: boolean) => void;
+  /**
+   * Phase 2 (v2 learning): this company's + the anonymized global
+   * pattern statistics. When present, suggestions are re-ranked by
+   * recorded choices; when absent, the ranking is rules-only.
+   */
+  learning?: GifiLearningContext;
+  /**
+   * Phase 2 (v2 learning): reports the ranked list currently shown,
+   * so the parent form can include it in the save payload — the API
+   * records it as a suggestion event (what was shown vs what was
+   * chosen is the learning signal).
+   */
+  onShownChange?: (shown: RankedGifiSuggestion[]) => void;
 }
 
 export function GifiDecisionField({
@@ -65,6 +82,8 @@ export function GifiDecisionField({
   onChange,
   unmappedByChoice,
   onUnmappedByChoiceChange,
+  learning,
+  onShownChange,
 }: GifiDecisionFieldProps) {
   const exempt = useMemo(
     () => isGifiDesignExempt({ code: '', name, type: accountType, subType: subType ?? null, detailType: detailType ?? null }),
@@ -72,10 +91,21 @@ export function GifiDecisionField({
   );
 
   const suggestions = useMemo(
-    () => (exempt ? [] : suggestGifiCodes({ name, type: accountType, detailType: detailType ?? null, gifiCode: value || null })),
-    [exempt, name, accountType, detailType, value],
+    () => (exempt ? [] : rankGifiSuggestions({ name, type: accountType, detailType: detailType ?? null, gifiCode: value || null }, learning)),
+    [exempt, name, accountType, detailType, value, learning],
   );
   const topSuggestion = suggestions[0] ?? null;
+  const runnersUp = suggestions.slice(1);
+  const [showRunnersUp, setShowRunnersUp] = useState(false);
+
+  // Report the shown list upward (for the save payload's suggestion
+  // event) — keyed on the code sequence so re-renders with an equal
+  // list don't re-report.
+  const shownSignature = suggestions.map((s) => s.code).join(',');
+  useEffect(() => {
+    if (onShownChange) onShownChange(suggestions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownSignature]);
 
   const mixedNotice = useMemo(
     () => (exempt ? null : mixedGifiAccountNotice({ name })),
@@ -126,6 +156,40 @@ export function GifiDecisionField({
           <Button type="button" size="sm" onClick={() => pick(topSuggestion.code)}>
             Use {topSuggestion.code}
           </Button>
+        </div>
+      )}
+
+      {!exempt && !mixedNotice && topSuggestion && !coded && runnersUp.length > 0 && (
+        <div className="mb-2">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+            onClick={() => setShowRunnersUp((v) => !v)}
+            aria-expanded={showRunnersUp}
+          >
+            {showRunnersUp ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            Other suggestions ({runnersUp.length})
+          </button>
+          {showRunnersUp && (
+            <ul className="mt-1.5 space-y-1">
+              {runnersUp.map((s) => (
+                <li
+                  key={s.code}
+                  className="flex items-center gap-3 flex-wrap rounded-lg border border-[var(--border)] px-3 py-2"
+                >
+                  <p className="text-xs text-[var(--text)] flex-1 min-w-[220px]">
+                    <span className="font-semibold text-[var(--text-strong)]">
+                      {s.code} — {s.description}.
+                    </span>{' '}
+                    {s.reason}.
+                  </p>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => pick(s.code)}>
+                    Use {s.code}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

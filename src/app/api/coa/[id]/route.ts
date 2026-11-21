@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireCompany, auditLog } from '@/lib/api-helpers';
 import { validateGifiCode, gifiTypeWarning, hasValidGifiCode } from '@/lib/gifi';
 import { gifiDecisionError } from '@/lib/gifi-readiness';
+import { recordGifiSuggestionEvent, sanitizeShownCodes } from '@/lib/gifi-events-server';
 export const dynamic = 'force-dynamic';
 
 const VALID_SUBTYPES = [
@@ -24,7 +25,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (!existing) return NextResponse.json({ error: 'Account not found' }, { status: 404 });
 
     const body = await req.json();
-    const { name, detailType, subType, gifiCode, description, active, gifiUnmappedByChoice } = body;
+    const { name, detailType, subType, gifiCode, description, active, gifiUnmappedByChoice, gifiShownCodes } = body;
 
     if (subType !== undefined && subType !== null && !VALID_SUBTYPES.includes(subType)) {
       return NextResponse.json({ error: 'Invalid subType' }, { status: 400 });
@@ -93,6 +94,24 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     });
 
     await auditLog(companyId, userId, 'coa.update', 'chart_of_account', params.id, { before: existing, after: updated });
+
+    // GIFI v2 learning (Phase 2): when this save touched the GIFI
+    // state and the form reported the ranked suggestions it showed,
+    // record the event (shown vs chosen) that re-ranks future
+    // suggestions. Telemetry only — the recorder swallows its own
+    // failures, so this can never fail the update.
+    if (gifiCode !== undefined || gifiUnmappedByChoice !== undefined) {
+      const shownCodes = sanitizeShownCodes(gifiShownCodes);
+      if (shownCodes.length > 0) {
+        await recordGifiSuggestionEvent({
+          companyId,
+          accountName: updated.name,
+          accountType: existing.type,
+          shownCodes,
+          chosenCode: hasValidGifiCode(updated.gifiCode) ? updated.gifiCode : null,
+        });
+      }
+    }
 
     const warning = gifiUpdate ? gifiTypeWarning(gifiUpdate, existing.type) : null;
 

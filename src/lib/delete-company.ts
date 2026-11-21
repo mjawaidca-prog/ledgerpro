@@ -51,6 +51,7 @@ export const COMPANY_PURGE_DELEGATES = [
   'journalEntry', // self-ref reversalOfId nulled first
   'receipt', // references transaction + chartOfAccount (SetNull): before both
   'receiptUploadLink', // references company + user (global) only
+  'aiSuggestion', // Phase 2 AI categorization: references transaction — before it
   'transaction',
   'invoiceLineItem', // via invoice.companyId
   'billLineItem', // via bill.companyId
@@ -87,6 +88,8 @@ export const COMPANY_PURGE_DELEGATES = [
   'subscriberFollowUp', // CC-3: per-company follow-up record
   'platformAuditEvent', // CC-1: platform audit rows that reference this company
   'notification', // companyId column but NO FK relation — orphans otherwise
+  'gifiSuggestionEvent', // Phase 2 GIFI v2 learning events
+  'healthFlagDismissal', // Phase 2 books-health dismissals
   'chartOfAccount',
   'financialAccount',
   'relatedPartyLink', // companyAId OR companyBId (cross-company guardrail)
@@ -169,6 +172,7 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
     { delegate: 'receipt', run: (tx) => tx.receipt.deleteMany(byCompany) },
     { delegate: 'receiptUploadLink', run: (tx) => tx.receiptUploadLink.deleteMany(byCompany) },
 
+    { delegate: 'aiSuggestion', run: (tx) => tx.aiSuggestion.deleteMany(byCompany) },
     { delegate: 'transaction', run: (tx) => tx.transaction.deleteMany(byCompany) },
 
     { delegate: 'invoiceLineItem', run: (tx) => tx.invoiceLineItem.deleteMany({ where: { invoice: { companyId } } }) },
@@ -210,6 +214,8 @@ export function companyPurgeSteps(companyId: string): PurgeStep[] {
     { delegate: 'subscriberFollowUp', run: (tx) => tx.subscriberFollowUp.deleteMany(byCompany) },
     { delegate: 'platformAuditEvent', run: (tx) => tx.platformAuditEvent.deleteMany(byCompany) },
     { delegate: 'notification', run: (tx) => tx.notification.deleteMany(byCompany) },
+    { delegate: 'gifiSuggestionEvent', run: (tx) => tx.gifiSuggestionEvent.deleteMany(byCompany) },
+    { delegate: 'healthFlagDismissal', run: (tx) => tx.healthFlagDismissal.deleteMany(byCompany) },
     { delegate: 'chartOfAccount', run: (tx) => tx.chartOfAccount.deleteMany(byCompany) },
     { delegate: 'financialAccount', run: (tx) => tx.financialAccount.deleteMany(byCompany) },
 

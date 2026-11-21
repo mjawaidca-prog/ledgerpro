@@ -22,6 +22,7 @@ interface QueueRow {
   category: { code: string; name: string } | null;
   contact: { id: string; name: string } | null;
   appliedRule: { id: string; name: string } | null;
+  aiSuggestion: { categoryCode: string; categoryName: string; confidence: number; reason: string; source: string; bulkEligible: boolean } | null;
   payeeGuess: string | null;
   taxCode: string | null;
   splits: unknown;
@@ -54,6 +55,8 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
   const [categories, setCategories] = useState<{ id: string; code: string; name: string; type: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Categorize form
   const [catCategory, setCatCategory] = useState('');
@@ -101,6 +104,9 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
       setCatCategory(row.category?.code ?? '');
     } else {
       setMode('categorize');
+      // Pre-fill the AI suggestion — one click on Post confirms it, and
+      // changing it teaches the engine (the override is recorded).
+      if (row.aiSuggestion) setCatCategory(row.aiSuggestion.categoryCode);
     }
     setSplitLines([{ categoryCode: '', amount: Math.abs(row.amount), taxCode: null, taxRate: null, taxInclusive: true, taxProvince: null, taxRecoverable: true, taxRecoveryPercent: 100 }]);
   };
@@ -133,6 +139,65 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
       setError(e.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const confirmAiSuggestion = async () => {
+    if (!selected?.aiSuggestion) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetchWithTenantHeaders(`/api/bank-transactions/${selected.id}/categorize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoryCode: selected.aiSuggestion.categoryCode,
+          taxCode: null,
+          taxRate: null,
+          taxInclusive: true,
+          contactId: null,
+          memo: null,
+          createRule: false,
+          post: false,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed');
+      load();
+      setSelected(null);
+      setMode(null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkConfirm = async () => {
+    setBulkBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetchWithTenantHeaders('/api/bank-transactions/bulk-confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: params.accountId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed');
+      const { confirmed, leftForReview } = json.data ?? { confirmed: 0, leftForReview: 0 };
+      setNotice(
+        confirmed > 0
+          ? `Confirmed ${confirmed} high-confidence suggestion${confirmed === 1 ? '' : 's'} — categorized, ready to post.${leftForReview > 0 ? ` ${leftForReview} suggestion${leftForReview === 1 ? '' : 's'} still need individual review.` : ''}`
+          : 'No suggestions were eligible for bulk confirmation — each needs an individual look.'
+      );
+      load();
+      setSelected(null);
+      setMode(null);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -220,6 +285,26 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
       </div>
 
       {error && <Alert variant="danger" className="mb-4">{error}</Alert>}
+      {notice && <Alert variant="success" className="mb-4">{notice}</Alert>}
+
+      {/* AI bulk confirmation — only high-confidence, proven suggestions */}
+      {rows && rows.some((r) => r.aiSuggestion?.bulkEligible) && (
+        <div className="flex items-center gap-3 mb-4 bg-[var(--primary-soft)] border border-[var(--primary-soft-border)] rounded-[var(--r-xl)] px-4 py-3">
+          <div className="flex-1 text-[13px] text-[var(--text)]">
+            <strong className="text-[var(--text-strong)] font-semibold">
+              {rows.filter((r) => r.aiSuggestion?.bulkEligible).length} suggestion{rows.filter((r) => r.aiSuggestion?.bulkEligible).length === 1 ? '' : 's'} ready to confirm
+            </strong>{' '}
+            — high confidence from your rules and history. They will be categorized, not posted; posting stays a separate step.
+          </div>
+          <button
+            onClick={bulkConfirm}
+            disabled={bulkBusy}
+            className="rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--text-faint)] text-white text-[13px] font-semibold px-4 py-2 transition-colors whitespace-nowrap"
+          >
+            {bulkBusy ? 'Confirming…' : 'Confirm all'}
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-[1fr_372px] gap-6 max-[1100px]:grid-cols-1">
         {/* Queue */}
@@ -245,7 +330,7 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
                 <div className="min-w-0">
                   <div className={cn('text-[13.5px] truncate', selected?.id === row.id ? 'text-[var(--text-strong)] font-semibold' : 'text-[var(--text)]')}>{row.description}</div>
                   <div className="font-mono text-[10.5px] text-[var(--text-faint)]">
-                    {row.suggested ? `suggested: ${row.suggested.ref} · ${row.suggested.contactName}` : row.appliedRule ? `rule ${row.appliedRule.name}` : row.category ? `${row.category.code} ${row.category.name}` : 'no rule matched this payee'}
+                    {row.suggested ? `suggested: ${row.suggested.ref} · ${row.suggested.contactName}` : row.appliedRule ? `rule ${row.appliedRule.name}` : row.category ? `${row.category.code} ${row.category.name}` : row.aiSuggestion ? `AI suggests ${row.aiSuggestion.categoryCode} ${row.aiSuggestion.categoryName} · ${Math.round(row.aiSuggestion.confidence * 100)}%` : 'no rule matched this payee'}
                   </div>
                 </div>
                 <div className={cn('text-right font-mono tabular-nums text-[13px]', row.amount >= 0 ? 'text-[var(--success)]' : 'text-[var(--text-strong)]')}>{SIGNED(row.amount)}</div>
@@ -315,6 +400,25 @@ export default function ReviewPage({ params }: { params: { accountId: string } }
 
               {mode === 'categorize' && (
                 <div className="space-y-3">
+                  {selected.aiSuggestion && !selected.category && (
+                    <div className="rounded-[var(--r-lg)] bg-[var(--primary-soft)] border border-[var(--primary-soft-border)] p-3.5">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.10em] text-[var(--primary)]">
+                        {selected.aiSuggestion.source === 'llm' ? 'AI suggestion' : selected.aiSuggestion.source === 'memory' ? 'From your history' : 'From your rules'} · {Math.round(selected.aiSuggestion.confidence * 100)}% confident
+                      </div>
+                      <div className="text-[14px] font-semibold text-[var(--text-strong)] mt-1">
+                        {selected.aiSuggestion.categoryCode} — {selected.aiSuggestion.categoryName}
+                      </div>
+                      <div className="text-xs text-[var(--text-muted)] mt-1">{selected.aiSuggestion.reason}</div>
+                      <button
+                        onClick={confirmAiSuggestion}
+                        disabled={busy}
+                        className="mt-2.5 rounded-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:bg-[var(--text-faint)] text-white text-[12.5px] font-semibold px-4 py-1.5 transition-colors"
+                      >
+                        {busy ? 'Confirming…' : 'Confirm suggestion'}
+                      </button>
+                      <span className="text-[11px] text-[var(--text-faint)] ml-2">Categorizes only — posting stays separate. Or pick a different category below; the correction teaches the engine.</span>
+                    </div>
+                  )}
                   <div>
                     <label className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--text-muted)]">Category</label>
                     <select value={catCategory} onChange={(e) => setCatCategory(e.target.value)} className="mt-1 w-full border border-[var(--border)] rounded-[var(--r-lg)] bg-[var(--surface)] px-3 py-2 text-[13px] text-[var(--text)] outline-none">

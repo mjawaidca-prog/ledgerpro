@@ -19,6 +19,7 @@ import {
   type CategorizationApplySummary,
 } from './categorization-apply';
 import { buildRuleTaxSplit } from './rule-tax';
+import { suggestForTransactions } from '@/lib/ai/categorization';
 
 export type ImportField =
   | 'ignore'
@@ -321,7 +322,7 @@ export async function commitImport(input: {
   applyRulesOnImport: boolean;
   autoPostExactMatches: boolean;
   skipRowIndexes: number[];
-}): Promise<{ importId: string; newCount: number; skippedDuplicate: number; skippedLocked: number; rulesApplied: number; categorization: CategorizationApplySummary }> {
+}): Promise<{ importId: string; newCount: number; skippedDuplicate: number; skippedLocked: number; rulesApplied: number; categorization: CategorizationApplySummary; aiSuggested: number }> {
   return db.$transaction(async (tx) => {
     const account = await tx.financialAccount.findUniqueOrThrow({
       where: { id: input.accountId, companyId: input.companyId },
@@ -494,6 +495,38 @@ export async function commitImport(input: {
       }
     }
 
+    // AI categorization (Phase 2 item 1) — the layered suggestion engine
+    // (bank rules → categorization rules → company memory → LLM tail)
+    // writes a suggestion + confidence + reason onto every row this import
+    // left uncategorized, for the review queue to confirm or correct.
+    // Suggestions only: nothing is categorized or posted here, and a
+    // suggestion failure must never fail the import.
+    let aiSuggested = 0;
+    if (rowsData.length) {
+      try {
+        const stillOpen = await tx.transaction.findMany({
+          where: { statementImportId: created.id, status: 'toreview', categoryId: null },
+          select: {
+            id: true,
+            description: true,
+            merchant: true,
+            rawStatementText: true,
+            amount: true,
+            date: true,
+            payeeGuess: true,
+            financialAccountId: true,
+          },
+        });
+        const aiResult = await suggestForTransactions(tx, {
+          companyId: input.companyId,
+          transactions: stillOpen.map((t) => ({ ...t, amount: Number(t.amount) })),
+        });
+        aiSuggested = aiResult.suggested;
+      } catch (e) {
+        console.error('[import] AI categorization failed:', e);
+      }
+    }
+
     await tx.statementImport.update({
       where: { id: created.id },
       data: { rulesApplied },
@@ -511,6 +544,7 @@ export async function commitImport(input: {
       skippedLocked: lockedSet.size,
       rulesApplied,
       categorization,
+      aiSuggested,
     };
   });
 }

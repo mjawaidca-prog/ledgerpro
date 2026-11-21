@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn';
 import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import {
   TrendingUp, TrendingDown, FileText, BarChart3,
-  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark, PackageCheck,
+  ArrowRight, Receipt, Building2, Scale, BookOpen, Target, Layers, Landmark, PackageCheck, HeartPulse,
 } from 'lucide-react';
 
 const reports = [
@@ -39,6 +39,13 @@ const reports = [
     href: '/reports/trial-balance',
     icon: Scale,
     color: 'bg-[var(--success-soft)] text-[var(--success)]',
+  },
+  {
+    title: 'Books Health',
+    description: 'The anomaly & duplicate radar: duplicate payments, outliers, stale coding, unreconciled accounts, loan proofs, and GST filing gaps — every flag names its evidence, and dismissals stick.',
+    href: '/reports/books-health',
+    icon: HeartPulse,
+    color: 'bg-[var(--danger-soft)] text-[var(--danger)]',
   },
   {
     title: 'Year-End Package',

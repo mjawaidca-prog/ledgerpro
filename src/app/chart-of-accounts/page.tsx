@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { DataTable } from '@/components/ui/DataTable';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +16,7 @@ import { GifiDecisionField } from '@/components/coa/GifiDecisionField';
 import { GifiReadinessPanel } from '@/components/coa/GifiReadinessPanel';
 import { hasValidGifiCode } from '@/lib/gifi';
 import { hasGifiDecision, type GifiReadinessAccountInput } from '@/lib/gifi-readiness';
+import type { GifiLearningContext } from '@/lib/gifi-learning';
 import { activeCompanyFromCompaniesResponse, companyDisplayName } from '@/lib/active-company';
 import type { Column } from '@/components/ui/DataTable';
 
@@ -116,6 +117,29 @@ export default function ChartOfAccountsPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  // GIFI v2 learning (Phase 2): the pattern statistics that re-rank
+  // suggestions, fetched once from the events aggregate; advisory —
+  // when it fails the forms rank rules-only, exactly as v1 did. The
+  // shown-list refs carry each form's currently displayed ranked
+  // codes into its save payload, where the API records them as a
+  // suggestion event (shown vs chosen is the learning signal).
+  const [gifiLearning, setGifiLearning] = useState<GifiLearningContext | undefined>(undefined);
+  const newShownRef = useRef<string[]>([]);
+  const editShownRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/coa/gifi-events');
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data.company) && Array.isArray(json.data.global)) {
+          setGifiLearning(json.data as GifiLearningContext);
+        }
+      } catch { /* learning context is advisory */ }
+    })();
+  }, []);
+
   function openEdit(acct: COAEntry, e: React.MouseEvent) {
     e.stopPropagation();
     setEditingAccount(acct);
@@ -142,6 +166,7 @@ export default function ChartOfAccountsPage() {
           subType: editSubType || null,
           gifiCode: editGifiCode.trim() || null,
           gifiUnmappedByChoice: editGifiUnmapped,
+          gifiShownCodes: editShownRef.current,
           description: editDescription.trim() || null,
           active: editActive,
         }),
@@ -172,6 +197,7 @@ export default function ChartOfAccountsPage() {
           description: newDescription.trim() || null,
           gifiCode: newGifiCode || null,
           gifiUnmappedByChoice: newGifiUnmapped,
+          gifiShownCodes: newShownRef.current,
         }),
       });
       const json = await res.json();
@@ -560,6 +586,8 @@ export default function ChartOfAccountsPage() {
                   onChange={setNewGifiCode}
                   unmappedByChoice={newGifiUnmapped}
                   onUnmappedByChoiceChange={setNewGifiUnmapped}
+                  learning={gifiLearning}
+                  onShownChange={(shown) => { newShownRef.current = shown.map((s) => s.code); }}
                 />
               </div>
               <div className="field">
@@ -627,6 +655,8 @@ export default function ChartOfAccountsPage() {
                   onChange={setEditGifiCode}
                   unmappedByChoice={editGifiUnmapped}
                   onUnmappedByChoiceChange={setEditGifiUnmapped}
+                  learning={gifiLearning}
+                  onShownChange={(shown) => { editShownRef.current = shown.map((s) => s.code); }}
                 />
               </div>
               <div className="field">
