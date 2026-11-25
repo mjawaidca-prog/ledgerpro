@@ -1,7 +1,7 @@
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
 
-const PUBLIC_MARKETING_PATHS = ['/', '/home', '/features', '/guides', '/pricing', '/faq', '/about', '/privacy', '/terms'];
+const PUBLIC_MARKETING_PATHS = ['/', '/home', '/features', '/guides', '/pricing', '/faq', '/about', '/privacy', '/terms', '/intercompany-accounting'];
 
 function isPublicPath(pathname: string) {
   return (
@@ -29,6 +29,10 @@ function isPublicPath(pathname: string) {
     // link-MINTING endpoint (/api/receipts/phone-link) stays protected.
     pathname.startsWith('/receipt-capture') ||
     pathname.startsWith('/api/receipts/phone-upload') ||
+    // The landing-page lead form is public by design: the endpoint does its
+    // own validation + honeypot spam check and only sends an email — there is
+    // deliberately no session on a marketing form.
+    pathname === '/api/leads' ||
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||
     pathname.startsWith('/opengraph-image') ||
