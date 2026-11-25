@@ -42,6 +42,9 @@ function isPublicPath(pathname: string) {
     // must be readable by search crawlers and signed-out guide readers. Only
     // this static help-image prefix is public; the in-product /help stays gated.
     pathname.startsWith('/help-images/') ||
+    // Landing-page proof figures (synthetic sample journals) are public for
+    // the same reason as the guide screenshots above.
+    pathname.startsWith('/images/') ||
     PUBLIC_MARKETING_PATHS.includes(pathname)
   );
 }
