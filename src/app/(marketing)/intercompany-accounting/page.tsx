@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, ArrowLeftRight, FileCheck2, Landmark } from 'lucide-react';
+import { ArrowRight, FileCheck2, Landmark } from 'lucide-react';
 import { LeadForm } from './LeadForm';
 
 export const metadata = {
@@ -63,28 +63,38 @@ export default function IntercompanyAccountingPage() {
         </h2>
 
         {/*
-          Proof visual slot: the synthetic two-journal screenshot (one intercompany
-          event posted in a synthetic company pair, both journals captured) drops in
-          here. Until it is captured, this designed panel marks the slot — it shows
-          no fabricated entries or figures.
+          Proof visual: screenshots of sample posting IC-0008 — one intercompany
+          event (LedgerPilot paid a $500 office supplies expense for LedgerPilot
+          Holdings Ltd.) captured live in both companies' books. Synthetic
+          company data.
         */}
         <div className="grid md:grid-cols-2 gap-4 mb-4">
-          {['Paying company — journal', 'Other company — journal'].map((label) => (
-            <div
-              key={label}
-              className="border border-dashed border-[var(--border)] rounded-xl bg-[var(--surface)] px-6 py-10 text-center"
-            >
-              <ArrowLeftRight size={28} className="mx-auto text-[var(--text-faint)] mb-3" />
-              <div className="text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)] mb-2">
-                {label}
-              </div>
-              <p className="text-sm text-[var(--text-faint)]">
-                Two-journal screenshot (synthetic company data) — captured from a live LedgerPro
-                posting for this page.
-              </p>
-            </div>
-          ))}
+          <figure className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+            <figcaption className="px-6 py-4 text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)]">
+              Paying company — journal
+            </figcaption>
+            <img
+              src="/images/intercompany-journal-paying.svg"
+              alt="LedgerPilot journal entry IC-0008, the paying company's side of the intercompany posting: debit 1310 Due from LedgerPilot Holdings Ltd. $500.00, credit 1000 Bank Accounts $500.00."
+              loading="lazy"
+              className="block h-auto w-full border-t border-[var(--border)]"
+            />
+          </figure>
+          <figure className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+            <figcaption className="px-6 py-4 text-xs font-semibold uppercase tracking-[0.10em] text-[var(--text-muted)]">
+              Other company — journal
+            </figcaption>
+            <img
+              src="/images/intercompany-journal-other.svg"
+              alt="LedgerPilot Holdings Ltd. journal entry IC-0008, the other company's side of the same intercompany posting: debit 6800 Office Supplies $500.00, credit 2311 Due to LedgerPilot $500.00."
+              loading="lazy"
+              className="block h-auto w-full border-t border-[var(--border)]"
+            />
+          </figure>
         </div>
+        <p className="text-center text-sm text-[var(--text-faint)] mb-4">
+          Sample posting IC-0008, captured from a live LedgerPro posting — synthetic company data.
+        </p>
         <p className="text-center text-[var(--text-muted)] leading-relaxed max-w-3xl mx-auto mb-8">
           The same event, both sets of books: the paying company&apos;s journal and the other
           company&apos;s journal, created from a single posting — due-from on one side, due-to on
