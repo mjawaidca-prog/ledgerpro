@@ -14,7 +14,7 @@ export default function PrivacyPage() {
         of their data.
       </div>
       <p className="text-sm text-[var(--text-muted)]">
-        Questions in the meantime? Contact <a href="mailto:hello@nexvarlab.online" className="text-[var(--primary)]">hello@nexvarlab.online</a>.
+        Questions in the meantime? Contact <a href="mailto:hello@nexvarlab.com" className="text-[var(--primary)]">hello@nexvarlab.com</a>.
       </p>
     </section>
   );

@@ -8,7 +8,6 @@ import {
   ChevronDown,
   CircleHelp,
   Mail,
-  PlayCircle,
   Search,
   ShieldCheck,
   X,
@@ -107,7 +106,7 @@ export function HelpCenter() {
           </p>
         </div>
         <a
-          href="mailto:hello@nexvarlab.online?subject=LedgerPro%20support"
+          href="mailto:hello@nexvarlab.com?subject=LedgerPro%20support"
           className="hidden sm:flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs font-semibold text-[var(--text)] no-underline hover:border-[var(--border-strong)]"
         >
           <Mail size={15} /> Contact support
@@ -176,26 +175,6 @@ export function HelpCenter() {
                     </section>
                   ))}
 
-                  {article.video && (
-                    <a
-                      href={article.video.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-3)] px-4 py-3 no-underline hover:border-[var(--border-strong)]"
-                    >
-                      <PlayCircle size={22} className="flex-none text-[var(--primary)]" />
-                      <span className="min-w-0">
-                        <span className="block text-[10px] font-mono uppercase tracking-[0.08em] text-[var(--primary)]">
-                          Watch the training video
-                        </span>
-                        <span className="mt-0.5 block text-sm font-semibold text-[var(--text-strong)]">
-                          {article.video.title}
-                        </span>
-                      </span>
-                      <ArrowRight size={15} className="ml-auto flex-none text-[var(--text-faint)]" />
-                    </a>
-                  )}
-
                   {article.action && (
                     <Link
                       href={article.action.href}
@@ -243,8 +222,8 @@ export function HelpCenter() {
             </div>
             <div>
               <h2 className="text-sm font-semibold text-[var(--text-strong)]">Still need help?</h2>
-              <a className="mt-0.5 block text-xs font-medium text-[var(--primary)]" href="mailto:hello@nexvarlab.online?subject=LedgerPro%20support">
-                hello@nexvarlab.online
+              <a className="mt-0.5 block text-xs font-medium text-[var(--primary)]" href="mailto:hello@nexvarlab.com?subject=LedgerPro%20support">
+                hello@nexvarlab.com
               </a>
             </div>
           </div>

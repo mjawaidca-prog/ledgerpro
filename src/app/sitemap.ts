@@ -5,6 +5,7 @@ import { LEDGERPRO_URL, SEO_FEATURE_SLUGS } from '@/lib/seo';
 const staticRoutes = [
   { path: '', priority: 1, changeFrequency: 'weekly' as const },
   { path: '/features', priority: 0.9, changeFrequency: 'monthly' as const },
+  { path: '/intercompany-accounting', priority: 0.8, changeFrequency: 'monthly' as const },
   { path: '/guides', priority: 0.9, changeFrequency: 'monthly' as const },
   { path: '/pricing', priority: 0.9, changeFrequency: 'monthly' as const },
   { path: '/faq', priority: 0.7, changeFrequency: 'monthly' as const },

@@ -184,3 +184,42 @@ export async function sendPasswordReset(to: string, resetUrl: string) {
   `;
   return sendWithProvider({ to, subject: 'Reset your LedgerPro password', html });
 }
+
+// ─── Lead notifications (public landing-page forms) ───
+
+export interface LeadNotification {
+  email: string;
+  role: string;
+  question?: string;
+  source: string;
+  subjectPrefix: string;
+}
+
+export async function sendLeadNotification(lead: LeadNotification) {
+  const inbox = process.env.LEADS_INBOX || 'hello@nexvarlab.com';
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: Inter, system-ui, sans-serif; color: #364150; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
+      <h1 style="font-size: 20px; color: #131a24; margin: 0 0 16px;">New workflow-review request</h1>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.7;">
+        <tr><td style="color: #697587; padding-right: 12px;">Work email</td><td><strong>${esc(lead.email)}</strong></td></tr>
+        <tr><td style="color: #697587; padding-right: 12px;">Role</td><td>${esc(lead.role)}</td></tr>
+        <tr><td style="color: #697587; padding-right: 12px;">Source</td><td>${esc(lead.source)}</td></tr>
+        <tr><td style="color: #697587; padding-right: 12px;">Question</td><td>${lead.question ? esc(lead.question) : '—'}</td></tr>
+      </table>
+      <p style="font-size: 13px; color: #9aa6b8; margin: 24px 0 0;">
+        Sent from a LedgerPro landing page form. Reply to the work email above to respond.
+      </p>
+    </body>
+    </html>
+  `;
+  return sendWithProvider({
+    to: inbox,
+    subject: `${lead.subjectPrefix} ${lead.email}`,
+    html,
+  });
+}

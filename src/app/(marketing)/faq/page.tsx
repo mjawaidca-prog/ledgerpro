@@ -95,7 +95,7 @@ export default function FAQPage() {
         <p className="text-[var(--text-muted)] mb-6">Still have questions?</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <a
-            href="mailto:hello@nexvarlab.online"
+            href="mailto:hello@nexvarlab.com"
             className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)] bg-[var(--surface)] border border-[var(--border-strong)] hover:bg-[var(--surface-2)] rounded-md px-6 py-3 no-underline transition-colors"
           >
             Contact Sales

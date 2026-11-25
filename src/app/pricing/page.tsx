@@ -48,7 +48,7 @@ const plans = [
     annualPrice: '$1,990/yr', oneTime: '$1,999 one-time',
     features: ['50 users', '25 companies', 'Unlimited transactions', 'White label', 'API access', 'Payroll sync with Nexvar Pay', 'Dedicated support'],
     cta: 'Contact Sales',
-    href: 'mailto:hello@nexvarlab.online',
+    href: 'mailto:hello@nexvarlab.com',
     featured: false,
   },
 ];

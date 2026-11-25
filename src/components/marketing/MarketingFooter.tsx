@@ -30,7 +30,7 @@ export function MarketingFooter() {
             <li><Link href="/about" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">About</Link></li>
             <li><Link href="/faq" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">FAQ</Link></li>
             <li><a href="https://www.nexvarlab.online" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Nexvar Lab Inc.</a></li>
-            <li><a href="mailto:hello@nexvarlab.online" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Contact</a></li>
+            <li><a href="mailto:hello@nexvarlab.com" className="text-[var(--text-muted)] hover:text-[var(--text-strong)] no-underline">Contact</a></li>
           </ul>
         </div>
 
